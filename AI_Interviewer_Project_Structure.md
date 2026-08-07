@@ -75,7 +75,7 @@
 │   │   │   ├── persistence/
 │   │   │   │   └── postgres_screening_repo.go
 │   │   │   └── embedding/         # Embedding adapter
-│   │   │       └── deepseek_embedder.go
+│   │   │       └── fastembed_embedder.go  # fastembed lokal (bge-small, 384 dims)
 │   │   │
 │   │   └── api/
 │   │       └── screening_handler.go
@@ -107,12 +107,14 @@
 │   │
 │   ├── memory/                   # Bounded Context: Semantic Memory (Mnemosyne adapter)
 │   │   ├── domain/
-│   │   │   ├── memory_port.go    # Port: MemoryBank interface (Remember/Recall/Reflect/Forget/Stats)
+│   │   │   ├── memory_port.go    # Port: MemoryBank (Remember/Recall/Reflect/QueryGraph/Forget/Stats)
 │   │   │   └── memory_hit.go     # Value Object
 │   │   │
 │   │   ├── infrastructure/
-│   │   │   └── mcp/
-│   │   │       └── mnemosyne_mcp.go  # Mnemosyne MCP server adapter (stdio) + ForBank(orgID)
+│   │   │   ├── mcp/
+│   │   │   │   └── mnemosyne_mcp.go  # Option A: Mnemosyne MCP (stdio) + ForBank(orgID)
+│   │   │   └── native/
+│   │   │       └── native_memory.go  # Option B (recommended): SQLite + fastembed + BM25 + LLM reflect
 │   │   │
 │   │   └── application/
 │   │       ├── sync_worker.go    # Sync candidate/interview ke bank tenant
@@ -144,9 +146,6 @@
 │   │   ├── infrastructure/
 │   │   │   ├── persistence/
 │   │   │   │   └── postgres_interview_repo.go
-│   │   │   ├── llm/               # LLM adapter
-│   │   │   │   ├── deepseek_provider.go
-│   │   │   │   └── provider.go    # LLMProvider port
 │   │   ├── stt/               # Speech-to-text adapter
 │   │   │   └── whisper_provider.go   # whisper.cpp (self-hosted, free)
 │   │   ├── tts/               # Text-to-speech adapter
@@ -203,6 +202,11 @@
 │   │       ├── auth_middleware.go      # JWT middleware
 │   │       ├── tenant_middleware.go    # Tenant resolver
 │   │       └── auth_handler.go
+│   │
+│   ├── llm/                        # Shared: LLM abstraction — ONE port, every context uses it
+│   │   ├── provider.go             # Port: Chat, ChatStream, StructuredOutput, Embed, CountTokens
+│   │   ├── client.go               # Retry + exponential backoff + fallback provider + metrics
+│   │   └── deepseek_provider.go    # DeepSeek API (model: deepseek-chat)
 │   │
 │   ├── shared/                    # Shared kernel
 │   │   ├── domain/
@@ -296,15 +300,19 @@ type InterviewRepository interface {
     UpdateStatus(ctx context.Context, id uuid.UUID, status InterviewStatus) error
     SaveAnswer(ctx context.Context, interviewID uuid.UUID, answer *Answer) error
     SaveEvaluation(ctx context.Context, interviewID uuid.UUID, eval *Evaluation) error
+    SaveQuestion(ctx context.Context, q *Question) error   // persist generated question ke bank (reuse + audit)
 }
 
 // Application ports — interfaces in application layer (driven side)
 
-// interview/application/llm_provider.go
+// LLM: ONE shared port in internal/llm/provider.go — every context (cv extraction,
+// interview chat, evaluation) uses the same port. Contexts do NOT define their own LLMProvider.
 type LLMProvider interface {
-    Chat(ctx context.Context, prompt string, history []Message) (<-chan string, error)
-    ChatStream(ctx context.Context, prompt string, history []Message) (<-chan string, error)
-    StructuredOutput(ctx context.Context, prompt string, schema any) (any, error)
+    Chat(ctx context.Context, req ChatRequest) (*ChatResponse, error)
+    ChatStream(ctx context.Context, req ChatRequest) (<-chan string, error)
+    StructuredOutput(ctx context.Context, req StructuredRequest) (any, error)
+    Embed(ctx context.Context, text string) ([]float32, error)
+    CountTokens(text string) int
 }
 
 // interview/application/stt_provider.go
@@ -392,11 +400,14 @@ func main() {
     redis := redis.NewClient(cfg)
     queue := asynq.NewServer(redis)
     fileStorage := s3.NewStorage(cfg)
-    llm := deepseek.NewProvider(cfg.DeepSeekAPIKey)
+    llm := llm.NewClient(
+        llmdeepseek.NewProvider(cfg.DeepSeekAPIKey), // primary: deepseek-chat
+        llmfallback.NewProvider(cfg),                // secondary OpenAI-compatible (OpenRouter/dll)
+    )
     stt := whisper.NewProvider()        // whisper.cpp self-hosted (free)
-    tts := edgetts.NewProvider()
-    embedder := fastembed.NewEmbedder() // lokal, $0
-    memory := mcp.NewMnemosyneAdapter(cfg.MnemosyneMCPEndpoint) // MCP stdio, ForBank(orgID)
+    tts := edgetts.NewProvider()        // fallback: piper
+    embedder := fastembed.NewEmbedder() // lokal bge-small, 384 dims, $0
+    memory := native.NewMemoryAdapter(cfg, embedder) // or mcp.NewMnemosyneAdapter(...) — same port
     fileParser := pdfcpu.NewParser()
     ocr := tesseract.NewOCR()
 
@@ -439,4 +450,4 @@ func main() {
 | **Use cases are single-purpose** | One struct per use case, one `Execute()` method |
 | **DTOs cross boundaries** | Domain models never exposed outside `application/` |
 | **Ports are in domain or application** | Driven adapters implement interfaces defined in inner layers |
-| **Domain events for cross-ctx communication** | `interview.completed` → `evaluation.generate_report`, `notification.send` |
+| **Domain events for cross-ctx communication** | `interview.completed` → `evaluation.generate_report`, `notification.send` (post-MVP) |

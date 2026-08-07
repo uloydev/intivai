@@ -6,7 +6,7 @@
    - 1.2 Scanned/Image-Based PDFs
    - 1.3 LLM-Based Structured Extraction
    - 1.4 Scoring Algorithm
-   - 1.5 Configurable Scoring — Per-Tenant dengan Default Fallback
+   - 1.5 Configurable Scoring — Per-Tenant with Global Default Fallback
    - 1.6 Company Context & Tenant System Prompt
 2. AI Interview (Chat)
 3. AI Interview (Voice/Video)
@@ -87,7 +87,7 @@ type ResumeData struct {
 
 // Use OpenAI JSON mode for structured output
 resp, _ := client.CreateChatCompletion(ctx, ChatCompletionRequest{
-    Model: "deepseek-v4-flash",  // murah untuk extraction
+    Model: "deepseek-chat",  // cheap for extraction
     Messages: []Message{
         {Role: "system", Content: prompt},
         {Role: "user", Content: resumeText},
@@ -117,10 +117,8 @@ type ScoringWeights struct {
     // Per-tenant configurable
 }
 
-const MinScoreToProceed = 50.0
-
-func ScoreResume(cv ResumeData, jd JobDescription, weights ScoringWeights) ScoreResult {
-    // 1. Keyword match with normalization
+func ScoreResume(cv ResumeData, jd JobDescription, weights ScoringWeights, minScore float64) ScoreResult {
+    // 1. Keyword match + synonym map (Go↔Golang); NOT embeddings — avoid double-count with semanticMatch
     skillsScore := matchSkills(cv.Skills, jd.RequiredSkills) * weights.SkillsMatch
 
     // 2. Experience years (capped at 100% of requirement)
@@ -142,7 +140,7 @@ func ScoreResume(cv ResumeData, jd JobDescription, weights ScoringWeights) Score
         TotalScore: total,
         Breakdown:  {...},
         MaxScore:   100,
-        Passed:     total >= MinScoreToProceed,
+        Passed:     total >= minScore,
     }
 }
 ```
@@ -151,37 +149,37 @@ func ScoreResume(cv ResumeData, jd JobDescription, weights ScoringWeights) Score
 - Experience capped at 100% (10yr when 5yr required = 100%, not 200%)
 - Per-tenant configurable weights
 - Minimum threshold to proceed (default: 50/100)
-- Skills normalization: partial matches via embedding similarity
+- Skills normalization: synonym map (Go↔Golang) + keyword match; partial match does NOT use embeddings — avoid double-counting with semanticMatch
 
-### Configurable Scoring — Per-Tenant dengan Default Fallback
+### Configurable Scoring — Per-Tenant with Global Default Fallback
 
-Setiap tenant boleh override scoring weights, tapi semua nilai punya default global yang dipakai kalau tenant belum set / set parsial / set invalid.
+Each tenant may override scoring weights, but every value has a global default that is used when the tenant has not set it, set it partially, or set an invalid value.
 
-**Hierarki resolusi (dari yang paling spesifik):**
+**Resolution hierarchy (most specific first):**
 
 ```
 tenant_scoring_weights (orgs.scoring_weights JSONB)
-        │  kalau field ada & valid → pakai
+        │  if field exists & valid → use
         ▼
-job_scoring_weights (jobs.scoring_weights JSONB, opsional per-JD)
-        │  kalau field ada & valid → pakai
+job_scoring_weights (jobs.scoring_weights JSONB, optional per-JD)
+        │  if field exists & valid → use
         ▼
-tenant defaults (dibuat pas org register, copy dari global defaults)
+tenant defaults (created at org registration, copied from global defaults)
         │
         ▼
-GLOBAL DEFAULTS (code constant — selalu ada, ga bisa hilang)
+GLOBAL DEFAULTS (code constant — always present, can't disappear)
 ```
 
-**Aturan fallback:**
-1. Tenant ga set apa-apa → pakai **global defaults** (0.35/0.20/0.25/0.10/0.10, threshold 50)
-2. Tenant set sebagian (misal cuma SkillsMatch) → field yang ga di-set fallback ke global default
-3. Tenant set nilai invalid (negatif, NaN, >1) → validasi tolak & fallback ke global default buat field itu
-4. Threshold (`min_score_to_proceed`) juga per-tenant: default 50, bisa di-override per org maupun per job
+**Fallback rules:**
+1. Tenant sets nothing → **global defaults** (0.35/0.20/0.25/0.10/0.10, threshold 50)
+2. Tenant sets partial (e.g. only SkillsMatch) → unset fields fall back to the global default
+3. Tenant sets invalid value (negative, NaN, >1) → validation rejects & falls back to the global default for that field
+4. Threshold (`min_score_to_proceed`) is per-tenant too: default 50, overridable per org or per job
 
 **Implementasi:**
 
 ```go
-// defaults.go — satu-satunya sumber default global
+// defaults.go — single source of global defaults
 var GlobalScoringDefaults = ScoringWeights{
     SkillsMatch:     0.35,
     ExperienceYears: 0.20,
@@ -191,9 +189,9 @@ var GlobalScoringDefaults = ScoringWeights{
 }
 const GlobalMinScoreToProceed = 50.0
 
-// resolve.go — resolver dengan fallback
+// resolve.go — resolver with fallback
 func (s *Server) ResolveScoringWeights(ctx context.Context, orgID, jobID uuid.UUID) (ScoringWeights, float64, error) {
-    w := GlobalScoringDefaults          // 1. mulai dari global
+    w := GlobalScoringDefaults          // 1. start from global defaults
     threshold := GlobalMinScoreToProceed
 
     org, err := s.repo.GetOrg(ctx, orgID)      // 2. overlay tenant
@@ -205,7 +203,7 @@ func (s *Server) ResolveScoringWeights(ctx context.Context, orgID, jobID uuid.UU
         threshold = *org.MinScoreToProceed
     }
 
-    if jobID != uuid.Nil {                       // 3. overlay per-job (opsional)
+    if jobID != uuid.Nil {                       // 3. overlay per-job (optional)
         job, err := s.repo.GetJob(ctx, jobID)
         if err == nil && job.ScoringWeights != nil {
             applyValidOverrides(&w, job.ScoringWeights)
@@ -214,10 +212,11 @@ func (s *Server) ResolveScoringWeights(ctx context.Context, orgID, jobID uuid.UU
             threshold = *job.MinScoreToProceed
         }
     }
+    w = normalizeWeights(w)              // normalize → max score ALWAYS 100
     return w, threshold, nil
 }
 
-// applyValidOverrides — cuma field valid yang di-override; NaN/negatif/>1 ditolak
+// applyValidOverrides — only valid fields override; NaN/negative/>1 rejected
 func applyValidOverrides(w *ScoringWeights, o map[string]float64) {
     if v, ok := o["skills_match"]; ok && validWeight(v) { w.SkillsMatch = v }
     if v, ok := o["experience_years"]; ok && validWeight(v) { w.ExperienceYears = v }
@@ -231,15 +230,18 @@ func validWeight(v float64) bool {
 }
 ```
 
-**Normalisasi jumlah bobot:** kalau tenant set weights yang totalnya ≠ 1 (misal 0.5+0.5 = 1.0, atau 0.6+0.2 = 0.8), **NORMALISASI di resolver** — bagi tiap weight dengan total sum. Ini menjamin max achievable score SELALU 100, dan skor antar tenant bisa dibandingkan. Tanpa normalisasi, tenant dengan total weight 0.8 punya max score 80 — cap 100 jadi meaningless (mudah tembus) dan skor nggak konsisten.
+**Weight normalization:** if a tenant sets weights whose total ≠ 1 (e.g. 0.5+0.5 = 1.0, or 0.6+0.2 = 0.8), **NORMALIZE in the resolver** — divide each weight by the total sum. This guarantees the max achievable score is ALWAYS 100, and scores are comparable across tenants. Without normalization, a tenant with total weight 0.8 has a max score of 80 — the 100 cap becomes meaningless (easy to reach) and scores are inconsistent.
 
 ```go
-// normalizeWeights — normalisasi di resolver, BUKAN di input
+// normalizeWeights — normalize in the resolver, NOT at input
 func normalizeWeights(w ScoringWeights) ScoringWeights {
     total := w.SkillsMatch + w.ExperienceYears + w.SemanticMatch +
              w.Education + w.Certifications
-    if total <= 0 || math.Abs(total-1.0) < 1e-9 {
-        return w // total 1 atau invalid → biarkan (fallback default)
+    if math.Abs(total-1.0) < 1e-9 {
+        return w // already sums to 1
+    }
+    if total <= 0 {
+        return GlobalScoringDefaults // all 0 / invalid → global fallback
     }
     w.SkillsMatch /= total
     w.ExperienceYears /= total
@@ -250,29 +252,29 @@ func normalizeWeights(w ScoringWeights) ScoringWeights {
 }
 ```
 
-Panggil di akhir `ResolveScoringWeights` sebelum return. Max score = 100 selalu.
+Call at the end of `ResolveScoringWeights` before returning — **required, do not skip**. Max score is always 100.
 
-**Alasan desain ini:**
-- **Integritas:** fallback ke global default menjamin skor selalu valid, ga ada field kosong/NaN
-- **Sederhana buat tenant:** org tinggal set 1-2 field yang mau diubah, sisanya otomatis default
-- **Migrasi:** tenant baru langsung jalan dengan defaults; override hanya saat dibutuhkan
-- **Audit:** breakdown menyimpan weights yang DIPAKAI per scoring (bukan yang dikonfigurasi) → traceable kenapa skor segitu
+**Design rationale:**
+- **Integrity:** fallback to global defaults guarantees scores are always valid, no empty/NaN fields
+- **Simple for tenants:** an org sets only the 1-2 fields it wants changed; the rest default automatically
+- **Migration:** new tenants run on defaults immediately; overrides only when needed
+- **Audit:** the breakdown stores the weights USED per scoring (not the configured ones) → traceable why a score is what it is
 
 **Embeddings for semantic matching:**
-- Gunakan **embedding lokal (fastembed, bge-small-en-v1.5)** — $0, konsisten sama layer Mnemosyne. Alternatif: DeepSeek embedding API kalau butuh kualitas lebih.
+- Use **local embedding (fastembed, bge-small-en-v1.5 = 384 dims)** — $0, consistent with the Mnemosyne layer. DeepSeek has no public embedding API — do not use. If you change the embedding model, update `VECTOR(dim)` + migration.
 - Pre-compute JD embeddings on create
 - Compute CV embedding on upload
 - Cosine similarity between CV and JD (catches "Go" ↔ "Golang" ↔ "Go programming")
 
 ### Company Context & Tenant System Prompt
 
-**Masalah:** AI interviewer tanpa konteks perusahaan = jawaban generik. Tenant butuh cara ngasih tau interviewer soal budaya, tech stack, values, dan preferensi pertanyaan mereka — biar interview relevan ke kebutuhan spesifik perusahaan.
+**Problem:** AI interviewer without company context = generic answers. Tenants need a way to tell the interviewer about their culture, tech stack, values, and question preferences — so interviews are relevant to the company's specific needs.
 
-**Solusi: 2 mekanisme, keduanya per-tenant, keduanya versioned, keduanya punya default fallback.**
+**Solution: 2 mechanisms, both per-tenant, both versioned, both with default fallback.**
 
-#### A. Company Context (file atau text)
+#### A. Company Context (file or text)
 
-Tenant upload file (PDF/MD/TXT) atau paste text berisi konteks perusahaan:
+Tenant uploads a file (PDF/MD/TXT) or pastes text containing company context:
 - Values & budaya kerja
 - Tech stack, product, architecture
 - Role-specific requirements
@@ -282,14 +284,14 @@ Tenant upload file (PDF/MD/TXT) atau paste text berisi konteks perusahaan:
 
 ```
 tenant upload file/text (POST /orgs/:id/contexts)
-  → validasi tipe + ukuran (10MB max)
-  → simpan mentah di MinIO (file) / Postgres (text), hash untuk dedup
+  → validate type + size (10MB max)
+  → store raw in MinIO (file) / Postgres (text), hash for dedup
   → version bump (v1, v2, v3...)
   → queue: index_context
     → parse + chunk (file)
-    → LLM summarize → ringkasan semantic
-    → index ke banks/<org_id>/mnemosyne.db (per-tenant bank)
-  → interview baru otomatis pake context versi terbaru
+    → LLM summarize → semantic summary
+    → index to banks/<org_id>/mnemosyne.db (per-tenant bank)
+  → new interviews automatically use the latest context version
 ```
 
 ```go
@@ -303,15 +305,15 @@ type UploadContextCommand struct {
 
 func (s *Service) UploadContext(ctx context.Context, cmd UploadContextCommand) (ContextVersion, error) {
     hash := sha256.Sum256(cmd.Content)
-    version, err := s.repo.NextVersion(ctx, cmd.OrgID) // version bump
+    version, err := s.repo.NextVersion(ctx, cmd.OrgID) // version bump — use a transaction + SELECT ... FOR UPDATE (2 concurrent uploads → collide UNIQUE(org_id, version))
     if err != nil { return ContextVersion{}, err }
 
-    // simpan mentah (source of truth di Postgres/MinIO)
+    // store raw (source of truth in Postgres/MinIO)
     if err := s.storage.Save(ctx, cmd.OrgID, version, cmd.Content); err != nil {
         return ContextVersion{}, err
     }
 
-    // async: chunk + summarize + index ke Mnemosyne bank tenant
+    // async: chunk + summarize + index into the tenant Mnemosyne bank
     s.queue.Enqueue(JobTypeIndexContext, IndexContextPayload{
         OrgID: cmd.OrgID, Version: version, Hash: string(hash[:]),
     })
@@ -319,37 +321,37 @@ func (s *Service) UploadContext(ctx context.Context, cmd UploadContextCommand) (
 }
 ```
 
-**Retrieval pas interview:** interview start → recall top-K chunk relevan dari bank tenant → inject ke system prompt interview (bounded budget, misal max 2-3K tokens). Interviewer bisa recall lagi on-demand kalau butuh detail.
+**Retrieval during interview:** interview start → recall top-K relevant chunks from the tenant bank → inject into the interview system prompt (bounded budget, e.g. max 2-3K tokens). The interviewer can recall again on-demand if it needs detail.
 
 #### B. Tenant System Prompt
 
-Tenant bisa set custom system prompt buat interviewer mereka. Ini yang ngontrol *gaya* interview.
+Tenants can set a custom system prompt for their interviewer. This controls the interview *style*.
 
-**Hierarki resolusi (sama kayak scoring):**
+**Resolution hierarchy (same as scoring):**
 
 ```
-tenant_prompts (versi aktif) → kalau ada & valid → pakai
-        ▼ (ga set / invalid)
+tenant_prompts (active version) → if present & valid → use
+        ▼ (not set / invalid)
 GLOBAL DEFAULT INTERVIEW PROMPT (code constant)
 ```
 
-**Safety rails (Wajib — jangan di-override tenant):**
+**Safety rails (Mandatory — cannot be overridden by tenants):**
 
-| Boleh tenant set | DILOCK (pinned, ga bisa diubah) |
+| Tenant may set | LOCKED (pinned, cannot be changed) |
 |---|---|
-| Tone & gaya interview | Anti-bias rules |
-| Fokus skill / prioritas pertanyaan | Prohibited questions |
-| Company values, budaya, tech stack | GDPR/consent flow |
-| Role-specific instruction | Bot detection, max duration, emergency stop |
+| Tone & interview style | Anti-bias rules |
+| Skill focus / question priorities | Prohibited questions |
+| Company values, culture, tech stack | GDPR/consent flow |
+| Role-specific instructions | Bot detection, max duration, emergency stop |
 
-Implementasi: global default prompt jadi **anchor**; tenant prompt di-append/inject di posisi yang aman, safety rails tetap hard-coded setelah tenant prompt. Jangan pernah tenant prompt replace seluruh system prompt.
+Implementation: the global default prompt is the **anchor**; the tenant prompt is appended/injected in a safe position; safety rails stay hard-coded AFTER the tenant prompt. The tenant prompt must never replace the whole system prompt.
 
 ```go
 // internal/interview/domain/service/prompt_composer.go
 func ComposeInterviewSystemPrompt(
-    tenantPrompt *string,     // opsional, tenant override
-    companyContext []string,  // recall dari Mnemosyne bank
-    safetyRails string,       // HARD-CODED, tidak bisa diubah
+    tenantPrompt *string,     // optional, tenant override
+    companyContext []string,  // recall from the Mnemosyne bank
+    safetyRails string,       // HARD-CODED, cannot be changed
 ) string {
     var b strings.Builder
     b.WriteString(GlobalDefaultPrompt)   // 1. anchor
@@ -369,12 +371,12 @@ func ComposeInterviewSystemPrompt(
 }
 ```
 
-**Kenapa safety rails di paling akhir:** LLM cenderung nurutin instruksi yang paling dekat dengan akhir prompt. Posisi paling bawah = paling kuat. Tenant prompt di tengah = bisa override default tapi ga bisa nutup safety rails.
+**Why safety rails go last:** LLMs tend to follow instructions closest to the end of the prompt. Bottom position = strongest. Tenant prompt in the middle = can override the default but cannot override safety rails.
 
-**Aturan validasi tenant prompt:**
-- Max length (misal 4K chars) — cegah prompt injection via panjang
-- Max context budget per interview (misal 3K tokens company context) — cegah overshoot token
-- Tenant prompt ga boleh mengandung instruksi yang ngerusak integrity (deteksi keyword: "pass all", "ignore safety", "always hire")
+**Tenant prompt validation rules:**
+- Max length (e.g. 4K chars) — prevent prompt injection via length
+- Max context budget per interview (e.g. 3K tokens of company context) — prevent token overshoot
+- Tenant prompt must not contain integrity-breaking instructions (keyword detection: "pass all", "ignore safety", "always hire")
 
 **Data model:**
 
@@ -402,7 +404,7 @@ CREATE TABLE tenant_prompts (
 );
 ```
 
-**Audit:** interview simpan `context_version` + `prompt_version` yang dipakai → traceable: "interview ini pake company context v3, tenant prompt v2, safety rails v1".
+**Audit:** the interview stores the `context_version` + `prompt_version` used → traceable: "this interview used company context v3, tenant prompt v2, safety rails v1".
 
 ---
 
@@ -410,7 +412,7 @@ CREATE TABLE tenant_prompts (
 
 ### Architecture
 ```
-Browser ──WebSocket──▶ Go Server ──WebSocket──▶ LLM API (streaming)
+Browser ──WebSocket──▶ Go Server ──SSE──▶ LLM API (streaming)   // DeepSeek streaming = SSE, not WebSocket
                            │
                       Save to PostgreSQL
                       (messages, evaluations)
@@ -420,7 +422,7 @@ Browser ──WebSocket──▶ Go Server ──WebSocket──▶ LLM API (str
 
 ### WebSocket Chat Flow
 ```
-Client connects → Server upgrades to WS
+Client connects → Server upgrades to WS (Authorization: WS ticket — lihat §3 Candidate Access)
   ↓
 Server sends: {"type": "interview.start", 
                "session_id": "iv_abc123", 
@@ -536,6 +538,7 @@ Rules:
 5. After answer, re-evaluate remaining questions
 6. If candidate shows weakness → probe deeper (follow-up)
 7. If candidate shows strength → move to next topic
+8. Selected questions are persisted to the `questions` bank — reuse + audit trail; the bank also seeds the next generation
 ```
 
 ### Bias Prevention
@@ -554,14 +557,28 @@ After interview, LLM generates structured evaluation via function calling:
 ```json
 {
   "overall_score": 78,
-  "technical_score": 82,
-  "communication_score": 75,
-  "culture_fit_score": 70,
+  "dimensions": {
+    "technical": { "score": 82, "weight": 0.4 },
+    "communication": { "score": 75, "weight": 0.2 },
+    "problem_solving": { "score": 80, "weight": 0.25 },
+    "culture_fit": { "score": 70, "weight": 0.15 }
+  },
+  "per_question": [
+    {
+      "question_idx": 1,
+      "score": 85,
+      "rationale": "Strong understanding of distributed systems",
+      "strengths": ["Clear explanation", "Used real examples"],
+      "weaknesses": []
+    }
+  ],
   "strengths": ["Go expertise", "System design"],
   "weaknesses": ["Limited cloud experience"],
   "recommendation": "proceed"
 }
 ```
+
+**Canonical schema** — the evaluator struct (§5) and Phase 4 must follow this; don't create new schemas. Dimension weights must sum to ≈ 1.
 
 ---
 
@@ -588,6 +605,8 @@ Browser (getUserMedia)
   │
   ├──▶ Go Server (Pion + coturn)
   │       │
+  │       ├──▶ VAD (silero-vad) — segmentasi utterance
+  │       │    └─ batas jawaban → trigger STT
   │       ├──▶ Whisper (STT)
   │       │    └─ via whisper.cpp subprocess
   │       │
@@ -612,7 +631,7 @@ Browser (getUserMedia)
 | **faster-whisper** | Python (CTranslate2) | Better, faster | Real-time on CPU |
 | **Whisper via Ollama** | `ollama run whisper` | Good | Depends on hardware |
 
-**MVP approach:** Use **whisper.cpp** via `os/exec` in Go. Start with `tiny` model (fast, decent accuracy), upgrade to `small` or `base` later.
+**MVP approach:** Use **whisper.cpp** via `os/exec` in Go. `tiny` is fine for dev; production uses `small`/`large-v3` — `tiny` accuracy is poor for Indonesian.
 
 ```go
 func transcribeAudio(audioPath string) (string, error) {
@@ -621,6 +640,17 @@ func transcribeAudio(audioPath string) (string, error) {
     return string(output), err
 }
 ```
+
+**VAD (Voice Activity Detection) — MANDATORY before STT**
+
+Without VAD the server can't tell when an answer ends → audio gets cut or runs together across sentences.
+
+| Option | Approach |
+|------|-----------|
+| **silero-vad** | ONNX model, high accuracy, CPU-only; Go bindings available |
+| **Energy-based** | Simple RMS threshold; enough for MVP, false positives in noisy environments |
+
+Flow: WebRTC audio → jitter buffer → VAD → segment → Whisper STT (once per segment).
 
 **LLM — DeepSeek Flash (API)**
 
@@ -649,6 +679,8 @@ func deepSeekChat(messages []Message) (string, error) {
 | **Edge TTS** | Very good (natural) | Free API | `http.Get` (no auth needed) |
 | **Ollama TTS** (future) | TBD | Free | — |
 
+⚠️ `api.edge-tts.com` is a community endpoint (unofficial, reverse-engineered Edge Read Aloud) — can change/go offline without notice. Fallback chain: Edge TTS → Piper (local, safe).
+
 ```go
 // Edge TTS — completely free, no API key
 func edgeTTS(text string) ([]byte, error) {
@@ -665,7 +697,7 @@ func edgeTTS(text string) ([]byte, error) {
 | Stack | Cost per interview (15min) | Dependency |
 |-------|---------------------------|------------|
 | **OpenAI Realtime API** | ~$0.90 | Paid API, vendor lock-in |
-| **Deepgram + DeepSeek + ElevenLabs** | ~$0.28 | 3 paid APIs (opsi premium, bukan MVP) |
+| **Deepgram + DeepSeek + ElevenLabs** | ~$0.28 | 3 paid APIs (premium option, not MVP) |
 | **Whisper + DeepSeek Flash + Piper/Edge TTS** | **~$0.001** | Whisper/Piper free, DeepSeek ~$0.0001/1K tokens |
 
 **Recommendation:** Start with Whisper + DeepSeek Flash + Piper/Edge TTS. Near-zero API cost ($0.001/interview), DeepSeek API is cheap enough that self-hosting hardware costs more. Upgrade to paid services only when you need higher accuracy or scale.
@@ -692,7 +724,7 @@ WebRTC in Go requires:
 
 **Running TURN server:** `coturn` is the reference implementation. Must deploy alongside your app.
 
-**Recommendation:** Use **LiveKit** as your WebRTC layer. It handles signaling, SFU, TURN, recording out of the box. The LiveKit server is Go. You write the AI agent as a separate service that subscribes to the audio stream.
+**Decision (MVP): Pion + coturn** — self-hosted, $0, consistent with the cost strategy (voice itself is post-MVP). **LiveKit = upgrade option** when voice becomes paid + needs scale: signaling, SFU, TURN, recording out of the box (Go server; the AI agent becomes a separate service that subscribes to the audio stream).
 
 ### Recording & Compliance
 - **Must** get candidate consent before recording
@@ -706,37 +738,44 @@ WebRTC in Go requires:
 - Flag suspicious patterns: copy-paste, too-perfect answers, code formatting
 - Send flagged interviews for human review
 
-### Candidate Access & Interview Link (Auth Flow Kandidat)
+### Candidate Access & Interview Link (Candidate Auth Flow)
 
-Kandidat itu **bukan user internal** — mereka ga punya akun. Flow akses interview:
+Candidates are **not internal users** — they have no account. Interview access flow:
 
 ```sql
--- Interview invitation token (short-lived, 1x pakai)
+-- Interview invitation token — invitation credential (1x START), not "single-use raw"
 CREATE TABLE interview_tokens (
     id UUID PRIMARY KEY,
+    org_id UUID REFERENCES orgs(id),        -- tenant: RLS + revoke
     interview_id UUID REFERENCES interviews(id),
-    token TEXT UNIQUE NOT NULL,      -- random 32-char, high entropy
-    expires_at TIMESTAMPTZ NOT NULL, -- default +7 hari
-    used_at TIMESTAMPTZ,             -- 1x pakai
+    token TEXT UNIQUE NOT NULL,             -- random 32-char, high entropy
+    expires_at TIMESTAMPTZ NOT NULL,        -- default +7 days
+    used_at TIMESTAMPTZ,                    -- set when the interview FIRST starts
+    revoked_at TIMESTAMPTZ,                 -- recruiter revoke → all access denied
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 ```
 
 ```go
 // Flow:
-// 1. Recruiter create interview → generate token
-// 2. Email ke kandidat: https://app.intivai.com/i/<token>
-// 3. Candidate klik → token divalidasi (exists, belum used, belum expire)
-// 4. Interview dimulai → token di-mark used
-// 5. Reconnect: session_id + token (bukan re-use token baru)
+// 1. Recruiter creates interview → generate token
+// 2. Deliver token SECURELY: email body / copy-paste. NOT in URL — leaks via referrer/log
+// 3. Candidate validates → token checked (exists, not expired, not revoked)
+// 4. FIRST start → used_at set (the same token stays valid for reconnect)
+// 5. Reconnect: session_id + the same token (still valid)
+// 6. WS upgrade: token → server issues a WS ticket (short-lived JWT, 10 min,
+//    bound to session_id + interview_id) → upgrade uses Authorization header
+// 7. Starting a DIFFERENT interview with the same token → rejected (used_at != NULL)
 ```
 
 **Rules:**
-- Token: crypto/rand 32-byte, URL-safe — ga bisa ditebak
-- Expire: 7 hari dari invite, 1x pakai
-- Reconnect pakai session_id yang beda dari token
+- Token: crypto/rand 32-byte, URL-safe — unguessable
+- Token = invitation credential (1x START); session_id = resume credential
+- Expiry: 7 days from invite; revoked_at → all access dies
+- WS ticket: short-lived JWT (10 min), not a session replacement
 - Rate limit per-IP auth attempts (10/min)
-- Revoke: recruiter bisa revoke token sebelum dipakai
+- Revoke: recruiter revokes the token before use → access denied immediately
+- Candidate validation goes through the security-definer function `validate_interview_token(token)` — candidates must never access tables directly
 
 ---
 
@@ -756,6 +795,7 @@ CREATE TABLE interview_tokens (
 │   ├── interview/     # Interview engine (bounded context)
 │   │   ├── chat/          # Chat interview (WebSocket)
 │   │   ├── voice/         # Voice interview (Whisper + LLM + Edge TTS)
+│   │   ├── ws/            # WebSocket hub + heartbeat (chat & voice)
 │   │   ├── evaluator.go   # LLM evaluation
 │   │   ├── scheduler.go   # Interview scheduling
 │   │   └── session.go     # Timeout, heartbeat, reconnection
@@ -764,11 +804,10 @@ CREATE TABLE interview_tokens (
 │   ├── api/           # HTTP handlers (Fiber)
 │   │   ├── middleware/
 │   │   │   ├── auth.go        # JWT + tenant context
-│   │   │   ├── ratelimit.go   # Per-tenant token bucket
+│   │   │   ├── ratelimit.go   # Per-tenant sliding window (Redis)
 │   │   │   ├── cors.go        # CORS configuration
 │   │   │   └── audit.go       # Request audit logging
-│   │   ├── handler/
-│   │   └── ws/            # WebSocket hub + heartbeat
+│   │   └── handler/
 │   ├── queue/         # Async job processing (asynq)
 │   ├── storage/       # S3 file storage (CVs, recordings)
 │   ├── llm/           # LLM provider abstraction + retry + fallback
@@ -787,7 +826,7 @@ CREATE TABLE orgs (
     name TEXT NOT NULL,
     slug TEXT UNIQUE NOT NULL,
     plan TEXT DEFAULT 'free',
-    scoring_weights JSONB,  -- per-tenant configurable weights (partial override; fallback ke global defaults)
+    scoring_weights JSONB,  -- per-tenant configurable weights (partial override; falls back to global defaults)
     min_score_to_proceed DOUBLE PRECISION,  -- per-tenant threshold override (default 50 via code)
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -798,11 +837,12 @@ CREATE TABLE users (
     org_id UUID REFERENCES orgs(id),
     email TEXT NOT NULL,
     role TEXT DEFAULT 'member',  -- admin, recruiter, interviewer
-    password_hash TEXT NOT NULL,
+    password_hash TEXT,  -- NULL if OAuth-only (Google)
+    auth_provider TEXT DEFAULT 'password',  -- password | google
     UNIQUE(org_id, email)  -- same email allowed in different orgs
 );
 
--- Interview Questions (reusable bank)
+-- Question bank: generated questions persisted automatically (reuse + audit; seeds the next generation)
 CREATE TABLE questions (
     id UUID PRIMARY KEY,
     org_id UUID REFERENCES orgs(id),
@@ -821,9 +861,9 @@ CREATE TABLE jobs (
     description TEXT NOT NULL,
     required_skills JSONB,
     min_experience INT,
-    scoring_weights JSONB,  -- per-job override (opsional; fallback ke org → global)
+    scoring_weights JSONB,  -- per-job override (optional; falls back to org → global)
     min_score_to_proceed DOUBLE PRECISION DEFAULT 50,
-    embedding VECTOR(1536),
+    embedding VECTOR(384),  -- fastembed bge-small = 384 dims
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -836,8 +876,8 @@ CREATE TABLE candidates (
     cv_path TEXT,
     cv_raw_text TEXT,
     cv_structured JSONB,
-    cv_embedding VECTOR(1536),
-    cv_ocr_method TEXT,  -- pdfcpu, tesseract, gpt4o-vision
+    cv_embedding VECTOR(384),
+    cv_ocr_method TEXT,  -- pdfcpu, tesseract, ollama-vision
     status TEXT DEFAULT 'new',
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -885,12 +925,12 @@ CREATE TABLE audit_logs (
 
 -- ═══════════════════════════════════════════════════════
 -- ROW-LEVEL SECURITY (RLS) — multi-tenant isolation
--- Wajib: aktifkan di SEMUA tabel yang punya org_id
+-- Mandatory: enable on EVERY table with org_id
 -- ═══════════════════════════════════════════════════════
--- Setiap request set app.org_id via middleware tenant:
+-- Each request sets app.org_id via the tenant middleware:
 --   SELECT set_config('app.org_id', $1, true);  -- per-transaction
 
--- Contoh lengkap (ulangi per tabel: candidates, jobs, applications, interviews, audit_logs, company_contexts, tenant_prompts, questions)
+-- Full example (repeat per table: candidates, jobs, applications, interviews, audit_logs, company_contexts, tenant_prompts, questions)
 ALTER TABLE candidates ENABLE ROW LEVEL SECURITY;
 CREATE POLICY tenant_isolation_candidates ON candidates
     USING (org_id = NULLIF(current_setting('app.org_id', true), '')::uuid);
@@ -904,7 +944,7 @@ CREATE POLICY tenant_isolation_applications ON applications
     USING (org_id = NULLIF(current_setting('app.org_id', true), '')::uuid);
 
 ALTER TABLE interviews ENABLE ROW LEVEL SECURITY;
--- interviews ga punya org_id langsung → via join application → job
+-- interviews have no direct org_id → via join application → job
 CREATE POLICY tenant_isolation_interviews ON interviews
     USING (EXISTS (
         SELECT 1 FROM applications a
@@ -929,13 +969,19 @@ ALTER TABLE questions ENABLE ROW LEVEL SECURITY;
 CREATE POLICY tenant_isolation_questions ON questions
     USING (org_id = NULLIF(current_setting('app.org_id', true), '')::uuid);
 
--- users: admin bisa liat semua user org-nya
+ALTER TABLE interview_tokens ENABLE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation_tokens ON interview_tokens
+    USING (org_id = NULLIF(current_setting('app.org_id', true), '')::uuid);
+-- Candidate token validation (no auth): via security-definer function validate_interview_token(token),
+-- returns valid/expired/used/revoked — NOT direct table access
+
+-- users: admins can see all users in their org
 ALTER TABLE users ENABLE ROW LEVEL SECURITY;
 CREATE POLICY tenant_isolation_users ON users
     USING (org_id = NULLIF(current_setting('app.org_id', true), '')::uuid);
 
--- ⚠️ orgs: special case — perlu akses org sendiri buat set weights.
--- Pake policy yang mengizinkan read org yang match app.org_id.
+-- ⚠️ orgs: special case — needs access to its own org to set weights.
+-- Use a policy that allows reading the org that matches app.org_id.
 ALTER TABLE orgs ENABLE ROW LEVEL SECURITY;
 CREATE POLICY tenant_isolation_orgs ON orgs
     USING (id = NULLIF(current_setting('app.org_id', true), '')::uuid);
@@ -943,63 +989,67 @@ CREATE POLICY tenant_isolation_orgs ON orgs
 
 ### Hybrid Memory DB — Semantic Recall (Mnemosyne per-tenant)
 
-**Masalah:** pgvector di Postgres bagus buat similarity search sederhana (CV ↔ job), tapi lemah buat *semantic recall lintas data*: "kandidat mana yang jawabannya menunjukkan pola skill yang sama dengan kandidat yang LOLOS kemarin?" atau "dari 50 interview, pertanyaan mana yang paling sering gagal?" — itu butuh memory layer dengan entity resolution + knowledge graph + refleksi lintas-interview.
+**Problem:** pgvector in Postgres is good for simple similarity search (CV ↔ job), but weak for *cross-data semantic recall*: "which candidate's answers show the same skill pattern as the candidate who PASSED yesterday?" or "out of 50 interviews, which question fails most often?" — that needs a memory layer with entity resolution + knowledge graph + cross-interview reflection.
 
-**Solusi: hybrid 2 layer.**
+**Solution: hybrid 2 layers.**
 
 ```
 ┌──────────────────────────────────────────────────────────┐
-│  PostgreSQL  (SOURCE OF TRUTH — integritas data)          │
-│  • orgs, users, candidates, jobs, interviews              │
-│  • ACID, FK, RLS (tenant isolation), transactions, audit  │
-│  • pgvector utk embedding primitif (cv ↔ job match)       │
+│  PostgreSQL  (SOURCE OF TRUTH — data integrity)            │
+│  • orgs, users, candidates, jobs, interviews               │
+│  • ACID, FK, RLS (tenant isolation), transactions, audit   │
+│  • pgvector for primitive embeddings (cv ↔ job match)      │
 └───────────────┬──────────────────────────────────────────┘
                 │ sync via Go worker (outbox / event bus)
 ┌───────────────▼──────────────────────────────────────────┐
 │  Mnemosyne  (SEMANTIC LAYER — 1 bank per tenant)         │
-│  • banks/<org_id>/mnemosyne.db  (SQLite terisolasi)      │
+│  • banks/<org_id>/mnemosyne.db  (isolated SQLite)        │
 │  • entity resolution + knowledge graph                   │
-│  • recall semantik multi-strategy                        │
-│  • reflect: sintesis lintas-memori                        │
+│  • multi-strategy semantic recall                        │
+│  • reflect: cross-memory synthesis                        │
 └──────────────────────────────────────────────────────────┘
 ```
 
-#### Kenapa hybrid (bukan Mnemosyne jadi satu-satunya DB)
+#### Why hybrid (not Mnemosyne as the only DB)
 
-| Kebutuhan | Postgres | Mnemosyne |
+| Requirement | Postgres | Mnemosyne |
 |-----------|----------|-----------|
-| **Integritas data** (ACID, FK, constraints) | ✅ | ❌ (memory layer, bukan relational DB) |
-| **Query relasional kompleks** (JOIN, reporting) | ✅ | ❌ |
+| **Data integrity** (ACID, FK, constraints) | ✅ | ❌ (memory layer, not a relational DB) |
+| **Complex relational queries** (JOIN, reporting) | ✅ | ❌ |
 | **Audit & billing** (immutable, transactional) | ✅ | ❌ |
-| **Semantic recall** ("kandidat mirip yang lolos") | 🟡 pgvector dangkal | ✅ vector + BM25 + entity |
-| **Knowledge graph** (kandidat↔skill↔interview) | ❌ | ✅ |
-| **Refleksi lintas-interview** (pola, insight) | ❌ | ✅ `reflect` |
-| **Tenant isolation** | ✅ RLS | ✅ bank per tenant (level DB) |
+| **Semantic recall** ("similar candidates who passed") | 🟡 shallow pgvector | ✅ vector + BM25 + entity |
+| **Knowledge graph** (candidate↔skill↔interview) | ❌ | ✅ |
+| **Cross-interview reflection** (patterns, insights) | ❌ | ✅ `reflect` |
+| **Tenant isolation** | ✅ RLS | ✅ bank per tenant (DB level) |
 
 **Data integrity:**
-- Postgres = source of truth. Semua data struktural (candidate, interview, score, payment) TETAP di Postgres.
-- Mnemosyne cuma nyimpen **embedding + entity + reference** (bukan transcript mentah).
-- Kalau Mnemosyne hilang/down → di-rebuild dari Postgres (cache, bukan sumber).
-- PII sensitif (transcript, CV) tidak dikirim ke LLM untuk extraction di tiap write — extraction cuma di layer semantic index.
+- Postgres = source of truth. All structural data (candidate, interview, score, payment) STAYS in Postgres.
+- Mnemosyne only stores **embedding + entity + reference** (not raw transcripts).
+- If Mnemosyne is lost/down → rebuilt from Postgres (cache, not a source).
+- Sensitive PII (transcript, CV) is not sent to the LLM for extraction on every write — extraction only happens in the semantic index layer.
 
 #### Tenant Isolation — Bank per Tenant
 
-Mnemosyne punya **Memory Bank Isolation** native:
+Mnemosyne has native **Memory Bank Isolation**:
 
 ```
 ~/.hermes/mnemosyne/data/banks/<org_id>/mnemosyne.db
 ```
 
-- **1 tenant = 1 SQLite bank terpisah** — isolasi di level file/database (bukan sekadar `WHERE tenant_id`).
-- **⚠️ Mnemosyne itu Python package — dari Go backend, panggil lewat MCP server (stdio) atau HTTP API, BUKAN SDK langsung.** Definisikan port Go sendiri:
+- **1 tenant = 1 separate SQLite bank** — isolation at the file/database level (not just `WHERE tenant_id`).
+- **⚠️ Mnemosyne is a Python package (MCP server). Two adapter options — ONE Go port, decision can be deferred:**
+  - **Option A — Mnemosyne MCP (stdio/HTTP):** use the existing plugin; graph/reflect features limited to what the plugin provides.
+  - **Option B — Native Go (recommended):** SQLite + fastembed (bge-small) + BM25 + LLM for reflect; full control, 1 binary, no Python runtime — fits the 1-server strategy.
+  - The Go port stays the same for both options — swap the adapter without touching use cases.
 
 ```go
 // internal/memory/domain/memory_port.go
-// Port (Go) — implementasi adapter ke Mnemosyne via MCP/HTTP
+// Port (Go) — adapter implementation for the memory layer via MCP/HTTP or native
 type MemoryBank interface {
     Remember(ctx context.Context, entityType, summary string, importance float64) error
     Recall(ctx context.Context, query string, budget string) ([]MemoryHit, error)
     Reflect(ctx context.Context, question string) (string, error)
+    QueryGraph(ctx context.Context, entityType, filter string) ([]MemoryHit, error)
     Forget(ctx context.Context, memoryID string) error
     Stats(ctx context.Context) (MemoryStats, error)
 }
@@ -1012,7 +1062,7 @@ type MemoryHit struct {
 ```
 
 ```go
-// internal/memory/infrastructure/mcp/mnemosyne_mcp.go
+// internal/memory/infrastructure/mcp/mnemosyne_mcp.go  (Option A)
 // Adapter — Mnemosyne MCP server via stdio
 func (a *MCPAdapter) Remember(ctx context.Context, entityType, summary string, importance float64) error {
     // Mnemosyne MCP tool: mnemosyne_remember(content=..., importance=...)
@@ -1028,11 +1078,11 @@ func (a *MCPAdapter) ForBank(orgID string) MemoryBank {
 }
 ```
 
-- **Dobel isolasi:** Postgres RLS (row-level) + Mnemosyne bank (file-level). Data tenant A ga mungkin ke-recall dari tenant B.
+- **Double isolation:** Postgres RLS (row-level) + Mnemosyne bank (file-level). Tenant A's data can never be recalled from tenant B.
 
 #### Semantic Indexing Pipeline (Go worker)
 
-Setelah event di Postgres, worker sinkronisasi index ke Mnemosyne:
+After an event lands in Postgres, a sync worker indexes it to Mnemosyne:
 
 ```go
 // Event: candidate scored / interview completed
@@ -1040,47 +1090,47 @@ type SyncEvent struct {
     OrgID       string `json:"org_id"`
     EntityType  string `json:"entity_type"` // candidate, interview, job
     EntityID    string `json:"entity_id"`
-    Summary     string `json:"summary"`     // ringkasan semantic (bukan PII mentah)
+    Summary     string    `json:"summary"`     // semantic summary (not raw PII)
     Importance  float64 `json:"importance"`
 }
 
 func (s *Server) syncToMnemosyne(ctx context.Context, ev SyncEvent) error {
-    mn := s.memory.ForBank(ev.OrgID) // adapter MCP/HTTP ke banks/<org_id>/
+    mn := s.memory.ForBank(ev.OrgID) // MCP/HTTP adapter to banks/<org_id>/
     return mn.Remember(ctx, ev.EntityType, ev.Summary, ev.Importance)
 }
 ```
 
-Event yang di-index:
-- `candidate_profile` — ringkasan CV (nama, skill, ex, catatan) → importance tinggi
-- `interview_summary` — ringkasan interview (jawaban inti, kesan) → importance sedang
-- `interview_reflection` — refleksi pasca-interview → pemicu `reflect`
-- `job_requirements` — skill wajib buat matching
+Events indexed:
+- `candidate_profile` — CV summary (name, skills, experience, notes) → high importance
+- `interview_summary` — interview summary (key answers, impressions) → medium importance
+- `interview_reflection` — post-interview reflection → triggers `reflect`
+- `job_requirements` — required skills for matching
 
-#### Recall & Reflect (use case konkret)
+#### Recall & Reflect (concrete use cases)
 
 ```go
-// 1. Semantic search kandidat (bukan keyword) — lewat port Go
-res, _ := mn.Recall(ctx, "kandidat kuat di Go + pernah fintech payment", "high")
+// 1. Semantic candidate search (not keyword) — via the Go port
+res, _ := mn.Recall(ctx, "strong Go candidate with fintech payment experience", "high")
 
-// 2. Knowledge graph query: skill yang dimiliki kandidat yang lolos
-// (via MCP tool mnemosyne_graph_query)
-graph, _ := mn.EntityQuery(ctx, "candidate", "passed_screening=true")
+// 2. Knowledge graph query: skills of candidates who passed
+// (port method — per-adapter implementation: MCP tool or SQLite query)
+graph, _ := mn.QueryGraph(ctx, "candidate", "passed_screening=true")
 
-// 3. Refleksi lintas-interview: pola pertanyaan yang gagal
-insight, _ := mn.Reflect(ctx, "dari 50 interview terakhir, pertanyaan mana yang paling sering gagal dan kenapa?")
+// 3. Cross-interview reflection: patterns of failing questions
+insight, _ := mn.Reflect(ctx, "of the last 50 interviews, which question fails most often and why?")
 ```
 
-#### Keuntungan buat produk
+#### Product benefits
 
-| Fitur produk | Implementasi |
+| Product feature | Implementation |
 |--------------|--------------|
-| "Cari kandidat mirip yang pernah lolos" | recall semantik + entity |
+| "Find similar candidates who passed before" | semantic recall + entity |
 | "Skill gap analysis" | graph query (skills of passing candidates) |
-| "Pola interview" | reflect lintas interview |
-| "Perbaiki pertanyaan bank" | reflect: pertanyaan dengan fail-rate tinggi |
-| Compliance | bank terpisah + hapus bank = hapus semua memori tenant |
+| "Interview patterns" | cross-interview reflect |
+| "Improve question bank" | reflect: questions with high fail rates |
+| Compliance | separate bank + delete bank = delete all tenant memory |
 
-**Catatan cost:** Mnemosyne pakai embedding lokal (fastembed, bge-small) = **$0, ga ada LLM call di index-time** (kecuali extraction optional). Ini lebih murah dari pgvector + external embedding API, dan cocok buat server 1 core.
+**Cost note:** Index-time = **$0** (local fastembed bge-small embeddings — no LLM calls, except optional extraction). **Reflect = small LLM call at query-time** (not $0) — short prompt, per-reflect cost negligible. Cheaper than pgvector + external embedding API, and fits a 1-core server.
 
 ### Async Processing with Queue
 
@@ -1159,30 +1209,30 @@ wsHub.Close()
 llmClient.Close()
 ```
 
-### Backup & Disaster Recovery (WAJIB — survival)
+### Backup & Disaster Recovery (MANDATORY — survival)
 
-Solo founder + 1 server = 1 bad day dari kehilangan semua. Minimal:
+Solo founder + 1 server = 1 bad day away from losing everything. Minimum:
 
 ```bash
-# 1. PostgreSQL — daily dump ke MinIO (cron)
+# 1. PostgreSQL — daily dump to MinIO (cron)
 # /etc/cron.d/pg-backup
 0 3 * * * pg_dump -Fc $DATABASE_URL | s3cmd put - s3://backups/pg-$(date +\%F).dump
 
 # 2. MinIO replication / offsite
-# rclone sync ke object storage eksternal (Backblaze B2 ~$6/TB)
+# rclone sync to external object storage (Backblaze B2 ~$6/TB)
 0 4 * * * rclone sync s3://backups b2:hermes-backups --fast-list
 
-# 3. Mnemosyne banks — SQLite file, backup bersama
-# banks/<org_id>/mnemosyne.db → rebuildable dari Postgres (cache), tapi backup juga murah
+# 3. Mnemosyne banks — SQLite file, back up together
+# banks/<org_id>/mnemosyne.db → rebuildable from Postgres (cache), but cheap to back up too
 0 5 * * * tar czf - ~/.hermes/mnemosyne/data/banks | s3cmd put - s3://backups/mnemosyne-$(date +\%F).tar.gz
 
-# 4. Config & .env — git (tanpa secret) + encrypted copy
+# 4. Config & .env — git (no secrets) + encrypted copy
 ```
 
 **Recovery target:**
-- RPO ≤ 24 jam (daily backup)
-- RTO ≤ 1 jam (restore dump + rebuild Mnemosyne dari Postgres)
-- Test restore bulanan — backup yang ga pernah di-restore = ga ada
+- RPO ≤ 24h (daily backup)
+- RTO ≤ 1h (restore dump + rebuild Mnemosyne from Postgres)
+- Monthly restore test — a backup never restored = no backup
 
 ### CORS & Security
 
@@ -1216,9 +1266,9 @@ app.Use(cors.New(cors.Config{
 | **WebSocket** | gorilla/websocket | Chat interview, signaling |
 | **WebRTC** | Pion + coturn | Voice/video (STUN/TURN required) |
 | **STT** | Whisper via whisper.cpp | Free, self-hosted, `os/exec` integration |
-| **LLM** | DeepSeek Flash (via API) | Cheap ($0.0001/1K tokens), fast, high quality |
+| **LLM** | DeepSeek Flash = `deepseek-chat` (via API) | Cheap ($0.0001/1K tokens), fast, high quality |
 | **TTS** | Piper TTS / Edge TTS | Free, self-hosted or free API |
-| **Embeddings** | fastembed lokal (bge-small) | $0, konsisten sama Mnemosyne layer |
+| **Embeddings** | local fastembed (bge-small) | $0, consistent with the Mnemosyne layer |
 | **Migrations** | golang-migrate | Versioned DB migrations |
 | **Frontend** | Next.js + React | SSR dashboard, real-time UI |
 | **Auth** | JWT + per-tenant RBAC | Multi-tenant ready |
@@ -1235,13 +1285,14 @@ app.Use(cors.New(cors.Config{
 type LLMProvider interface {
     Chat(ctx context.Context, req ChatRequest) (*ChatResponse, error)
     ChatStream(ctx context.Context, req ChatRequest) (<-chan string, error)
+    StructuredOutput(ctx context.Context, req StructuredRequest) (any, error)
     Embed(ctx context.Context, text string) ([]float64, error)
     CountTokens(text string) int
 }
 
 type LLMClient struct {
     primary    LLMProvider  // DeepSeek Flash (cheap, fast)
-    fallback   LLMProvider  // Secondary OpenAI-compatible provider (e.g. OpenRouter / Neuralwatt) — BUKAN Anthropic (mahal, kontradiksi strategi cost)
+    fallback   LLMProvider  // Secondary OpenAI-compatible provider (e.g. OpenRouter / Neuralwatt) — NOT Anthropic (expensive, contradicts cost strategy)
     metrics    *MetricsRecorder
 }
 
@@ -1298,6 +1349,8 @@ func buildSafePrompt(ctx InterviewContext) ([]Message, error) {
 }
 ```
 
+**Note:** `cl100k_base` ≈ DeepSeek tokenizer (5-10% drift) — good enough for a budget guard; use the provider's tokenizer if you need precision.
+
 ### Rate Limit Handling (429)
 
 ```go
@@ -1321,18 +1374,32 @@ func (rl *RateLimiter) Allow(tenantID string, tokens int) bool {
 ### Structured Output (Function Calling)
 
 ```go
+// Canonical — single source of truth (synced with schema §2 + Phase 4)
 type InterviewEvaluation struct {
-    OverallScore      int      `json:"overall_score" jsonschema:"minimum=0,maximum=100"`
-    TechnicalScore    int      `json:"technical_score"`
-    CommunicationScore int    `json:"communication_score"`
-    Strengths         []string `json:"strengths"`
-    Weaknesses        []string `json:"weaknesses"`
-    Recommendation    string   `json:"recommendation" jsonschema:"enum=proceed,enum=hold,enum=reject"`
+    OverallScore   int                  `json:"overall_score" jsonschema:"minimum=0,maximum=100"`
+    Dimensions     map[string]Dimension `json:"dimensions"` // technical, communication, problem_solving, culture_fit
+    PerQuestion    []PerQuestionScore   `json:"per_question"`
+    Strengths      []string             `json:"strengths"`
+    Weaknesses     []string             `json:"weaknesses"`
+    Recommendation string               `json:"recommendation" jsonschema:"enum=proceed,enum=hold,enum=reject"`
+}
+
+type Dimension struct {
+    Score  int     `json:"score"`
+    Weight float64 `json:"weight"`
+}
+
+type PerQuestionScore struct {
+    QuestionIdx int      `json:"question_idx"`
+    Score       int      `json:"score"`
+    Rationale   string   `json:"rationale"`
+    Strengths   []string `json:"strengths"`
+    Weaknesses  []string `json:"weaknesses"`
 }
 
 func (e *Evaluator) Evaluate(transcript []Message) (*InterviewEvaluation, error) {
     resp, err := e.llm.ChatWithRetry(ctx, ChatRequest{
-        Model: "deepseek-v4-flash",  // murah untuk evaluasi
+        Model: "deepseek-chat",  // cheap for evaluation
         Messages: []Message{
             {Role: "system", Content: evaluationPrompt},
             {Role: "user", Content: formatTranscript(transcript)},
@@ -1377,12 +1444,30 @@ func (v *Validator) ValidateResponse(raw string) (*InterviewEvaluation, error) {
         eval.Recommendation = "hold" // default safe
     }
 
+    // 3b. Dimensions: weight sum must be ≈ 1 — if not, normalize so overall_score stays consistent
+    normalizeDimensionWeights(&eval)
+
     // 4. Content moderation
     if hasToxicContent(eval.Feedback) {
         return nil, fmt.Errorf("response failed moderation")
     }
 
     return &eval, nil
+}
+
+// normalizeDimensionWeights — weight sum ≈ 1 so overall_score stays consistent across tenants
+func normalizeDimensionWeights(e *InterviewEvaluation) {
+    var sum float64
+    for _, d := range e.Dimensions {
+        sum += d.Weight
+    }
+    if sum <= 0 || math.Abs(sum-1) < 1e-9 {
+        return
+    }
+    for k, d := range e.Dimensions {
+        d.Weight /= sum
+        e.Dimensions[k] = d
+    }
 }
 ```
 
@@ -1392,7 +1477,7 @@ func (v *Validator) ValidateResponse(raw string) (*InterviewEvaluation, error) {
 |----------|---------|---------------|
 | **Prompt caching** (DeepSeek prefix caching) | Up to 50% on long contexts | Structure prompts with JD + CV as prefix |
 | **Semantic caching** | 20-40% on repeat queries | Redis + pgvector similarity (>0.95) |
-| **Model tiering** | 30-60% | DeepSeek Flash untuk extraction/evaluation, DeepSeek Flash (reasoning) untuk complex questions |
+| **Model tiering** | 30-60% | DeepSeek Flash for extraction/evaluation, DeepSeek Flash (reasoning) for complex questions |
 | **Response caching** | 10-20% | Cache common interview questions |
 | **Token optimization** | 10-20% | Sliding window, trim whitespace, concise prompts |
 | **Streaming vs non-streaming** | Same cost | Always stream (better UX, same tokens) |
@@ -1422,36 +1507,36 @@ func (v *Validator) ValidateResponse(raw string) (*InterviewEvaluation, error) {
 
 ### Differentiation
 
-**Frame ke outcome buyer, bukan fitur engineering.** Recruiter/HR nggak peduli backend kita Go — mereka peduli: dapet kandidat bagus lebih cepet, nggak ketinggalan talent bagus, evaluasi konsisten & adil.
+**Frame to the buyer outcome, not engineering features.** Recruiters/HR don't care that our backend is Go — they care about: getting good candidates faster, not missing good talent, consistent & fair evaluations.
 
 | # | Buyer outcome | Fitur pendukung |
 |---|---------------|-----------------|
-| 1 | **Dapet kandidat yang cocok 2x lebih cepet** | CV-gap questioning: pertanyaan digenerate dari gap JD↔CV, bukan question bank generik |
-| 2 | **All-in-one pipeline, bayar sekali** | CV screening → chat interview → voice interview → report. Kompetitor charge per module |
-| 3 | **Evaluasi konsisten & adil (anti bias lawsuit)** | Bias prevention, prohibited questions, scoring transparan, audit log |
-| 4 | **Interview relevan ke budaya perusahaan** | Company context + tenant system prompt (differentiator baru, ga ada kompetitor yang punya) |
-| 5 | **Live, bukan rekaman** | Live conversational AI (kebanyakan kompetitor async/recorded) |
-| 6 | **Data di tangan sendiri** | Self-hostable (enterprise) + on-prem option |
+| 1 | **Get matching candidates 2x faster** | CV-gap questioning: questions generated from JD↔CV gaps, not a generic question bank |
+| 2 | **All-in-one pipeline, pay once** | CV screening → chat interview → voice interview → report. Competitors charge per module |
+| 3 | **Consistent & fair evaluations (anti-bias lawsuit)** | Bias prevention, prohibited questions, transparent scoring, audit log |
+| 4 | **Interviews relevant to company culture** | Company context + tenant system prompt (new differentiator, no competitor has it) |
+| 5 | **Live, not recorded** | Live conversational AI (most competitors are async/recorded) |
+| 6 | **Your data in your hands** | Self-hostable (enterprise) + on-prem option |
 
-**Bukan differentiator:** "Go-native stack", "real-time scoring" (fitur teknis — jangan dijual, cuma di-internal).
+**Not differentiators:** "Go-native stack", "real-time scoring" (technical features — don't sell them, keep internal).
 
-### Beachhead Market (Target Pasar Pertama)
+### Beachhead Market (First Target Market)
 
-**Jangan mulai dari "semua recruiter" — mulai dari satu segmen yang paling sakit:**
+**Don't start with "all recruiters" — start with the single most painful segment:**
 
-| Segmen | Kenapa cocok | Kenapa duluan |
+| Segment | Why it fits | Why first |
 |--------|--------------|---------------|
-| **Volume hiring SEA (BPO, call center, retail, agency recruiter)** | Hire ratusan/bulan, screening cost paling sakit, budget sensitif | 🥇 Target pertama |
-| Tech startup hiring (5-20/bln) | Butuh quality, mau bayar | 🥈 Kedua |
-| Enterprise (100+/bln) | Budget gede, tapi butuh SOC 2 + integrasi | 🥉 Nanti (post-MVP) |
+| **Volume hiring SEA (BPO, call center, retail, agency recruiter)** | Hiring hundreds/month, screening cost hurts most, budget-sensitive | 🥇 First target |
+| Tech startup hiring (5-20/mo) | Need quality, willing to pay | 🥈 Second |
+| Enterprise (100+/mo) | Big budget, but needs SOC 2 + integrations | 🥉 Later (post-MVP) |
 
-**Go-to-market volume hiring:**
-- Pilot: 3-5 agency recruiter / BPO di Jakarta-Bandung (network Hyperscal/OCBC)
-- Channel: LinkedIn agency network, JobStreet/Glints partnership, referral dari pilot
-- Paket: per-interview pricing (bukan subscription) buat volume — $0.5-1/interview
-- KPI pilot: interview completion rate + waktu screening turun
+**Volume hiring go-to-market:**
+- Pilot: 3-5 agency recruiters / BPOs in Jakarta-Bandung (Hyperscal/OCBC network)
+- Channels: LinkedIn agency network, JobStreet/Glints partnership, referral from pilots
+- Package: per-interview pricing (not subscription) for volume — $0.5-1/interview
+- Pilot KPIs: interview completion rate + reduced screening time
 
-### Pricing Model Recommendation (revisi — usage-based buat volume, subscription buat enterprise)
+### Pricing Model Recommendation (revised — usage-based for volume, subscription for enterprise)
 
 | Tier | Price | Features |
 |------|-------|----------|
@@ -1547,7 +1632,7 @@ func (v *Validator) ValidateResponse(raw string) (*InterviewEvaluation, error) {
 | ✅ Added heartbeat, timeout, reconnection | Production WebSocket reliability |
 | ✅ Added bias prevention + prohibited questions | Legal compliance for HR SaaS |
 | ✅ Added language detection | Handle multi-language candidates |
-| ✅ **Replaced OpenAI Realtime WebRTC dengan Whisper + DeepSeek Flash + Piper/Edge TTS** | Stack voice self-hosted, $0.001/interview |
+| ✅ **Replaced OpenAI Realtime WebRTC with Whisper + DeepSeek Flash + Piper/Edge TTS** | Voice stack self-hosted, $0.001/interview |
 | ✅ Added WebRTC complexity warning + TURN requirement | Realistic architecture assessment |
 | ✅ Added recording consent + GDPR compliance | Legal requirement |
 | ✅ Added bot detection | Prevent AI-cheating |
