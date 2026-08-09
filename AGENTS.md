@@ -2,9 +2,9 @@
 
 ## Project
 
-- Monorepo: `backend/` (Go), `docker-compose.yml` (stack), `.github/workflows/ci.yml`
-- Architecture reference: `AI_Interviewer_Phases.md` (per-phase deliverables + testing criteria), `AI_Interviewer_Research.md` (design decisions)
-- Phases: M1 foundation, M2 job/CV/screening/context, M3 interviews (next)
+- Monorepo: `backend/` (Go), `frontend/` (React SPA), `docker-compose*.yml` (dev/prod stacks), `.github/workflows/ci.yml`
+- Architecture reference: `AI_Interviewer_Phases.md` (phases + testing criteria), `AI_Interviewer_Research.md` (design + impl-sync table), `AI_Interviewer_Project_Structure.md` (current structure)
+- Phases: M1–M3 complete; **P4a (evaluation + FE + P6a ops) complete — beta gate** in `M3_Plan.md`; next phase plan in `P4_Plan.md`
 
 ## Commands (run from `backend/`)
 
@@ -20,6 +20,26 @@
 | `make smoke` | end-to-end API scenario against running stack (`CV_PDF` env or `/tmp/kilo/cv.pdf`) | After any API change |
 | `make migrate` | apply migrations (admin URL) | After fresh DB or new migration |
 | `go run ./cmd/server -migrate-only` | same as `make migrate` | — |
+| `make load-ws` | 100-concurrent WS load check (`CONNS` overrides) | After WS handler changes |
+
+## Frontend commands (run from `frontend/`)
+
+| Command | Purpose | When |
+|---|---|---|
+| `npm run build` | tsc + vite build | Before EVERY FE commit |
+| `npx vitest run` | unit tests (api/ws libs) | Before commit |
+| `npx playwright test` | E2E happy path (needs stack + DeepSeek key) | After FE flow changes |
+
+## Production commands (VPS, `docker compose --env-file .env.prod`)
+
+| Command | Purpose |
+|---|---|
+| `scripts/backup.sh` | nightly: pg_dump + MinIO mirror → backup bucket, 14-day retention |
+| `scripts/restore.sh <dump>` | restore DB + object storage to `intivai_restore`, promote steps |
+| `docker compose ... -f docker-compose.prod.yml up -d` | deploy (CI does this on main) |
+
+> NEVER run prod compose without `--env-file .env.prod` — base compose
+> `environment:` would win and boot with dev secrets.
 
 Full check before commit:
 
@@ -28,7 +48,8 @@ make check && make coverage && make test-integration-dev
 ```
 
 Plan for the current phase lives in `M3_Plan.md` (acceptance criteria from
-`AI_Interviewer_Phases.md` — mark executed, not just coded).
+`AI_Interviewer_Phases.md` — mark executed, not just coded). Beta-gate status
+is the top checklist in `M3_Plan.md`.
 
 ## Workflow per change
 
@@ -88,7 +109,7 @@ Plan for the current phase lives in `M3_Plan.md` (acceptance criteria from
   - Unique constraint violations: map 23505 → domain sentinel in repo, sentinel → `DomainError` in use case, `httpapi.Error` maps `DomainError`/`NotFoundError` only
 - Schema drift: migration + repo SQL + domain struct are three copies — changes must touch all three in one commit; add a column or NULL-scan is a migration, not a repo-only edit
 - Migration naming: `NNN_<context>_<what>.up.sql` / `.down.sql` — zero-padded, one concern per migration, never renumber existing versions. Renames are safe (golang-migrate stores no checksums) but must be rename-only commits
-- pgvector: embeddings `VECTOR(384)` bge-small; HNSW index exists
+- pgvector: embeddings `VECTOR(384)` (default model multi-qa-MiniLM-L6-cos-v1 — bge-small gated on HF, switch via `EMBED_MODEL_NAME`); HNSW index exists
 
 ### API
 - DTOs: json tags on every result (snake_case); no field-name leaks
@@ -105,7 +126,7 @@ Plan for the current phase lives in `M3_Plan.md` (acceptance criteria from
 
 ### Security
 - Prompt/context content: `ContainsInjection` rails before persistence
-- JWT: only `type=auth` tokens accepted on API routes; `ws_ticket` only on `/candidate/interviews/:id/chat`
+- JWT: only `type=auth` tokens accepted on API routes; `ws_ticket` only on `/candidate/interviews/:id/chat` (browsers pass it as `?ticket=`)
 - Passwords: min 8 chars; bcrypt
 - Role rank: a user may only create roles AT OR BELOW their own rank (admin > recruiter > interviewer/member) — no recruiter→admin escalation (`canCreateRole` in `create_user.go`)
 - WS Origin allowlist: `INTIVAI_ALLOWED_ORIGINS` guards the chat socket (CSWSH); non-browser clients must send a matching Origin when the list is set
@@ -124,7 +145,8 @@ Plan for the current phase lives in `M3_Plan.md` (acceptance criteria from
 
 ## Environment
 
-- `make dev` uses `docker-compose.yml` + `docker-compose.dev.yml` (non-conflicting host ports: postgres 5433, redis 6380, minio 9002/9003, app 8081)
+- `make dev` uses `docker-compose.yml` + `docker-compose.dev.yml` (non-conflicting host ports: postgres 5433, redis 6380, minio 9002/9003, app 8081); prod = `docker-compose.prod.yml` (Caddy-only ports) + `--env-file .env.prod`
+- FE dev: `frontend/` Vite on :5173 (proxies `/api` + WS to :8081); `INTIVAI_ALLOWED_ORIGINS` must include the FE origin (CSWSH + CORS)
 - Docker buildx is broken on the dev machine: `DOCKER_BUILDKIT=0 docker build` (classic builder)
 - Tesseract OCR in image: needs `tesseract-ocr-data-eng` + `poppler-utils` — do not remove
 - DeepSeek key: `INTIVAI_DEEPSEEK_API_KEY`; absent → extract marks `failed_extract` honestly (use `POST /cvs/:id/extract` to retry after key is set)

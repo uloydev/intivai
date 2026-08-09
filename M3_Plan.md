@@ -114,19 +114,19 @@ candidate chat UI becomes a P3 deliverable. Beta = Phase 0 cohort (5 pilots).
 
 | # | Gate item | Status |
 |---|-----------|--------|
-| 1 | P4a: evaluation LLM → report JSON; `evaluation` frame carries real scores | [ ] |
-| 2 | P4a: `GET /interviews/:id` + `GET /candidates/:id/report` (JSON) | [ ] |
-| 3 | P3 FE: candidate chat UI (ticket → consent → interview → evaluation frame) | [ ] |
-| 4 | P4a FE: recruiter dashboard-lite (CV/job upload, interview list, result view) | [ ] |
-| 5 | Invite flow: shareable interview URL from invitation token | [ ] |
-| 6 | Consent capture: `consent_given` recorded at interview start | [ ] |
-| 7 | Live DeepSeek streaming verified with real key (smoke, not just mock) | [ ] |
-| 8 | Fresh-volume boot 001–007 (`make dev` from clean volume) | [ ] |
-| 9 | Deploy: compose on VPS, domain + TLS, env management, push pipeline | [ ] |
-| 10 | Backup & DR: postgres dump → MinIO + rclone B2; restore test executed | [ ] |
-| 11 | Error alerting lite (Sentry Go or log shipping) | [ ] |
-| 12 | 5 pilot companies onboarded; feedback channel + retention criteria set | [ ] |
-| 13 | `make check` + `make coverage` + `make test-integration-dev` green | [ ] |
+| 1 | P4a: evaluation LLM → report JSON; `evaluation` frame carries real scores | [x] |
+| 2 | P4a: `GET /interviews` + `GET /interviews/:id` + `GET /candidates/:id/report` (JSON) | [x] |
+| 3 | P3 FE: candidate chat UI (ticket → consent → interview → evaluation frame) | [x] |
+| 4 | P4a FE: recruiter dashboard-lite (CV/job upload, interview list, result view) | [x] |
+| 5 | Invite flow: shareable interview URL from invitation token | [x] |
+| 6 | Consent capture: `consent_given` recorded at interview start | [x] |
+| 7 | Live DeepSeek streaming verified with real key (smoke + Playwright E2E) | [x] |
+| 8 | Fresh-volume boot 001–007 (`make dev` from clean volume) | [x] |
+| 9 | Deploy: compose on VPS, domain + TLS, env management, push pipeline | [~] pipeline + overlay ready; needs VPS/domain/secrets |
+| 10 | Backup & DR: postgres dump + MinIO mirror → backup bucket; restore test executed | [~] scripts ready; needs host cron + first restore test |
+| 11 | Error alerting lite (Sentry Go, DSN-gated) | [~] wired; needs DSN |
+| 12 | 5 pilot companies onboarded; feedback channel + retention criteria set | [ ] business |
+| 13 | `make check` + `make coverage` + `make test-integration-dev` green | [x] |
 | 14 | All commits pushed; deploy from tagged release | [ ] |
 
 Beta starts when gates 1–13 are checked and 14 is done — no silent partial beta.

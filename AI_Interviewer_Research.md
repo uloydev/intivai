@@ -26,6 +26,42 @@
 
 ---
 
+## ⚙️ Implementation Sync (2026-08-10) — what landed, what deviated
+
+This research is the design record; the sections below keep their original
+reasoning. Status markers: ✅ implemented as designed · ⚠️ deviated (reason).
+
+| Research decision | Status | Where |
+|---|---|---|
+| 1.1 PDF text extraction via pure-Go lib | ✅ `ledongthuc/pdf` | `cv/application/parse_worker.go` |
+| 1.2 Scanned PDFs → pdftoppm + Tesseract | ✅ (functional fixture test) | `cv/infrastructure/ocr/` |
+| 1.3 LLM structured extraction (JSON mode) | ✅ DeepSeek `StructuredOutput`, 12K char cap | `cv/application/extract_worker.go` |
+| 1.4 Weighted scoring (skills .35 / exp .20 / semantic .25 / edu .10 / certs .10) | ✅ | `screening/domain/scoring.go` |
+| 1.5 Per-tenant weights + threshold fallback | ✅ org > job > default 50 | `screening/application/org_settings.go` |
+| 1.6 Company context + tenant prompt, versioning, rails | ✅ `ContainsInjection`, `ValidatePrompt`, hash dedup, version pinning on interviews | `context/` + `interview` (context_version) |
+| §2 Chat: 30-min cap, 3-min question timeout, idle 5m, heartbeat 30s/10s | ✅ frozen-clock tested; WS read deadline = 3m; server ping 30s | `interview/domain`, `interview/api` |
+| §2 Sliding window (10 Q&A) + 8K token budget | ✅ | `interview/domain/service/context.go` |
+| §2 Weakness→probe, strength→next | ✅ deterministic probe (<8 words) | `interview/domain/service/probe.go` |
+| §3 Voice | ⏸ post-MVP, not built (per plan) | — |
+| §4.1 Modular monolith | ✅ single Go binary + asynq workers | `backend/` |
+| §4.2 Multi-tenant RLS | ✅ **plus FORCE RLS + least-privilege `intivai_app` role** (owner bypass bug fixed) | migrations 002 |
+| §4.3 Mnemosyne bank per tenant | ✅ SQLite (dev) + **pgvector bank (prod)** + cosine recall | `memory/infrastructure/{native,postgres}` |
+| §4.3 fastembed bge-small | ⚠️ cybertron (pure Go) with `multi-qa-MiniLM-L6-cos-v1` default — bge-small is gated on HuggingFace; set `EMBED_MODEL_NAME` when accessible | `embedding/` |
+| §4.4 Asynq queue | ✅ task names single-sourced; 6 workers | `pkg/queue` + `internal/*/application` |
+| §4.5 golang-migrate embedded | ✅ migrations 001–007, `-migrate-only` mode | `pkg/db/` |
+| §4.6 Observability | ⚠️ partial: JSON logs, health/ready (DB/Redis/MinIO), Sentry-lite; Prometheus → P6b | `pkg/logger`, `cmd/server` |
+| §4.7 CORS/CSWSH | ✅ origin allowlist (CORS + WS), `?ticket=` for browsers | `httpmw/cors.go`, `interview/api` |
+| §4.8 Rate limiting | ✅ Redis sliding window (auth/tenant/user), fail-open | `httpmw/ratelimit.go` |
+| §4.9 Stack | ✅ GORM over pgx stdlib (was planned earlier as raw pgx), Fiber, MinIO, React FE | everywhere |
+| §5 LLM patterns | ✅ one provider port; evaluation adds injection rails + schema validation (LLM never sets the final score) | `llm/`, `evaluation/` |
+| §7 Consent | ✅ `consent_given` gate before interview start | `interview` (consent endpoint) |
+
+Out of scope/deferred: voice (§3), PDF report + cross-interview reflect
+(P4b), Prometheus/k6/Terraform/SOC2 (P6b), multi-instance session registry
+(carryover item 12, needs multi-instance deployment).
+
+---
+
 ## 1. CV Parsing & Scoring
 
 ### PDF Text Extraction (Go Options) — MVP: PDF Only

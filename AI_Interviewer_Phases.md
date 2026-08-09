@@ -240,7 +240,7 @@ type ScoreResult struct {
 - [x] Bias detection catches prohibited questions
 - [x] Idle timeout disconnects after 5 minutes (ws read deadline; clock injectable)
 - [x] 100 concurrent WebSocket connections stable (cmd/loadcheck: 100/100 pass)
-- [ ] Browser candidate interview runs end-to-end (chat UI ↔ WS: ticket → consent → questions → streamed answers → evaluation frame)
+- [x] Browser candidate interview runs end-to-end (Playwright happy path, real DeepSeek: register → job → CV → extract → passed → interview → invite → consent → chat → streamed reply)
 - [x] System prompt composer: tenant prompt + company context + safety rails composed correctly (composed once per connection)
 - [x] Safety rails always last (tenant cannot override)
 - [x] Interrupt stops the AI mid-response (streaming goroutine + ctx cancel; live-verified)
@@ -323,13 +323,13 @@ similar, _ := mn.Recall(ctx,
 ```
 
 ### Testing Criteria (P4a — beta gate)
-- [ ] Evaluation returns valid structured JSON (per-question scores + overall)
-- [ ] Report aggregates correctly (dimensions × weights → overall_score)
-- [ ] `evaluation` frame in the WS flow carries real scores (not empty map)
-- [ ] `GET /interviews/:id` returns answers + status + scores to recruiter
-- [ ] Recruiter dashboard-lite: upload CV → create job → create interview → see result (browser, end-to-end)
-- [ ] Invite URL flow: recruiter shares link → candidate opens → consent → interview
-- [ ] Edge cases: empty transcript, single answer, very long interview
+- [x] Evaluation returns valid structured JSON (per-question scores + overall)
+- [x] Report aggregates correctly (domain recomputes; LLM never sets the final number)
+- [x] `evaluation` frame carries real scores + overall + recommendation (complete/pending)
+- [x] `GET /interviews/:id` + `GET /interviews` list + `GET /candidates/:id/report` (org-checked)
+- [x] Recruiter dashboard-lite: upload CV → create job → create interview → see result (browser, Playwright-verified)
+- [x] Invite URL flow: share link → candidate opens → consent → ticket exchange → chat (E2E-verified)
+- [x] Edge cases: empty transcript/single answer/long interview covered by domain tests + evaluator validation
 
 ### Testing Criteria (P4b — post-MVP)
 - [ ] PDF report download works
