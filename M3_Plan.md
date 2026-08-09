@@ -7,9 +7,9 @@ deliverables and doc testing criteria — mark boxes as executed, not just coded
 
 | # | Item | Source | Scheduled | Status |
 |---|------|--------|-----------|--------|
-| 1 | Context management: sliding window (last 10 Q&A) + tiktoken budget | M3 deliverable | 2026-08-12 | [ ] |
+| 1 | Context management: sliding window (last 10 Q&A) + tiktoken budget | M3 deliverable | 2026-08-12 | [x] done 2026-08-10 (TrimContext + budget in domain/service/context.go; history seeded from transcript via RecentContext; handler window+budget enforced) |
 | 2 | 100 concurrent WS connections load check (harness: Go load client) | M3 criterion | 2026-08-13 | [ ] |
-| 3 | Interview duration cap (30 min) + per-question timeout (3 min) | Research §2 config | 2026-08-12 | [ ] |
+| 3 | Interview duration cap (30 min) + per-question timeout (3 min) | Research §2 config | 2026-08-12 | [x] done 2026-08-10 (MaxInterviewDuration in domain ExpireIfNeeded; PerQuestionTimeout as WS read deadline) |
 | 4 | Dynamic follow-up probing (weakness→probe, strength→next) | Research §2 strategy | 2026-08-14 (post-load) | [ ] |
 | 5 | Smoke extended with interview endpoints | M3 plan | 2026-08-11 | [ ] |
 | 6 | `go test -race` in CI (backend job) | cross-cutting | 2026-08-11 | [ ] |
@@ -29,7 +29,7 @@ deliverables and doc testing criteria — mark boxes as executed, not just coded
 | Bias detection: protected-class rules | `internal/interview/domain/service/bias.go` | [x] unit-tested |
 | Prompt composer: default + tenant prompt + company context + safety rails (pinned LAST) | `internal/interview/domain/service/prompt_composer.go` | [x] unit-tested |
 | Clock injection (idle timeout, expiry) | `internal/interview/domain/clock.go` | [x] |
-| Context management: sliding window, tiktoken counting | `internal/interview/domain/service/` | [ ] |
+| Context management: sliding window, tiktoken counting | `internal/interview/domain/service/context.go` | [x] unit-tested + chat flow asserts window |
 | WebSocket hub: connections, heartbeat, per-interview room | `internal/interview/api/chat_handler.go` | [x] chat flow integration-tested (ticket → start → question → answer → tokens → next) |
 | API: `POST /interviews`, `POST /candidate/interviews/:id/ticket`, `WS /candidate/interviews/:id/chat` | `internal/interview/api/` | [x] live-verified |
 | Reconnection: last unanswered question stored, resume | `internal/interview/application/` | [x] resume sends start + current question (CurrentState) |
@@ -81,7 +81,7 @@ Remaining for M3 done-criteria: sliding-window context management (tiktoken), 10
 - [x] Answers stored in PostgreSQL
 - [x] Reconnection resumes from last unanswered question (resume sends start + current question; session mismatch rejected)
 - [x] Bias detection catches prohibited questions
-- [x] Idle timeout disconnects after 5 minutes (read deadline + injectable clock)
+- [x] Idle/per-question timeout: silent candidate disconnects (read deadline = PerQuestionTimeout 3m; 30-min duration cap expires via domain state machine, frozen-clock tested)
 - [ ] 100 concurrent WebSocket connections stable (load check pending)
 - [x] System prompt composer: tenant prompt + company context + safety rails composed correctly (live)
 - [x] Safety rails always last (tenant cannot override)
@@ -103,3 +103,63 @@ Remaining for M3 done-criteria: sliding-window context management (tiktoken), 10
   own goroutine with ctx cancel (interrupt); single active connection per
   interview (`sessionRegistry`); prompt composed once per connection; LLM
   error / interrupt both dispatch the next question via `turnState`
+
+---
+
+## Fix plan — M1–M3 gap closure (2026-08-10 → 08-15)
+
+Order = date + dependency. Each item: TDD per AGENTS, `make check` +
+`make test-integration-dev` green, mark carryover row [x] with date.
+
+### F0. Commit pending work (08-10, first)
+Uncommitted across working tree — split logical commits:
+1. `feat(interview): sliding-window context + token budget` — `domain/service/context.go` + tests, `RecentContext`, handler windowing
+2. `feat(interview): 30-min duration cap + 3-min per-question timeout` — domain consts + `ExpireIfNeeded`, read deadline
+3. `feat: extend smoke with interview flow` — scripts/smoke.sh (ws, ticket, chat)
+4. `ci: add go test -race to backend job` — .github/workflows/ci.yml
+5. my session leftovers: Makefile dev/redis-clear, docker-compose.dev.yml `!override`, AGENTS.md rows
+
+### F1. Scanned-PDF OCR fixture (08-12) — item 9
+- Fixture: scanned PDF (image-only, 1-2 pages) committed under `testdata/`; generation script documented
+- Test: parse worker → `pdftoppm` + tesseract → extracted text contains expected strings; failure path `failed_ocr` honest
+- Files: `internal/cv/` test + fixture; verify tesseract-ocr-data-eng + poppler in Dockerfile still installed
+- Gate: `make test-integration-dev` (OCR runs in containerized CI)
+
+### F2. Context version pinned on interview row (08-13) — item 10
+- Migration 007: `interviews.context_version INT` (nullable) + `contexts` version FK semantics
+- `CreateInterview` writes latest company-context version at creation (audit trace)
+- Repo round-trip test + API asserts version on interview detail
+- Files: migration + `internal/interview/` repo/domain/application in SAME change
+
+### F3. 100-conn WS load harness (08-13) — item 2
+- `cmd/loadcheck` (or `scripts/load_ws.go`): Go client, N=100 concurrent sockets, ticket-per-conn (or shared interview), answer+interrupt mix, assert all streams complete, errors = 0, duration budget
+- Harness FIRST, then run against dev stack; record numbers in M3_Plan criterion
+- Note: single-connection-per-interview rule → harness must use 100 distinct interviews (or accept 99 rejections as expected behavior — decide in harness)
+
+### F4. Server heartbeat (08-14) — item 11
+- Handler: server ping on `PingInterval=30s` (writer goroutine ticker), `PongWait=10s` read deadline margin; pong frames from client honored
+- Protocol: keep client `ping`→`pong` (already exists); add server-initiated ping
+- Tests: ws harness — stale client (no pong) dropped; active client survives
+- Also verify `HandshakeTimeout: 10s` in upgrader config (fiberws)
+
+### F5. Dynamic follow-up probing (08-14, post-load) — item 4
+- Domain: probe strategy (weakness→probe question, strength→next) in `question_generator.go` or new `probe.go`; unit tests: weak answer → probe generated from CV-gap skill; strong → advance
+- Handler: after answer, if probe applies → send probe as next question (persisted like normal questions)
+- No LLM for probing (deterministic, cheap) — only LLM for responses
+
+### F6. Local embeddings fastembed bge-small (08-15) — item 7
+- `internal/llm/embed.go` or `internal/embedding/`: fastembed Go adapter (pure-Go ONNX runtime or fastembed-go), model bge-small-en-v1.5, 384d — no network at inference
+- `Embed()` impl replaces "not implemented"; unit test: known sentence → dims=384, stable
+- Column `VECTOR(384)` + HNSW already in migration 002
+
+### F7. Embedding-based semantic recall (08-15) — item 8
+- Postgres bank: `Recall` cosine path (`embedding <=> $1` ORDER BY, LIMIT), fallback LIKE when embedding NULL
+- Sync worker: compute embedding at `Remember` (async, non-blocking; index-time cost accepted)
+- SemanticMatch in scoring swaps keyword overlap → cosine (weights unchanged)
+- Tests: bank integration — same-tenant semantic recall ranks exact match first; cross-tenant isolation still holds
+
+### F8. Close-out (08-15)
+- Carryover table: mark all closed, remove DECISION deferral item 12 (keep)
+- `make check` + `make test-integration-dev` + `make coverage` green; fresh-DB boot; update phases doc boxes M2/M3
+- Self-review diff before commit; conventional commits per item
+
