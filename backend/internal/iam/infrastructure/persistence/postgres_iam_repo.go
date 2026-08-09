@@ -21,16 +21,7 @@ func NewPostgresIAMRepo(pool *gorm.DB) *PostgresIAMRepo {
 	return &PostgresIAMRepo{pool: pool}
 }
 
-// q resolves the query executor: the request transaction if present
-// (set by the tenant-tx middleware), otherwise the pool.
-func (r *PostgresIAMRepo) q(ctx context.Context) *gorm.DB {
-	if tx, ok := db.TxFrom(ctx); ok {
-		return tx
-	}
-	return r.pool.WithContext(ctx)
-}
-
-// tq is q but REQUIRES a tenant transaction — RLS-scoped tables must never be
+// tq REQUIRES a tenant transaction — RLS-scoped tables must never be
 // touched outside one, otherwise queries silently return zero rows.
 func (r *PostgresIAMRepo) tq(ctx context.Context) (*gorm.DB, error) {
 	tx, ok := db.TxFrom(ctx)
@@ -144,7 +135,7 @@ func (r *PostgresIAMRepo) ListUsers(ctx context.Context, orgID uuid.UUID) ([]*ia
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	users := []*iamdomain.User{}
 	for rows.Next() {

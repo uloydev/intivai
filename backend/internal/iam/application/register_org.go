@@ -48,12 +48,12 @@ func (uc *RegisterOrg) Execute(ctx context.Context, cmd RegisterOrgCommand) (*Re
 		}
 		return uc.repo.CreateUser(tctx, admin)
 	})
-	switch {
-	case err == nil:
+	switch err {
+	case nil:
 		// ok
-	case err == domain.ErrDuplicateSlug:
+	case domain.ErrDuplicateSlug:
 		return nil, errors.NewDomainError("ORG_SLUG_TAKEN", "org slug already taken")
-	case err == domain.ErrDuplicateEmail:
+	case domain.ErrDuplicateEmail:
 		return nil, errors.NewDomainError("EMAIL_TAKEN", "email already registered in this org")
 	default:
 		return nil, err

@@ -165,3 +165,41 @@ func TestAuthenticateWrongPassword(t *testing.T) {
 		t.Fatal("expected auth failure")
 	}
 }
+
+func TestCreateUserValidationAndAuthz(t *testing.T) {
+	repo := &memRepo{}
+	admin := AuthContext{UserID: uuid.New(), OrgID: uuid.New(), Role: string(iamdomain.RoleAdmin)}
+	uc := NewCreateUser(repo, fakeHasher{})
+
+	if _, err := uc.Execute(context.Background(), admin, CreateUserCommand{OrgID: admin.OrgID, Email: "r@x.io", Role: "recruiter", Password: "short"}); err == nil {
+		t.Fatal("weak password accepted")
+	}
+	if _, err := uc.Execute(context.Background(), admin, CreateUserCommand{OrgID: admin.OrgID, Email: "r@x.io", Role: "bogus", Password: "secret123"}); err == nil {
+		t.Fatal("invalid role accepted")
+	}
+	res, err := uc.Execute(context.Background(), admin, CreateUserCommand{OrgID: admin.OrgID, Email: "  R@X.IO ", Role: "recruiter", Password: "secret123"})
+	if err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	if res.Role != "recruiter" {
+		t.Fatalf("role = %s", res.Role)
+	}
+	if repo.users[0].Email != "r@x.io" {
+		t.Fatalf("email not normalized: %s", repo.users[0].Email)
+	}
+
+	// member role cannot create users
+	member := AuthContext{UserID: uuid.New(), OrgID: admin.OrgID, Role: string(iamdomain.RoleMember)}
+	if _, err := uc.Execute(context.Background(), member, CreateUserCommand{OrgID: admin.OrgID, Email: "x@x.io", Role: "member", Password: "secret123"}); err == nil {
+		t.Fatal("member role created a user")
+	}
+}
+
+func TestAuthorize(t *testing.T) {
+	if err := Authorize(AuthContext{Role: string(iamdomain.RoleAdmin)}, iamdomain.RoleAdmin, iamdomain.RoleRecruiter); err != nil {
+		t.Fatal(err)
+	}
+	if err := Authorize(AuthContext{Role: string(iamdomain.RoleMember)}, iamdomain.RoleAdmin); err == nil {
+		t.Fatal("member authorized as admin")
+	}
+}

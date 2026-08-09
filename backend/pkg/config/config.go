@@ -45,6 +45,9 @@ type Config struct {
 		Driver  string // sqlite | postgres
 		DataDir string
 	}
+	Cv struct {
+		MaxUploadMB int
+	}
 	RateLimit struct {
 		TenantPerMin int
 		UserPerMin   int
@@ -130,6 +133,14 @@ func Load() (*Config, error) {
 	cfg.Memory.DataDir = v.GetString("MEMORY_DATA_DIR")
 	if cfg.Memory.DataDir == "" {
 		cfg.Memory.DataDir = "./data"
+	}
+
+	cfg.Cv.MaxUploadMB = v.GetInt("CV_MAX_UPLOAD_MB")
+	if cfg.Cv.MaxUploadMB == 0 {
+		cfg.Cv.MaxUploadMB = 10
+	}
+	if cfg.Cv.MaxUploadMB < 0 {
+		return nil, fmt.Errorf("invalid CV_MAX_UPLOAD_MB %d: must be positive", cfg.Cv.MaxUploadMB)
 	}
 
 	cfg.RateLimit.TenantPerMin = v.GetInt("RATE_LIMIT_TENANT_PER_MIN")

@@ -47,7 +47,7 @@ func (m *NativeMemory) open() error {
 		return fmt.Errorf("open sqlite: %w", err)
 	}
 	if _, err := db.Exec(schema); err != nil {
-		db.Close()
+		_ = db.Close()
 		return fmt.Errorf("init sqlite schema: %w", err)
 	}
 	m.db = db
@@ -88,7 +88,7 @@ func (m *NativeMemory) Recall(ctx context.Context, query string, budget string) 
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	return scanHits(rows)
 }
 
@@ -102,7 +102,7 @@ func (m *NativeMemory) QueryGraph(ctx context.Context, entityType, filter string
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	return scanHits(rows)
 }
 

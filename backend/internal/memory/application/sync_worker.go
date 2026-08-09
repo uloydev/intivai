@@ -41,11 +41,9 @@ func (s *SyncWorker) SyncContext(ctx context.Context, orgID, contextType, summar
 	return s.factory.ForBank(orgID).Remember(ctx, "company_context_"+contextType, summary, 0.8)
 }
 
-// Mux registers the sync_mnemosyne handler on the asynq mux.
-func (s *SyncWorker) Mux() *asynq.ServeMux {
-	mux := asynq.NewServeMux()
+// Register adds the sync_mnemosyne handler to the shared asynq mux.
+func (s *SyncWorker) Register(mux *asynq.ServeMux) {
 	mux.HandleFunc(TaskSyncMnemosyne, s.handleSync)
-	return mux
 }
 
 func (s *SyncWorker) handleSync(ctx context.Context, t *asynq.Task) error {

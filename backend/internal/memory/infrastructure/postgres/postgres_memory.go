@@ -79,7 +79,7 @@ func (b *PostgresBank) query(ctx context.Context, sql string, args ...any) ([]me
 		if err != nil {
 			return err
 		}
-		defer rows.Close()
+		defer func() { _ = rows.Close() }()
 		for rows.Next() {
 			var h memdomain.MemoryHit
 			var imp float64

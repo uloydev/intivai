@@ -14,15 +14,29 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/healthcheck"
 	"github.com/gofiber/fiber/v2/middleware/recover"
+	"github.com/google/uuid"
+	"github.com/hibiken/asynq"
+	ctxapi "github.com/intivai/backend/internal/context/api"
+	ctxapp "github.com/intivai/backend/internal/context/application"
+	ctxrepo "github.com/intivai/backend/internal/context/infrastructure/persistence"
+	cvapi "github.com/intivai/backend/internal/cv/api"
+	cvapp "github.com/intivai/backend/internal/cv/application"
+	cvrepo "github.com/intivai/backend/internal/cv/infrastructure/persistence"
 	"github.com/intivai/backend/internal/iam/api"
 	"github.com/intivai/backend/internal/iam/application"
 	"github.com/intivai/backend/internal/iam/infrastructure/auth"
 	iamrepo "github.com/intivai/backend/internal/iam/infrastructure/persistence"
+	jobapi "github.com/intivai/backend/internal/job/api"
+	jobapp "github.com/intivai/backend/internal/job/application"
+	jobrepo "github.com/intivai/backend/internal/job/infrastructure/persistence"
 	"github.com/intivai/backend/internal/llm"
 	memapp "github.com/intivai/backend/internal/memory/application"
 	memdomain "github.com/intivai/backend/internal/memory/domain"
 	"github.com/intivai/backend/internal/memory/infrastructure/native"
 	pgmem "github.com/intivai/backend/internal/memory/infrastructure/postgres"
+	scrapi "github.com/intivai/backend/internal/screening/api"
+	scrapp "github.com/intivai/backend/internal/screening/application"
+	scrrepo "github.com/intivai/backend/internal/screening/infrastructure/persistence"
 	"github.com/intivai/backend/internal/shared/httpmw"
 	"github.com/intivai/backend/pkg/config"
 	"github.com/intivai/backend/pkg/db"
@@ -69,10 +83,10 @@ func main() {
 	if err != nil {
 		logger.Fatal().Err(err).Msg("database")
 	}
-	defer sqlDB.Close()
+	defer func() { _ = sqlDB.Close() }()
 
 	rdb := queue.NewRedis(cfg.Redis.Addr)
-	defer rdb.Close()
+	defer func() { _ = rdb.Close() }()
 
 	store, err := storage.New(cfg.MinIO.Endpoint, cfg.MinIO.AccessKey, cfg.MinIO.SecretKey, cfg.MinIO.Bucket, cfg.MinIO.UseSSL)
 	if err != nil {
@@ -92,7 +106,6 @@ func main() {
 		fallback,
 		cfg.LLM.MaxRetries,
 	)
-	_ = llmClient
 
 	var memoryFactory memdomain.BankFactory
 	if cfg.Memory.Driver == "postgres" {
@@ -101,6 +114,9 @@ func main() {
 		memoryFactory = native.NewNativeFactory(cfg.Memory.DataDir)
 	}
 	syncWorker := memapp.NewSyncWorker(memoryFactory)
+
+	queueClient := queue.NewClient(cfg.Redis.Addr)
+	defer func() { _ = queueClient.Close() }()
 
 	// --- IAM ---
 	iamRepo := iamrepo.NewPostgresIAMRepo(pool)
@@ -113,9 +129,39 @@ func main() {
 	createUser := application.NewCreateUser(iamRepo, hasher)
 	authHandler := api.NewAuthHandler(registerOrg, authenticate, createUser)
 
+	// --- M2 contexts: job, cv, screening, company context ---
+	jobRepo := jobrepo.NewPostgresJobRepo(pool)
+	jobService := jobapp.NewJobService(jobRepo)
+	jobHandler := jobapi.NewJobHandler(jobService)
+
+	candidateRepo := cvrepo.NewPostgresCandidateRepo(pool)
+	cvService := cvapp.NewCVService(candidateRepo, store, queueClient)
+	cvHandler := cvapi.NewCVHandler(cvService, cfg.Cv.MaxUploadMB)
+
+	appRepo := scrrepo.NewPostgresApplicationRepo(pool)
+	screeningService := scrapp.NewScreeningService(pool, appRepo, candidateRepo, jobRepo, queueClient)
+	screeningHandler := scrapi.NewScreeningHandler(screeningService)
+
+	contextRepo := ctxrepo.NewPostgresContextRepo(pool)
+	contextService := ctxapp.NewContextService(pool, contextRepo, store, queueClient, logger)
+	contextHandler := ctxapi.NewContextHandler(contextService)
+
+	// --- Workers ---
+	parseWorker := cvapp.NewParseWorker(pool, candidateRepo, store, queueClient, logger)
+	extractWorker := cvapp.NewExtractWorker(pool, candidateRepo, appRepo, jobRepo, llmClient, queueClient, logger)
+	scoreWorker := scrapp.NewScoreWorker(pool, appRepo, candidateRepo, jobRepo, orgSettings{repo: iamRepo}, logger)
+	indexWorker := ctxapp.NewIndexWorker(pool, contextRepo, store, memoryFactory, logger)
+	workerMux := asynq.NewServeMux()
+	syncWorker.Register(workerMux)
+	parseWorker.Register(workerMux)
+	extractWorker.Register(workerMux)
+	scoreWorker.Register(workerMux)
+	indexWorker.Register(workerMux)
+
 	// --- HTTP ---
 	app := fiber.New(fiber.Config{
 		AppName:      "intivai",
+		BodyLimit:    32 * 1024 * 1024, // uploads (cv pdf, context files)
 		ErrorHandler: errorHandler,
 	})
 	app.Use(recover.New())
@@ -172,10 +218,28 @@ func main() {
 	authed.Get("/me", authHandler.Me)
 	authed.Post("/users", authHandler.CreateUser)
 
+	authed.Post("/jobs", jobHandler.Create)
+	authed.Get("/jobs", jobHandler.List)
+	authed.Get("/jobs/:id", jobHandler.Get)
+	authed.Patch("/jobs/:id", jobHandler.Update)
+
+	authed.Post("/cvs", cvHandler.Upload)
+	authed.Get("/cvs", cvHandler.List)
+	authed.Get("/cvs/:id", cvHandler.Get)
+	authed.Post("/cvs/:id/extract", cvHandler.ReExtract)
+
+	authed.Post("/screenings", screeningHandler.Create)
+	authed.Get("/applications", screeningHandler.List)
+
+	authed.Post("/orgs/:orgId/contexts", contextHandler.UploadContext)
+	authed.Get("/orgs/:orgId/contexts", contextHandler.ListContexts)
+	authed.Put("/orgs/:orgId/prompt", contextHandler.SetPrompt)
+	authed.Get("/orgs/:orgId/prompt", contextHandler.GetPrompt)
+
 	// --- Worker (asynq) ---
 	worker := queue.NewServer(cfg.Redis.Addr, 10, logger)
 	go func() {
-		if err := worker.Start(syncWorker.Mux()); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		if err := worker.Start(workerMux); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			logger.Fatal().Err(err).Msg("worker")
 		}
 	}()
@@ -184,7 +248,9 @@ func main() {
 	go func() {
 		<-ctx.Done()
 		logger.Info().Msg("shutting down...")
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		// Must exceed the LLM client timeout (60s) so in-flight extraction
+		// finishes instead of being redelivered after restart.
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 65*time.Second)
 		defer cancel()
 		_ = app.ShutdownWithContext(shutdownCtx)
 		_ = worker.Shutdown(shutdownCtx)
@@ -205,4 +271,25 @@ func errorHandler(c *fiber.Ctx, err error) error {
 		logger.Error().Err(err).Msg("unhandled error")
 	}
 	return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "internal server error"})
+}
+
+// orgSettings adapts the IAM org repo to screening.OrgSettingsReader.
+type orgSettings struct {
+	repo *iamrepo.PostgresIAMRepo
+}
+
+func (a orgSettings) ReadOrgSettings(ctx context.Context, orgID uuid.UUID) (map[string]float64, float64, error) {
+	org, err := a.repo.GetOrg(ctx, orgID)
+	if err != nil {
+		return nil, 0, err
+	}
+	weights := map[string]float64{}
+	if org.ScoringWeights != nil {
+		weights = org.ScoringWeights
+	}
+	minScore := 50.0
+	if org.MinScoreToProceed != nil {
+		minScore = *org.MinScoreToProceed
+	}
+	return weights, minScore, nil
 }
