@@ -77,6 +77,7 @@ Plan for the current phase lives in `M3_Plan.md` (acceptance criteria from
   - NULL scans: use pointers (`*string`, `*int`, `*[]byte`) for nullable columns — `database/sql` cannot scan NULL into scalars or `json.RawMessage`
   - Unique constraint violations: map 23505 → domain sentinel in repo, sentinel → `DomainError` in use case, `httpapi.Error` maps `DomainError`/`NotFoundError` only
 - Schema drift: migration + repo SQL + domain struct are three copies — changes must touch all three in one commit; add a column or NULL-scan is a migration, not a repo-only edit
+- Migration naming: `NNN_<context>_<what>.up.sql` / `.down.sql` — zero-padded, one concern per migration, never renumber existing versions. Renames are safe (golang-migrate stores no checksums) but must be rename-only commits
 - pgvector: embeddings `VECTOR(384)` bge-small; HNSW index exists
 
 ### API
