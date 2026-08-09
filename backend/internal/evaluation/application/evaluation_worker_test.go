@@ -122,4 +122,21 @@ func TestEvaluationWorkerHappyPathAndIdempotent(t *testing.T) {
 	if string(evalJSON) != string(evalAfter) {
 		t.Fatal("replay changed the evaluation")
 	}
+
+	// Atomic guard: a direct second save (simulated inline-vs-worker race)
+	// must be rejected — first writer wins, value untouched.
+	err = db.RunInTx(ctx, pool, orgID, func(tctx context.Context) error {
+		return repo.SaveEvaluation(tctx, ivID, []byte(`{"overall_score": 1}`))
+	})
+	if !errors.Is(err, ivdomain.ErrEvaluationExists) {
+		t.Fatalf("second save err = %v, want ErrEvaluationExists", err)
+	}
+	var evalFinal []byte
+	_ = db.RunInTx(ctx, pool, orgID, func(tctx context.Context) error {
+		tx, _ := db.TxFrom(tctx)
+		return tx.Raw(`SELECT evaluation FROM interviews WHERE id = $1`, ivID).Row().Scan(&evalFinal)
+	})
+	if string(evalFinal) != string(evalJSON) {
+		t.Fatal("atomic guard overwritten the evaluation")
+	}
 }

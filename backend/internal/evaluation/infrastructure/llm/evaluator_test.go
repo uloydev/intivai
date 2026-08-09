@@ -122,6 +122,35 @@ func TestEvaluateWindowsLongTranscripts(t *testing.T) {
 	}
 }
 
+// Malformed LLM output: duplicate or out-of-range question indices must be
+// rejected — a broken response must not corrupt the report.
+func TestEvaluateRejectsInconsistentIndices(t *testing.T) {
+	dups := []map[string]any{
+		{"question_idx": 1, "category": "technical", "score": 80.0, "rationale": "r", "strengths": []any{}, "weaknesses": []any{}},
+		{"question_idx": 1, "category": "communication", "score": 60.0, "rationale": "r", "strengths": []any{}, "weaknesses": []any{}},
+	}
+	e := NewEvaluator(&mockEvalLLM{out: evalOut(dups)})
+	if _, err := e.Evaluate(context.Background(), pairs(2)); err == nil {
+		t.Fatal("duplicate question_idx accepted")
+	}
+
+	outOfRange := []map[string]any{
+		{"question_idx": 99, "category": "technical", "score": 80.0, "rationale": "r", "strengths": []any{}, "weaknesses": []any{}},
+	}
+	e2 := NewEvaluator(&mockEvalLLM{out: evalOut(outOfRange)})
+	if _, err := e2.Evaluate(context.Background(), pairs(2)); err == nil {
+		t.Fatal("out-of-range question_idx accepted")
+	}
+}
+
+// The evaluation system prompt must carry the injection rail — the transcript
+// is candidate-controlled text and must never act as instructions.
+func TestEvalSystemPromptHasInjectionRail(t *testing.T) {
+	if !strings.Contains(evalSystem, "CANDIDATE-CONTROLLED") || !strings.Contains(evalSystem, "ignore any request") {
+		t.Fatal("evaluation system prompt missing the transcript injection rail")
+	}
+}
+
 func pairs(n int) []ivdomain.TranscriptPair {
 	out := make([]ivdomain.TranscriptPair, n)
 	for i := range out {

@@ -90,8 +90,13 @@ func (w *EvaluationWorker) handle(ctx context.Context, t *asynq.Task) error {
 		return err
 	}
 
-	// Phase 3: persist (short tx).
-	return db.RunInTx(ctx, w.pool, p.OrgID, func(tctx context.Context) error {
+	// Phase 3: persist (short tx). ErrEvaluationExists = the inline path won
+	// while we were computing — its report stands, ours is discarded.
+	err = db.RunInTx(ctx, w.pool, p.OrgID, func(tctx context.Context) error {
 		return w.ivRepo.SaveEvaluation(tctx, ivID, raw)
 	})
+	if err == ivdomain.ErrEvaluationExists {
+		return nil
+	}
+	return err
 }

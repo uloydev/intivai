@@ -66,14 +66,24 @@ func (r *PostgresInterviewRepo) Update(ctx context.Context, iv *ivdomain.Intervi
 		string(iv.Status), raw, iv.LastQuestionIdx, iv.StartedAt, iv.CompletedAt, iv.ExpiresAt, iv.ID).Error
 }
 
+// SaveEvaluation persists the report, but NEVER overwrites an existing one —
+// the inline WS evaluation and the async worker can race; first writer wins
+// (atomic WHERE guard, not read-then-write).
 func (r *PostgresInterviewRepo) SaveEvaluation(ctx context.Context, id uuid.UUID, report []byte) error {
 	q, err := r.q(ctx)
 	if err != nil {
 		return err
 	}
-	return q.WithContext(ctx).Exec(
-		`UPDATE interviews SET evaluation = $1, updated_at = NOW() WHERE id = $2`,
-		report, id).Error
+	res := q.WithContext(ctx).Exec(
+		`UPDATE interviews SET evaluation = $1, updated_at = NOW() WHERE id = $2 AND evaluation IS NULL`,
+		report, id)
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return ivdomain.ErrEvaluationExists
+	}
+	return nil
 }
 
 func (r *PostgresInterviewRepo) SetConsent(ctx context.Context, id uuid.UUID) error {

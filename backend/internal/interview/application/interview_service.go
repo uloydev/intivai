@@ -380,9 +380,10 @@ func (s *InterviewService) Transcript(ctx context.Context, orgID string, intervi
 }
 
 // EvaluateAndPersist stores the report (evaluation JSONB). Idempotent: an
-// existing evaluation wins — retries never double-run the LLM.
+// existing evaluation wins (atomic WHERE guard in the repo) — retries never
+// double-run or overwrite.
 func (s *InterviewService) EvaluateAndPersist(ctx context.Context, orgID string, interviewID uuid.UUID, report []byte) error {
-	return db.RunInTx(ctx, s.pool, orgID, func(tctx context.Context) error {
+	err := db.RunInTx(ctx, s.pool, orgID, func(tctx context.Context) error {
 		iv, err := s.ivRepo.GetByID(tctx, interviewID)
 		if err != nil {
 			return err
@@ -392,6 +393,10 @@ func (s *InterviewService) EvaluateAndPersist(ctx context.Context, orgID string,
 		}
 		return s.ivRepo.SaveEvaluation(tctx, interviewID, report)
 	})
+	if err == ivdomain.ErrEvaluationExists {
+		return nil // lost the race; the other writer's report stands
+	}
+	return err
 }
 
 // EnqueueEvaluation schedules the async retry worker (no-op without enqueuer).

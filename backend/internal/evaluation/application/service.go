@@ -99,6 +99,20 @@ func (s *EvaluationService) InterviewDetail(ctx context.Context, actor applicati
 			return err
 		}
 		app, err := s.appRepo.GetByID(tctx, iv.ApplicationID)
+		if err == scrdomain.ErrNotFound {
+			// Application row gone (deleted) — the interview itself still
+			// stands; surface it without candidate/job context.
+			detail = &InterviewDetail{
+				InterviewID:    iv.ID,
+				Status:         iv.Status,
+				ContextVersion: iv.ContextVersion,
+				TotalQuestions: len(iv.Questions),
+				Evaluation:     json.RawMessage(iv.Evaluation),
+				CreatedAt:      iv.CreatedAt,
+				CompletedAt:    iv.CompletedAt,
+			}
+			return nil
+		}
 		if err != nil {
 			return err
 		}
