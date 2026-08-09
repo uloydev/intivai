@@ -35,6 +35,8 @@
 | **pdfcpu** | Free (Apache 2.0) | Text content | Pure Go, no deps, mature | Extracts raw text, no layout; fails on scanned/image PDFs |
 | **sajari/docconv** | Free (MIT) | Text via pdftotext | Handles PDF well | Requires poppler-utils installed |
 
+> **Implementation note:** `ledongthuc/pdf` (MIT, pure Go) was chosen — simpler extraction API for raw text; pdfcpu remains a viable alternative. See `internal/cv/application/parse_worker.go`.
+
 **For MVP, PDF only.** DOCX can be added later after MVP.
 
 ### ⚠️ Scanned / Image-Based PDFs
@@ -45,6 +47,8 @@ pdfcpu **cannot** extract text from scanned documents. For these, you need OCR:
 |------------|----------|------|------|
 | **Tesseract CLI** | `os/exec` tesseract | Free, open source, well-known | Needs tesseract installed, slower |
 | **LLM vision (via Ollama)** | `llama3.2-vision` or similar | No OCR infra, multi-language | Requires GPU, slower |
+
+> **Implementation note:** Alpine `tesseract` cannot read PDF input directly (leptonica lacks rasterization) — `internal/cv/infrastructure/ocr` rasterizes pages with `pdftoppm` (poppler-utils, 200dpi PNG) then runs tesseract per page. Image deps: `tesseract-ocr tesseract-ocr-data-eng poppler-utils ghostscript` (Dockerfile — do not remove).
 
 ### DOCX Parsing (MIT-licensed, no AGPL trap)
 
@@ -76,13 +80,14 @@ Return valid JSON only.
 ```
 
 ```go
+// Implemented schema (internal/cv/application/dto.go) — scoring-oriented:
+// name/email/phone live on the candidates table; experience flattened to years.
 type ResumeData struct {
-    Name        string       `json:"name"`
-    Email       string       `json:"email"`
-    Skills      []Skill      `json:"skills"`
-    Experience  []Experience `json:"experience"`
-    Education   []Education  `json:"education"`
-    TotalYears  float64      `json:"years_of_exp"`
+    Skills          []string `json:"skills"`
+    ExperienceYears float64  `json:"experience_years"`
+    Education       string   `json:"education"`
+    Certifications  []string `json:"certifications"`
+    Summary         string   `json:"summary"`
 }
 
 // Use OpenAI JSON mode for structured output
@@ -101,11 +106,12 @@ resp, _ := client.CreateChatCompletion(ctx, ChatCompletionRequest{
 ### Scoring Algorithm
 
 ```go
+// Implemented (internal/screening/domain/scoring.go): Total normalized to
+// 0-100 (weights sum to 1.0; threshold default 50, job > org > default).
 type ScoreResult struct {
-    TotalScore     float64            `json:"total_score"`
-    Breakdown      map[string]float64 `json:"breakdown"`
-    MaxScore       float64            `json:"max_score"`
-    Passed         bool               `json:"passed"`
+    Total      float64            `json:"total"`
+    Breakdown  map[string]float64 `json:"breakdown"`
+    Passed     bool               `json:"passed"`
 }
 
 type ScoringWeights struct {
@@ -262,6 +268,7 @@ Call at the end of `ResolveScoringWeights` before returning — **required, do n
 
 **Embeddings for semantic matching:**
 - Use **local embedding (fastembed, bge-small-en-v1.5 = 384 dims)** — $0, consistent with the Mnemosyne layer. DeepSeek has no public embedding API — do not use. If you change the embedding model, update `VECTOR(dim)` + migration.
+  - **Status:** deferred (M2.5). Columns `VECTOR(384)` + HNSW index exist (migration 002); `SemanticMatch` currently uses keyword overlap (`internal/screening/domain/semantic.go`); pgvector bank adapter stores NULL embeddings until fastembed lands.
 - Pre-compute JD embeddings on create
 - Compute CV embedding on upload
 - Cosine similarity between CV and JD (catches "Go" ↔ "Golang" ↔ "Go programming")
@@ -1598,8 +1605,10 @@ func normalizeDimensionWeights(e *InterviewEvaluation) {
 | `github.com/pion/webrtc/v4` | WebRTC (voice) | ✅ |
 | `github.com/pion/turn/v3` | TURN server for WebRTC | ✅ |
 | `github.com/hibiken/asynq` | Async queue (Redis) | ✅ |
-| `github.com/jackc/pgx/v5` | PostgreSQL driver | ✅ |
-| `github.com/pgvector/pgvector-go` | pgvector for Go | ✅ |
+| `github.com/jackc/pgx/v5` | PostgreSQL driver (via GORM) | ✅ |
+| `gorm.io/gorm` + `gorm.io/driver/postgres` | ORM — all app DB access | ✅ |
+| `github.com/ledongthuc/pdf` | PDF text extraction (chosen over pdfcpu) | ✅ |
+| `github.com/pgvector/pgvector-go` | pgvector for Go (raw SQL used today) | ⏳ |
 | `github.com/redis/go-redis/v9` | Redis client | ✅ |
 | `github.com/golang-jwt/jwt/v5` | JWT auth | ✅ |
 | `github.com/pkoukk/tiktoken-go` | LLM token counting | ✅ |

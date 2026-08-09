@@ -59,30 +59,31 @@ Phase 6: Production Polish (Observability, Deploy, Scale)
 | **Shared kernel** | Base entity, aggregate root, value object, domain events | `shared/domain/` |
 | **Config** | Viper config loader, env vars | `pkg/config/config.go` |
 | **Logger** | Zerolog structured logging | `pkg/logger/zerolog.go` |
-| **Database** | PostgreSQL connection pool, migration tool setup | `pkg/db/postgres.go`, `pkg/db/migrations/001_init.up.sql` |
+| **Database** | PostgreSQL connection pool (GORM over pgx stdlib), migration tool setup | `pkg/db/postgres.go`, `pkg/db/migrations/001_init.up.sql` |
 | **Queue** | Asynq setup + worker skeleton | `pkg/queue/asynq.go` |
-| **Storage** | MinIO/S3 client skeleton | `pkg/storage/s3.go` |
+| **Storage** | MinIO/S3 client skeleton | `pkg/storage/minio.go` |
 | **Memory layer (Mnemosyne port)** | MemoryBank port + adapter (native SQLite+fastembed default; MCP optional), bank per tenant, sync worker skeleton | `internal/memory/` |
 | **IAM** | Org, User entities + Auth (JWT), RBAC, multi-tenant middleware | `internal/iam/` |
 | **API scaffold** | Fiber app, middleware (auth, tenant, CORS, rate limit), health check | `cmd/server/main.go` |
 | **DevOps** | Docker Compose (Go app + Postgres + Redis + MinIO) | `docker-compose.yml` |
-| **CI** | GitHub Actions: lint, test, build | `.github/workflows/ci.yml` |
+| **CI** | GitHub Actions: lint (golangci-lint), vet, build, test, coverage gate, integration (postgres+redis services), end-to-end smoke | `.github/workflows/ci.yml` |
 
 ### Key Decisions Made
 - Framework: Fiber
-- Database: PostgreSQL + pgvector (source of truth)
+- Database: PostgreSQL + pgvector (source of truth) — accessed via GORM over pgx stdlib; migrations via golang-migrate
 - Queue: Asynq (Redis)
 - Auth: JWT + per-tenant RBAC
 - File storage: MinIO (S3-compatible)
-- **Hybrid memory: MemoryBank port (1 SQLite bank per tenant) — native Go adapter by default (fastembed, $0); MCP optional. Reflect = small LLM call at query-time**
+- **Hybrid memory: MemoryBank port (1 SQLite bank per tenant) — native Go adapter by default (fastembed, $0); MCP optional. Reflect = small LLM call at query-time. Postgres pgvector bank adapter exists (swap via `INTIVAI_MEMORY_DRIVER=postgres`)**
+- PDF text extraction: `ledongthuc/pdf` (pure Go); scanned PDFs → `pdftoppm` (poppler) rasterize + Tesseract OCR
 
 ### Testing Criteria
-- [ ] Unit tests pass
-- [ ] Auth middleware rejects unauthenticated requests
-- [ ] Tenant isolation: User A cannot see User B's data
-- [ ] Docker Compose starts all services
-- [ ] Health endpoint returns 200
-- [ ] **Per-tenant Mnemosyne bank created + recall isolated across tenants**
+- [x] Unit tests pass (make check)
+- [x] Auth middleware rejects unauthenticated requests (rejects ws_ticket tokens too)
+- [x] Tenant isolation: User A cannot see User B's data (RLS FORCE + intivai_app least-privilege role, integration-tested)
+- [x] Docker Compose starts all services (migrate service + app + postgres + redis + minio)
+- [x] Health endpoint returns 200
+- [x] Per-tenant Mnemosyne bank created + recall isolated across tenants (sqlite + pgvector banks, integration-tested)
 
 ---
 
@@ -95,7 +96,7 @@ Phase 6: Production Polish (Observability, Deploy, Scale)
 | Area | What | Files |
 |------|------|-------|
 | **Job context** | Job entity, skill requirements, create/update/list | `internal/job/` |
-| **CV context** | CV upload, pdfcpu parsing, DeepSeek structured extraction, embedding | `internal/cv/` |
+| **CV context** | CV upload, PDF text extraction (`ledongthuc/pdf`), DeepSeek structured extraction, embedding (deferred — column + HNSW ready) | `internal/cv/` |
 | **Screening context** | Scoring engine, weighted algorithm, passing threshold | `internal/screening/` |
 | **Company context** | Upload file/text, versioning, hash dedup, index into the tenant's Mnemosyne bank | `internal/context/` |
 | **Tenant prompt** | Set/get tenant system prompt, validation, versioning, default fallback | `internal/context/` |
@@ -107,13 +108,12 @@ Phase 6: Production Polish (Observability, Deploy, Scale)
 POST /api/v1/cvs (upload PDF)
   → file saved to MinIO
   → queue: parse_cv
-    → pdfcpu extract text
-    → if scanned → Tesseract OCR
+    → extract text (ledongthuc/pdf)
+    → if scanned → pdftoppm rasterize + Tesseract OCR
     → save raw text
   → queue: extract_cv
     → DeepSeek structured output → ResumeData
-    → DeepSeek embedding → vector
-    → save structured + vector
+    → save structured (+ embedding when local fastembed lands, M2.5)
   → queue: score_cv (for each active JD)
     → weighted scoring algorithm
     → save score + breakdown
@@ -128,31 +128,32 @@ CV/extract done → worker syncs a semantic summary into the tenant bank:
 
 ```go
 // internal/memory/application/sync_worker.go
-func (s *SyncWorker) SyncCandidate(ctx context.Context, orgID, candidateID uuid.UUID, summary string) error {
-    mn := s.mnemosyne.ForBank(orgID.String()) // banks/<org_id>/mnemosyne.db
-    _, err := mn.Remember(ctx, "candidate_profile", summary, mnemosyne.WithImportance(0.9))
-    return err
+func (s *SyncWorker) SyncCandidate(ctx context.Context, orgID, candidateID, summary string) error {
+    mn := s.mnemosyne.ForBank(orgID) // banks/<org_id>/mnemosyne.db
+    return mn.Remember(ctx, "candidate_profile", summary, 0.9)
 }
 ```
 
 What gets indexed: semantic summaries (not raw PII) — cross-candidate recall becomes possible.
 
 ### Testing Criteria (tambahan Phase 2)
-- [ ] Sync worker writes to the correct tenant bank
-- [ ] Recall "Go fintech candidate" finds semantically matching candidates
-- [ ] Company context upload → version bump + index into tenant bank
-- [ ] Tenant prompt set → validation rejects prompt injection (max length, forbidden keywords)
-- [ ] Tenant without prompt → falls back to global default
-- [ ] Context version pinned at interview time (audit traceable)
+- [x] Sync worker writes to the correct tenant bank (integration-verified)
+- [x] Recall finds matching candidates — keyword overlap verified; embedding recall deferred until fastembed lands (M2.5)
+- [x] Company context upload → version bump + dedup + index into tenant bank
+- [x] Tenant prompt set → validation rejects prompt injection (max length, forbidden keywords)
+- [x] Tenant without prompt → falls back to global default
+- [ ] Context version pinned at interview time (audit traceable) — M3 feature
 
 ---
 
 ### Scoring Engine
 ```go
+// Implemented weights (internal/screening/domain/scoring.go). Total is
+// normalized to a 0-100 scale (weights sum to 1.0, threshold default 50).
 type ScoringWeights struct {
     SkillsMatch      float64 // 0.35
     ExperienceYears  float64 // 0.20
-    SemanticMatch    float64 // 0.25 (embedding cosine similarity)
+    SemanticMatch    float64 // 0.25 (keyword overlap now; embedding cosine when fastembed lands, M2.5)
     Education        float64 // 0.10
     Certifications   float64 // 0.10
 }
@@ -165,11 +166,11 @@ type ScoreResult struct {
 ```
 
 ### Testing Criteria
-- [ ] PDF upload → extracted text + structured data obtained
-- [ ] CV score matches expected weighted calculation
-- [ ] Same CV scored against 2 different JDs produces different scores
-- [ ] Async jobs complete successfully
-- [ ] Score threshold correctly filters candidates
+- [x] PDF upload → extracted text + structured data obtained (parse verified live; extract needs `INTIVAI_DEEPSEEK_API_KEY`, failure state `failed_extract` honest + `POST /cvs/:id/extract` retry)
+- [x] CV score matches expected weighted calculation (unit + integration verified)
+- [x] Same CV scored against 2 different JDs produces different scores (engine unit-tested)
+- [x] Async jobs complete successfully (parse → extract → score pipeline live-verified; failure paths integration-tested)
+- [x] Score threshold correctly filters candidates (job > org > default 50, unit-tested)
 
 ---
 

@@ -1,0 +1,399 @@
+openapi: 3.0.3
+info:
+  title: Intivai API
+  version: 0.3.0
+  description: AI interviewer backend — auth, jobs, CV pipeline, screening, context.
+servers:
+  - url: /api/v1
+paths:
+  /auth/register:
+    post:
+      summary: Register an org with its admin user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, slug, admin_email, admin_password]
+              properties:
+                name: { type: string }
+                slug: { type: string }
+                admin_email: { type: string, format: email }
+                admin_password: { type: string, minLength: 8 }
+      responses:
+        "201":
+          description: Registered
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      org_id: { type: string, format: uuid }
+                      user_id: { type: string, format: uuid }
+                      slug: { type: string }
+                      plan: { type: string }
+        "400": { description: Validation error (code: WEAK_PASSWORD, ORG_SLUG_TAKEN, EMAIL_TAKEN) }
+  /auth/login:
+    post:
+      summary: Login with org slug + email + password
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [org_slug, email, password]
+              properties:
+                org_slug: { type: string }
+                email: { type: string, format: email }
+                password: { type: string }
+      responses:
+        "200":
+          description: Token
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      token: { type: string }
+                      expires_at: { type: string, format: date-time }
+                      user:
+                        type: object
+                        properties:
+                          user_id: { type: string, format: uuid }
+                          org_id: { type: string, format: uuid }
+                          role: { type: string, enum: [admin, recruiter, interviewer, member] }
+        "401": { description: AUTH_FAILED }
+  /me:
+    get:
+      summary: Current user identity
+      security: [bearerAuth]
+      responses:
+        "200":
+          description: Identity
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      user_id: { type: string, format: uuid }
+                      org_id: { type: string, format: uuid }
+                      role: { type: string }
+                      time: { type: string, format: date-time }
+  /users:
+    post:
+      summary: Create tenant user (admin/recruiter only)
+      security: [bearerAuth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, role, password]
+              properties:
+                email: { type: string, format: email }
+                role: { type: string, enum: [admin, recruiter, interviewer, member] }
+                password: { type: string, minLength: 8 }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      user_id: { type: string, format: uuid }
+                      role: { type: string }
+        "400": { description: WEAK_PASSWORD / INVALID_ROLE / EMAIL_TAKEN }
+        "403": { description: FORBIDDEN }
+  /jobs:
+    get:
+      summary: List org jobs
+      security: [bearerAuth]
+      responses:
+        "200":
+          description: Jobs
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/Job" }
+    post:
+      summary: Create job (admin/recruiter)
+      security: [bearerAuth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/JobCreate" }
+      responses:
+        "201": { description: Created }
+        "400": { description: JOB_TITLE_REQUIRED / JOB_DESC_REQUIRED }
+  /jobs/{id}:
+    get:
+      summary: Get job
+      security: [bearerAuth]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200": { description: Job }
+        "404": { description: Not found }
+    patch:
+      summary: Partial update (nil fields kept)
+      security: [bearerAuth]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/JobUpdate" }
+      responses:
+        "200": { description: Updated }
+        "400": { description: Validation error }
+  /cvs:
+    post:
+      summary: Upload CV (multipart: file, name, email)
+      security: [bearerAuth]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file, name]
+              properties:
+                file: { type: string, format: binary }
+                name: { type: string }
+                email: { type: string, format: email }
+      responses:
+        "201":
+          description: Accepted — async pipeline starts (parse_cv)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      id: { type: string, format: uuid }
+                      status: { type: string }
+        "413": { description: File too large }
+    get:
+      summary: List candidates (summary only — no raw text / structured PII)
+      security: [bearerAuth]
+      responses:
+        "200":
+          description: Candidates
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string, format: uuid }
+                        name: { type: string }
+                        email: { type: string }
+                        status:
+                          type: string
+                          enum: [new, parsing, parsed, extracting, extracted, failed_ocr, failed_extract]
+                        cv_ocr_method: { type: string }
+                        error_message: { type: string }
+                        created_at: { type: string, format: date-time }
+  /cvs/{id}:
+    get:
+      summary: Candidate detail (raw text + structured)
+      security: [bearerAuth]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200": { description: Detail }
+        "404": { description: Not found }
+  /cvs/{id}/extract:
+    post:
+      summary: Re-trigger extraction (only parsed / failed_extract candidates)
+      security: [bearerAuth]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200": { description: Enqueued }
+        "400": { description: CANDIDATE_NOT_RETRYABLE }
+  /screenings:
+    post:
+      summary: Create application + trigger async scoring
+      security: [bearerAuth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [candidate_id, job_id]
+              properties:
+                candidate_id: { type: string, format: uuid }
+                job_id: { type: string, format: uuid }
+      responses:
+        "201": { description: Created (or re-triggered) }
+        "400": { description: CANDIDATE_NOT_READY / JOB_NOT_ACTIVE }
+        "404": { description: candidate/job not found }
+  /applications:
+    get:
+      summary: List applications (optional ?job_id filter)
+      security: [bearerAuth]
+      parameters:
+        - { name: job_id, in: query, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: Applications
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string, format: uuid }
+                        candidate_id: { type: string, format: uuid }
+                        job_id: { type: string, format: uuid }
+                        status: { type: string, enum: [screening, passed, rejected] }
+                        cv_score: { type: number }
+                        passed_screening: { type: boolean }
+  /orgs/{orgId}/contexts:
+    post:
+      summary: Upload company context (json text OR multipart file); sha256 dedup + versioning
+      security: [bearerAuth]
+      parameters:
+        - { name: orgId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [content]
+              properties:
+                content: { type: string, maxLength: 65536 }
+      responses:
+        "201": { description: Created or deduped }
+        "400": { description: CTX_EMPTY / CTX_TOO_LARGE / CTX_INJECTION }
+        "403": { description: org mismatch }
+    get:
+      summary: List org contexts (versioned)
+      security: [bearerAuth]
+      parameters:
+        - { name: orgId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200": { description: Contexts }
+  /orgs/{orgId}/prompt:
+    get:
+      summary: Latest tenant prompt (default fallback when unset)
+      security: [bearerAuth]
+      parameters:
+        - { name: orgId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: Prompt
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      system_prompt: { type: string }
+                      version: { type: integer }
+    put:
+      summary: Set tenant prompt (versioned; injection rails)
+      security: [bearerAuth]
+      parameters:
+        - { name: orgId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [system_prompt]
+              properties:
+                system_prompt: { type: string, maxLength: 4000 }
+      responses:
+        "200": { description: Set }
+        "400": { description: PROMPT_INJECTION / PROMPT_TOO_LONG }
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    Job:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        title: { type: string }
+        description: { type: string }
+        required_skills:
+          type: array
+          items: { type: string }
+        min_experience: { type: integer }
+        scoring_weights:
+          type: object
+          additionalProperties: { type: number }
+        min_score_to_proceed: { type: number }
+        status: { type: string, enum: [active, archived] }
+        created_at: { type: string, format: date-time }
+    JobCreate:
+      type: object
+      required: [title, description]
+      properties:
+        title: { type: string }
+        description: { type: string }
+        required_skills:
+          type: array
+          items: { type: string }
+        min_experience: { type: integer, minimum: 0 }
+        scoring_weights:
+          type: object
+          additionalProperties: { type: number }
+        min_score_to_proceed: { type: number }
+    JobUpdate:
+      type: object
+      description: PATCH — omitted fields are kept
+      properties:
+        title: { type: string }
+        description: { type: string }
+        required_skills:
+          type: array
+          items: { type: string }
+        min_experience: { type: integer, minimum: 0 }
+        scoring_weights:
+          type: object
+          additionalProperties: { type: number }
+        min_score_to_proceed: { type: number }
+        status: { type: string, enum: [active, archived] }
