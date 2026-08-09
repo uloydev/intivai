@@ -1,4 +1,4 @@
-.PHONY: check lint vet build test coverage test-integration test-integration-dev migrate dev smoke
+.PHONY: check lint vet build test coverage test-integration test-integration-dev migrate dev redis-clear smoke
 
 # Full pre-commit gate (unit-level)
 check: lint vet build test
@@ -39,9 +39,17 @@ test-integration-dev:
 migrate:
 	INTIVAI_MIGRATE_URL='postgres://intivai:intivai@localhost:5433/intivai?sslmode=disable' go run ./cmd/server -migrate-only
 
+# Boot the dev stack on a FRESH redis: stale asynq tasks/dead-letters from a
+# previous session must not leak into the new one. Containers are recreated
+# (redis data lives in the container layer); postgres + minio volumes persist.
 dev:
+	cd .. && docker compose --env-file .env -f docker-compose.yml -f docker-compose.dev.yml down
 	DOCKER_BUILDKIT=0 docker build -t intivai-app:latest .
 	cd .. && docker compose --env-file .env -f docker-compose.yml -f docker-compose.dev.yml up -d
+
+# Flush redis while the stack stays up (mid-session queue cleanup).
+redis-clear:
+	docker compose --env-file .env -f docker-compose.yml -f docker-compose.dev.yml exec redis redis-cli FLUSHALL
 
 CV_PDF ?= /tmp/kilo/cv.pdf
 

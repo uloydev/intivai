@@ -2,17 +2,15 @@
 # postgres:5432 / redis:6379. Used via:
 #   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
 # App still reaches services by container name internally.
+# !override REPLACES the base port list — compose v5 otherwise APPENDS
+# overlay ports, leaving the base binds (e.g. 6379) active too.
+# (!reset is broken in compose v5.1: it drops the list entirely.)
 services:
   postgres:
-    ports:
-      - "5433:5432"
+    ports: !override ["5433:5432"]
   redis:
-    ports:
-      - "6380:6379"
+    ports: !override ["6380:6379"]
   minio:
-    ports:
-      - "9002:9000"
-      - "9003:9001"
+    ports: !override ["9002:9000", "9003:9001"]
   app:
-    ports:
-      - "8081:8080"
+    ports: !override ["8081:8080"]

@@ -15,7 +15,8 @@
 | `make coverage` | per-package coverage floors (domain ≥70%, others ≥50%; needs stack up) | Before commit |
 | `make test-integration-dev` | integration tests against local compose (needs stack up) | After any schema/repo/worker change |
 | `make test` | unit tests | Before commit |
-| `make dev` | boot full stack (docker compose, classic builder) | Start of a session |
+| `make dev` | boot full stack on FRESH redis (stale asynq tasks wiped; postgres/minio volumes persist; classic builder) | Start of a session |
+| `make redis-clear` | `FLUSHALL` queue while stack stays up | Mid-session queue cleanup |
 | `make smoke` | end-to-end API scenario against running stack (`CV_PDF` env or `/tmp/kilo/cv.pdf`) | After any API change |
 | `make migrate` | apply migrations (admin URL) | After fresh DB or new migration |
 | `go run ./cmd/server -migrate-only` | same as `make migrate` | — |
