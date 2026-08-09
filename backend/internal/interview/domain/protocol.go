@@ -45,16 +45,23 @@ type ResponseMessage struct {
 	Content string `json:"content"`
 }
 
+// Evaluation status values.
+const (
+	EvalComplete = "complete"
+	EvalPending  = "pending"
+)
+
 type EvaluationMessage struct {
 	Type           string             `json:"type"`
 	Scores         map[string]float64 `json:"scores"`
 	Overall        float64            `json:"overall,omitempty"`
 	Recommendation string             `json:"recommendation,omitempty"`
-	Status         string             `json:"status"` // complete | pending
+	Status         string             `json:"status"` // EvalComplete | EvalPending
 }
 
 type ErrorMessage struct {
 	Type    string `json:"type"`
+	Code    string `json:"code,omitempty"` // machine-readable domain error code
 	Message string `json:"message"`
 }
 

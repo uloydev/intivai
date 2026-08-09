@@ -10,6 +10,13 @@ import (
 	"github.com/rs/zerolog"
 )
 
+// Task names — single source for producers + workers. Add new tasks here,
+// never as bare string literals in workers.
+const (
+	TaskSyncMnemosyne     = "sync_mnemosyne"
+	TaskEvaluateInterview = "evaluate_interview"
+)
+
 type Client struct {
 	client *asynq.Client
 }

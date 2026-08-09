@@ -12,7 +12,6 @@ import (
 	"github.com/google/uuid"
 	ctxdomain "github.com/intivai/backend/internal/context/domain"
 	cvdomain "github.com/intivai/backend/internal/cv/domain"
-	evalllm "github.com/intivai/backend/internal/evaluation/infrastructure/llm"
 	"github.com/intivai/backend/internal/iam/application"
 	iamdomain "github.com/intivai/backend/internal/iam/domain"
 	ivdomain "github.com/intivai/backend/internal/interview/domain"
@@ -367,25 +366,14 @@ func (s *InterviewService) RecentContext(ctx context.Context, orgID string, inte
 }
 
 // Transcript returns question/answer pairs for the evaluator, in order.
-func (s *InterviewService) Transcript(ctx context.Context, orgID string, interviewID uuid.UUID) ([]evalllm.TranscriptPair, error) {
-	var pairs []evalllm.TranscriptPair
+func (s *InterviewService) Transcript(ctx context.Context, orgID string, interviewID uuid.UUID) ([]ivdomain.TranscriptPair, error) {
+	var pairs []ivdomain.TranscriptPair
 	err := db.RunInTx(ctx, s.pool, orgID, func(tctx context.Context) error {
 		iv, err := s.ivRepo.GetByID(tctx, interviewID)
 		if err != nil {
 			return err
 		}
-		for _, a := range iv.Answers {
-			if a.Idx < 1 || a.Idx > len(iv.Questions) {
-				continue
-			}
-			q := iv.Questions[a.Idx-1]
-			pairs = append(pairs, evalllm.TranscriptPair{
-				Idx:      a.Idx,
-				Category: q.Category,
-				Question: q.Content,
-				Answer:   a.Content,
-			})
-		}
+		pairs = iv.TranscriptPairs()
 		return nil
 	})
 	return pairs, err

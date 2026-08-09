@@ -20,6 +20,7 @@ import (
 	ivdomain "github.com/intivai/backend/internal/interview/domain"
 	gensvc "github.com/intivai/backend/internal/interview/domain/service"
 	"github.com/intivai/backend/internal/llm"
+	sharederrors "github.com/intivai/backend/internal/shared/errors"
 	"github.com/intivai/backend/internal/shared/httpapi"
 	"github.com/rs/zerolog"
 )
@@ -27,6 +28,17 @@ import (
 // Read deadline per candidate frame (Research §2: PerQuestionTimeout = 3 min).
 // Stricter than the domain idle rule — a silent candidate disconnects at 3
 // minutes; the 5-minute idle/expiry path still guards server-side state.
+// errorFrame maps a domain error to a WS error frame with its machine
+// readable code (FE can distinguish CONSENT_REQUIRED from INTERVIEW_EXPIRED).
+func errorFrame(err error) ivdomain.ErrorMessage {
+	frame := ivdomain.ErrorMessage{Type: ivdomain.MsgError, Message: err.Error()}
+	var de *sharederrors.DomainError
+	if errors.As(err, &de) {
+		frame.Code = de.Code
+	}
+	return frame
+}
+
 const readDeadline = ivdomain.PerQuestionTimeout
 
 // Server heartbeat (Research §2): ping every 30s; drop the socket when the
@@ -236,7 +248,7 @@ func (h *ChatHandler) Chat(origins []string) fiber.Handler {
 		}
 
 		if err := h.svc.StartInterview(connCtx, orgID, interviewID); err != nil {
-			send(ivdomain.ErrorMessage{Type: ivdomain.MsgError, Message: err.Error()})
+			send(errorFrame(err))
 			return
 		}
 		// Compose the prompt ONCE per connection (version pinned at connect).
@@ -312,7 +324,7 @@ func (h *ChatHandler) Chat(origins []string) fiber.Handler {
 			case ivdomain.AnswerMessage:
 				next, err := h.svc.AnswerAndAdvance(connCtx, orgID, interviewID, m.Content)
 				if err != nil {
-					send(ivdomain.ErrorMessage{Type: ivdomain.MsgError, Message: err.Error()})
+					send(errorFrame(err))
 					return
 				}
 				if lastQuestion != nil {
@@ -435,7 +447,7 @@ func (h *ChatHandler) sendEvaluation(ctx context.Context, send func(any), orgID 
 		Scores:         scores,
 		Overall:        report.OverallScore,
 		Recommendation: report.Recommendation,
-		Status:         "complete",
+		Status:         ivdomain.EvalComplete,
 	})
 }
 
@@ -446,6 +458,6 @@ func (h *ChatHandler) pendingEvaluation(send func(any), orgID string, interviewI
 	send(ivdomain.EvaluationMessage{
 		Type:   ivdomain.MsgEvaluation,
 		Scores: map[string]float64{},
-		Status: "pending",
+		Status: ivdomain.EvalPending,
 	})
 }

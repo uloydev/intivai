@@ -6,16 +6,22 @@ import (
 	"fmt"
 
 	evaldomain "github.com/intivai/backend/internal/evaluation/domain"
+	ivdomain "github.com/intivai/backend/internal/interview/domain"
 	"github.com/intivai/backend/internal/llm"
 	"github.com/intivai/backend/internal/shared/errors"
 )
 
-// TranscriptPair — one question/answer for the evaluator.
-type TranscriptPair struct {
-	Idx      int    `json:"idx"`
-	Category string `json:"category"`
-	Question string `json:"question"`
-	Answer   string `json:"answer"`
+// EvalWindow — transcript pairs sent to the LLM (long interviews are
+// windowed to the tail; the earliest Q&A matter least for the outcome).
+const EvalWindow = 30
+
+// evalSchema — exactly what the LLM must fill. The final overall score and
+// dimensions are computed by the domain, never by the LLM.
+type evalSchema struct {
+	PerQuestion    []evaldomain.QuestionScore `json:"per_question"`
+	Strengths      []string                   `json:"strengths"`
+	Weaknesses     []string                   `json:"weaknesses"`
+	Recommendation string                     `json:"recommendation"`
 }
 
 // Evaluator — post-interview scoring via the shared LLM port (structured
@@ -32,13 +38,18 @@ func NewEvaluator(p llm.Provider) *Evaluator {
 
 const evalSystem = `You are an objective technical interviewer evaluator. Score each candidate answer 0-100 per question and fill the JSON schema exactly: per_question[{question_idx, category, score, rationale, strengths[], weaknesses[]}], strengths[], weaknesses[], recommendation("proceed"|"reconsider"|"reject"). Return valid JSON only. Bias rules: evaluate job-relevant skills only; never reference protected classes.`
 
-// Evaluate scores the transcript and returns the canonical report.
-func (e *Evaluator) Evaluate(ctx context.Context, pairs []TranscriptPair) (evaldomain.Report, error) {
+// Evaluate scores the transcript and returns the canonical report. The LLM's
+// strengths/weaknesses/recommendation are preserved; overall + dimensions are
+// recomputed by the domain (per-question scores clamped 0-100).
+func (e *Evaluator) Evaluate(ctx context.Context, pairs []ivdomain.TranscriptPair) (evaldomain.Report, error) {
+	if len(pairs) > EvalWindow {
+		pairs = pairs[len(pairs)-EvalWindow:]
+	}
 	raw, _ := json.Marshal(pairs)
 	out, err := e.llm.StructuredOutput(ctx, llm.StructuredRequest{
 		System: evalSystem,
-		User:   "Transcript:\n" + string(raw),
-		Schema: evaldomain.Report{},
+		User:   "Transcript (last " + fmt.Sprint(len(pairs)) + " Q&A):\n" + string(raw),
+		Schema: evalSchema{},
 	})
 	if err != nil {
 		return evaldomain.Report{}, fmt.Errorf("evaluate: %w", err)
@@ -48,12 +59,33 @@ func (e *Evaluator) Evaluate(ctx context.Context, pairs []TranscriptPair) (evald
 		return evaldomain.Report{}, fmt.Errorf("evaluate: marshal output: %w", err)
 	}
 
-	var scored evaldomain.Report
+	var scored evalSchema
 	if err := json.Unmarshal(rawReport, &scored); err != nil {
 		return evaldomain.Report{}, errors.NewDomainError("EVAL_PARSE", "evaluator returned invalid JSON")
 	}
 	if len(scored.PerQuestion) == 0 {
 		return evaldomain.Report{}, errors.NewDomainError("EVAL_EMPTY", "evaluator returned no per-question scores")
 	}
-	return evaldomain.Evaluate(scored.PerQuestion, evaldomain.DefaultWeights())
+	for i := range scored.PerQuestion {
+		scored.PerQuestion[i].Score = clampScore(scored.PerQuestion[i].Score)
+	}
+
+	report, err := evaldomain.Evaluate(scored.PerQuestion, evaldomain.DefaultWeights())
+	if err != nil {
+		return evaldomain.Report{}, err
+	}
+	report.Strengths = scored.Strengths
+	report.Weaknesses = scored.Weaknesses
+	report.Recommendation = scored.Recommendation
+	return report, nil
+}
+
+func clampScore(v float64) float64 {
+	if v > 100 {
+		return 100
+	}
+	if v < 0 {
+		return 0
+	}
+	return v
 }

@@ -51,7 +51,7 @@ type Interview struct {
 	Questions       []Question
 	Answers         []Answer
 	LastQuestionIdx int
-	ContextVersion  int // company-context version pinned at creation (audit)
+	ContextVersion  int    // company-context version pinned at creation (audit)
 	Evaluation      []byte // post-interview report (evaluation JSONB), hydrated by GetByID
 	ConsentGiven    bool   // GDPR consent captured before interview start
 	StartedAt       *time.Time

@@ -2,78 +2,130 @@ package llm
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"strings"
 	"testing"
 
-	evaldomain "github.com/intivai/backend/internal/evaluation/domain"
+	ivdomain "github.com/intivai/backend/internal/interview/domain"
 	"github.com/intivai/backend/internal/llm"
 )
 
 type mockEvalLLM struct {
 	out any
 	err error
+	req llm.StructuredRequest // captured for prompt assertions
 }
 
-func (m mockEvalLLM) Chat(ctx context.Context, req llm.ChatRequest) (*llm.ChatResponse, error) {
+func (m *mockEvalLLM) Chat(ctx context.Context, req llm.ChatRequest) (*llm.ChatResponse, error) {
 	return nil, errors.New("unused")
 }
-func (m mockEvalLLM) ChatStream(ctx context.Context, req llm.ChatRequest) (<-chan string, error) {
+func (m *mockEvalLLM) ChatStream(ctx context.Context, req llm.ChatRequest) (<-chan string, error) {
 	return nil, errors.New("unused")
 }
-func (m mockEvalLLM) StructuredOutput(ctx context.Context, req llm.StructuredRequest) (any, error) {
+func (m *mockEvalLLM) StructuredOutput(ctx context.Context, req llm.StructuredRequest) (any, error) {
+	m.req = req
 	return m.out, m.err
 }
-func (m mockEvalLLM) Embed(ctx context.Context, text string) ([]float32, error) {
+func (m *mockEvalLLM) Embed(ctx context.Context, text string) ([]float32, error) {
 	return nil, errors.New("unused")
 }
-func (m mockEvalLLM) CountTokens(text string) int { return 0 }
+func (m *mockEvalLLM) CountTokens(text string) int { return 0 }
 
-func TestEvaluateValidTranscript(t *testing.T) {
-	e := NewEvaluator(mockEvalLLM{out: map[string]any{
-		"per_question": []any{
-			map[string]any{"question_idx": 1, "category": "technical", "score": 80.0, "rationale": "solid", "strengths": []any{"clear"}, "weaknesses": []any{}},
-			map[string]any{"question_idx": 2, "category": "communication", "score": 60.0, "rationale": "brief", "strengths": []any{}, "weaknesses": []any{"short"}},
-		},
+func evalOut(qs []map[string]any) map[string]any {
+	return map[string]any{
+		"per_question":   qs,
 		"strengths":      []any{"Go"},
 		"weaknesses":     []any{"cloud"},
 		"recommendation": "proceed",
-	}})
+	}
+}
 
-	r, err := e.Evaluate(context.Background(), []TranscriptPair{
-		{Idx: 1, Category: "technical", Question: "q1", Answer: "a1"},
-		{Idx: 2, Category: "communication", Question: "q2", Answer: "a2"},
-	})
+func TestEvaluatePreservesLLMFieldsAndRecomputesOverall(t *testing.T) {
+	e := NewEvaluator(&mockEvalLLM{out: evalOut([]map[string]any{
+		{"question_idx": 1, "category": "technical", "score": 80.0, "rationale": "solid", "strengths": []any{"clear"}, "weaknesses": []any{}},
+		{"question_idx": 2, "category": "communication", "score": 60.0, "rationale": "brief", "strengths": []any{}, "weaknesses": []any{"short"}},
+	})})
+
+	r, err := e.Evaluate(context.Background(), pairs(2))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if r.OverallScore != 80*0.4+60*0.2 { // technical .4, communication .2
+	// LLM fields preserved.
+	if r.Recommendation != "proceed" || len(r.Strengths) != 1 || r.Strengths[0] != "Go" || len(r.Weaknesses) != 1 {
+		t.Fatalf("LLM fields lost: %+v", r)
+	}
+	// Domain owns the math: 80×0.4 + 60×0.2 (weights sum 1).
+	if r.OverallScore != 80*0.4+60*0.2 {
 		t.Fatalf("overall = %f", r.OverallScore)
 	}
 	if r.Dimensions["technical"].Score != 80 {
 		t.Fatalf("technical dim = %f", r.Dimensions["technical"].Score)
 	}
-	if r.Recommendation != "" || len(r.Strengths) != 0 {
-		t.Fatalf("LLM-supplied fields must not leak into the domain report: %+v", r)
+}
+
+func TestEvaluateClampsOutOfRangeScores(t *testing.T) {
+	e := NewEvaluator(&mockEvalLLM{out: evalOut([]map[string]any{
+		{"question_idx": 1, "category": "technical", "score": 150.0, "rationale": "r", "strengths": []any{}, "weaknesses": []any{}},
+		{"question_idx": 2, "category": "communication", "score": -10.0, "rationale": "r", "strengths": []any{}, "weaknesses": []any{}},
+	})})
+
+	r, err := e.Evaluate(context.Background(), pairs(2))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Dimensions["technical"].Score != 100 {
+		t.Fatalf("technical dim = %f, want clamped 100", r.Dimensions["technical"].Score)
+	}
+	if r.Dimensions["communication"].Score != 0 {
+		t.Fatalf("communication dim = %f, want clamped 0", r.Dimensions["communication"].Score)
 	}
 }
 
 func TestEvaluateLLMFailure(t *testing.T) {
-	e := NewEvaluator(mockEvalLLM{err: errors.New("llm down")})
+	e := NewEvaluator(&mockEvalLLM{err: errors.New("llm down")})
 	if _, err := e.Evaluate(context.Background(), nil); err == nil {
 		t.Fatal("llm failure accepted")
 	}
 }
 
 func TestEvaluateEmptyScoresRejected(t *testing.T) {
-	e := NewEvaluator(mockEvalLLM{out: map[string]any{
-		"per_question":   []any{},
-		"strengths":      []any{},
-		"weaknesses":     []any{},
-		"recommendation": "proceed",
-	}})
-	if _, err := e.Evaluate(context.Background(), []TranscriptPair{{Idx: 1}}); err == nil {
+	e := NewEvaluator(&mockEvalLLM{out: evalOut([]map[string]any{})})
+	if _, err := e.Evaluate(context.Background(), pairs(1)); err == nil {
 		t.Fatal("empty per-question accepted")
 	}
 }
 
-var _ = evaldomain.Report{}
+// Long transcripts are windowed to the tail (EvalWindow) — the prompt never
+// grows unbounded.
+func TestEvaluateWindowsLongTranscripts(t *testing.T) {
+	m := &mockEvalLLM{out: evalOut([]map[string]any{
+		{"question_idx": 1, "category": "technical", "score": 80.0, "rationale": "r", "strengths": []any{}, "weaknesses": []any{}},
+	})}
+	e := NewEvaluator(m)
+
+	if _, err := e.Evaluate(context.Background(), pairs(2*EvalWindow)); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(m.req.User, "last 30 Q&A") {
+		t.Fatalf("prompt not windowed: %.120s", m.req.User)
+	}
+	var sent []ivdomain.TranscriptPair
+	if idx := strings.Index(m.req.User, "["); idx < 0 {
+		t.Fatalf("no transcript JSON in prompt: %.120s", m.req.User)
+	} else if err := json.Unmarshal([]byte(m.req.User[idx:]), &sent); err != nil {
+		t.Fatal(err)
+	}
+	if len(sent) != EvalWindow {
+		t.Fatalf("windowed pairs = %d, want %d", len(sent), EvalWindow)
+	}
+}
+
+func pairs(n int) []ivdomain.TranscriptPair {
+	out := make([]ivdomain.TranscriptPair, n)
+	for i := range out {
+		out[i] = ivdomain.TranscriptPair{Idx: i + 1, Category: "technical", Question: fmt.Sprintf("q%d", i+1), Answer: "answer"}
+	}
+	return out
+}

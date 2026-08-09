@@ -9,12 +9,13 @@ import (
 	evalllm "github.com/intivai/backend/internal/evaluation/infrastructure/llm"
 	ivdomain "github.com/intivai/backend/internal/interview/domain"
 	"github.com/intivai/backend/pkg/db"
+	"github.com/intivai/backend/pkg/queue"
 	"gorm.io/gorm"
 )
 
 // TaskEvaluateInterview — async evaluation retry for interviews whose inline
 // LLM evaluation failed (candidate did not wait / provider error).
-const TaskEvaluateInterview = "evaluate_interview"
+const TaskEvaluateInterview = queue.TaskEvaluateInterview
 
 type EvaluatePayload struct {
 	OrgID       string `json:"org_id"`
@@ -23,6 +24,8 @@ type EvaluatePayload struct {
 
 // EvaluationWorker — asynq handler for TaskEvaluateInterview. Idempotent:
 // skips when the interview already has an evaluation (inline path won).
+// The LLM call runs OUTSIDE the DB transaction — a held pool connection for
+// the full DeepSeek round-trip starves the pool under load.
 type EvaluationWorker struct {
 	pool      *gorm.DB
 	ivRepo    ivdomain.InterviewRepository
@@ -50,44 +53,45 @@ func (w *EvaluationWorker) handle(ctx context.Context, t *asynq.Task) error {
 		return asynq.SkipRetry
 	}
 
-	var skipped bool
+	// Phase 1: read state (short tx — no LLM inside).
+	var (
+		alreadyEvaluated bool
+		pairs            []ivdomain.TranscriptPair
+	)
 	err = db.RunInTx(ctx, w.pool, p.OrgID, func(tctx context.Context) error {
 		iv, err := w.ivRepo.GetByID(tctx, ivID)
 		if err != nil {
 			return err
 		}
 		if len(iv.Evaluation) > 0 {
-			skipped = true // inline evaluation already won
+			alreadyEvaluated = true // inline evaluation already won
 			return nil
 		}
-		var pairs []evalllm.TranscriptPair
-		for _, a := range iv.Answers {
-			if a.Idx < 1 || a.Idx > len(iv.Questions) {
-				continue
-			}
-			q := iv.Questions[a.Idx-1]
-			pairs = append(pairs, evalllm.TranscriptPair{
-				Idx: a.Idx, Category: q.Category, Question: q.Content, Answer: a.Content,
-			})
+		pairs = iv.TranscriptPairs()
+		return nil
+	})
+	if err != nil {
+		if err == ivdomain.ErrNotFound {
+			return asynq.SkipRetry
 		}
-		if len(pairs) == 0 {
-			return ivdomain.ErrNotFound // nothing to evaluate
-		}
-		report, err := w.evaluator.Evaluate(tctx, pairs)
-		if err != nil {
-			return err
-		}
-		raw, err := json.Marshal(report)
-		if err != nil {
-			return err
-		}
+		return err // transient → asynq retries
+	}
+	if alreadyEvaluated || len(pairs) == 0 {
+		return asynq.SkipRetry
+	}
+
+	// Phase 2: LLM evaluation (no tx held).
+	report, err := w.evaluator.Evaluate(ctx, pairs)
+	if err != nil {
+		return err
+	}
+	raw, err := json.Marshal(report)
+	if err != nil {
+		return err
+	}
+
+	// Phase 3: persist (short tx).
+	return db.RunInTx(ctx, w.pool, p.OrgID, func(tctx context.Context) error {
 		return w.ivRepo.SaveEvaluation(tctx, ivID, raw)
 	})
-	if skipped {
-		return asynq.SkipRetry
-	}
-	if err == ivdomain.ErrNotFound {
-		return asynq.SkipRetry
-	}
-	return err // transient → asynq retries
 }
