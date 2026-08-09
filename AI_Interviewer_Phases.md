@@ -142,7 +142,7 @@ What gets indexed: semantic summaries (not raw PII) — cross-candidate recall b
 - [x] Company context upload → version bump + dedup + index into tenant bank
 - [x] Tenant prompt set → validation rejects prompt injection (max length, forbidden keywords)
 - [x] Tenant without prompt → falls back to global default
-- [ ] Context version pinned at interview time (audit traceable) — M3 feature
+- [x] Context version pinned at interview time (audit traceable) — migration 007, integration-tested
 
 ---
 
@@ -235,7 +235,7 @@ type ScoreResult struct {
 - [x] Reconnection resumes from last unanswered question (resume re-sends start + current question; session mismatch rejected)
 - [x] Bias detection catches prohibited questions
 - [x] Idle timeout disconnects after 5 minutes (ws read deadline; clock injectable)
-- [ ] 100 concurrent WebSocket connections stable (load check pending)
+- [x] 100 concurrent WebSocket connections stable (cmd/loadcheck: 100/100 pass)
 - [x] System prompt composer: tenant prompt + company context + safety rails composed correctly (composed once per connection)
 - [x] Safety rails always last (tenant cannot override)
 - [x] Interrupt stops the AI mid-response (streaming goroutine + ctx cancel; live-verified)

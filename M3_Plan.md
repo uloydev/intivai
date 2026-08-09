@@ -8,16 +8,16 @@ deliverables and doc testing criteria — mark boxes as executed, not just coded
 | # | Item | Source | Scheduled | Status |
 |---|------|--------|-----------|--------|
 | 1 | Context management: sliding window (last 10 Q&A) + tiktoken budget | M3 deliverable | 2026-08-12 | [x] done 2026-08-10 (TrimContext + budget in domain/service/context.go; history seeded from transcript via RecentContext; handler window+budget enforced) |
-| 2 | 100 concurrent WS connections load check (harness: Go load client) | M3 criterion | 2026-08-13 | [ ] |
+| 2 | 100 concurrent WS connections load check (harness: Go load client) | M3 criterion | 2026-08-13 | [x] done 2026-08-10 (cmd/loadcheck + make load-ws; 100/100 in ~140ms; found+fixed tenant-tx pool deadlock) |
 | 3 | Interview duration cap (30 min) + per-question timeout (3 min) | Research §2 config | 2026-08-12 | [x] done 2026-08-10 (MaxInterviewDuration in domain ExpireIfNeeded; PerQuestionTimeout as WS read deadline) |
-| 4 | Dynamic follow-up probing (weakness→probe, strength→next) | Research §2 strategy | 2026-08-14 (post-load) | [ ] |
+| 4 | Dynamic follow-up probing (weakness→probe, strength→next) | Research §2 strategy | 2026-08-14 (post-load) | [x] done 2026-08-10 (deterministic probe on <8-word answers, inserted with renumbering, banked) |
 | 5 | Smoke extended with interview endpoints | M3 plan | 2026-08-11 | [ ] |
 | 6 | `go test -race` in CI (backend job) | cross-cutting | 2026-08-11 | [ ] |
-| 7 | Local embeddings fastembed bge-small (columns+HNSW ready) | M2 deferral | 2026-08-15 | [ ] |
-| 8 | Embedding-based semantic recall (banks + SemanticMatch) | M2 deferral | 2026-08-15 (after 7) | [ ] |
-| 9 | Scanned-PDF OCR fixture + functional verification | M2 verification | 2026-08-12 | [ ] |
-| 10 | Context version pinned on interview row (audit) | Phases Phase 2 | 2026-08-13 | [ ] |
-| 11 | Server heartbeat (PingInterval/PongWait) | Research §2 config | 2026-08-14 | [ ] |
+| 7 | Local embeddings fastembed bge-small (columns+HNSW ready) | M2 deferral | 2026-08-15 | [x] done 2026-08-10 (pure-Go cybertron, 384-dim verified; bge-small gated on HF → multi-qa default, EMBED_MODEL_NAME to switch) |
+| 8 | Embedding-based semantic recall (banks + SemanticMatch) | M2 deferral | 2026-08-15 (after 7) | [x] done 2026-08-10 (pg bank cosine Recall + cosine SemanticScoreWithEmbedder; keyword stays default) |
+| 9 | Scanned-PDF OCR fixture + functional verification | M2 verification | 2026-08-12 | [x] done 2026-08-10 (in-process scanned PDF → pdftoppm → tesseract, verified in app container) |
+| 10 | Context version pinned on interview row (audit) | Phases Phase 2 | 2026-08-13 | [x] done 2026-08-10 (migration 007 + pinned at CreateInterview, integration-tested) |
+| 11 | Server heartbeat (PingInterval/PongWait) | Research §2 config | 2026-08-14 | [x] done 2026-08-10 (ping 30s / pong wait 10s, silent client dropped, unit-tested) |
 | 12 | Multi-instance session registry (Redis) | cross-cutting | deferred — needs multi-instance deployment (DECISION) | [ ] |
 
 ## Deliverables
@@ -82,7 +82,7 @@ Remaining for M3 done-criteria: sliding-window context management (tiktoken), 10
 - [x] Reconnection resumes from last unanswered question (resume sends start + current question; session mismatch rejected)
 - [x] Bias detection catches prohibited questions
 - [x] Idle/per-question timeout: silent candidate disconnects (read deadline = PerQuestionTimeout 3m; 30-min duration cap expires via domain state machine, frozen-clock tested)
-- [ ] 100 concurrent WebSocket connections stable (load check pending)
+- [x] 100 concurrent WebSocket connections stable (cmd/loadcheck: 100/100 pass, ~140ms)
 - [x] System prompt composer: tenant prompt + company context + safety rails composed correctly (live)
 - [x] Safety rails always last (tenant cannot override)
 - [x] Interrupt stops the AI mid-response (streaming goroutine + cancel; live-verified)
