@@ -118,24 +118,35 @@ func (s *ScreeningService) Create(ctx context.Context, actor application.AuthCon
 }
 
 func (s *ScreeningService) List(ctx context.Context, actor application.AuthContext, jobID uuid.UUID) ([]*ApplicationResult, error) {
-	apps, err := s.appRepo.List(ctx, actor.OrgID, jobID)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]*ApplicationResult, 0, len(apps))
-	for _, a := range apps {
-		r := &ApplicationResult{
-			ID: a.ID, CandidateID: a.CandidateID, JobID: a.JobID, Status: a.Status,
-			CVScore: a.CVScore, PassedScreening: a.PassedScreening,
+	var out []*ApplicationResult
+	err := db.RunInTx(ctx, s.pool, actor.OrgID.String(), func(tctx context.Context) error {
+		apps, err := s.appRepo.List(tctx, actor.OrgID, jobID)
+		if err != nil {
+			return err
 		}
-		if c, err := s.candRepo.GetByID(ctx, a.CandidateID); err == nil {
-			r.CandidateName = c.Name
-			r.CandidateEmail = c.Email
+		out = make([]*ApplicationResult, 0, len(apps))
+		for _, a := range apps {
+			r := &ApplicationResult{
+				ID: a.ID, CandidateID: a.CandidateID, JobID: a.JobID, Status: a.Status,
+				CVScore: a.CVScore, PassedScreening: a.PassedScreening,
+			}
+			// Candidate/job lookups are RLS-scoped to the tenant tx. NotFound
+			// → empty display field; real errors surface loudly instead of
+			// silently blanking FE rows.
+			if c, err := s.candRepo.GetByID(tctx, a.CandidateID); err == nil {
+				r.CandidateName = c.Name
+				r.CandidateEmail = c.Email
+			} else if err != cvdomain.ErrNotFound {
+				return err
+			}
+			if j, err := s.jobRepo.GetByID(tctx, a.JobID); err == nil {
+				r.JobTitle = j.Title
+			} else if err != jobdomain.ErrNotFound {
+				return err
+			}
+			out = append(out, r)
 		}
-		if j, err := s.jobRepo.GetByID(ctx, a.JobID); err == nil {
-			r.JobTitle = j.Title
-		}
-		out = append(out, r)
-	}
-	return out, nil
+		return nil
+	})
+	return out, err
 }

@@ -32,6 +32,11 @@ func (s *Storage) EnsureBucket(ctx context.Context) error {
 	}
 	if !exists {
 		if err := s.client.MakeBucket(ctx, s.bucket, minio.MakeBucketOptions{}); err != nil {
+			// Concurrent first uploads race MakeBucket — the loser sees
+			// BucketAlreadyOwned; the bucket exists, that's success.
+			if existsNow, e2 := s.client.BucketExists(ctx, s.bucket); e2 == nil && existsNow {
+				return nil
+			}
 			return fmt.Errorf("make bucket: %w", err)
 		}
 	}
