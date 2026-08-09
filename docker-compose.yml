@@ -79,6 +79,8 @@ services:
       INTIVAI_MINIO_SECRET_KEY: intivai123
       INTIVAI_MINIO_BUCKET: intivai
       INTIVAI_JWT_SECRET: dev-secret-change-me
+      # Dev: load checks (100-conn harness) hit ticket issuance in bursts.
+      INTIVAI_RATE_LIMIT_AUTH_PER_MIN: 2000
       INTIVAI_MEMORY_DATA_DIR: /data
       INTIVAI_ALLOWED_ORIGINS: http://localhost:3000
     ports:
