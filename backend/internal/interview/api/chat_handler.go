@@ -181,11 +181,19 @@ func (h *ChatHandler) Ticket(c *fiber.Ctx) error {
 // RequireTicket — pre-upgrade gate: Bearer must be a ws_ticket bound to this
 // interview. Non-upgrade requests get 401; upgrades proceed to Chat.
 func (h *ChatHandler) RequireTicket(c *fiber.Ctx) error {
+	// Browsers cannot set the Authorization header on a WebSocket — accept
+	// ?ticket= as well. Non-browser clients may keep using the header.
 	header := c.Get("Authorization")
-	if !strings.HasPrefix(header, "Bearer ") {
+	token := ""
+	if strings.HasPrefix(header, "Bearer ") {
+		token = strings.TrimPrefix(header, "Bearer ")
+	} else if q := c.Query("ticket"); q != "" {
+		token = q
+	}
+	if token == "" {
 		return c.Status(401).JSON(fiber.Map{"error": "missing ws ticket"})
 	}
-	claims, err := h.tokens.Parse(strings.TrimPrefix(header, "Bearer "))
+	claims, err := h.tokens.Parse(token)
 	if err != nil || claims.Type != application.TokenTypeWSTicket {
 		return c.Status(401).JSON(fiber.Map{"error": "invalid ws ticket"})
 	}
