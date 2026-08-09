@@ -1,0 +1,14 @@
+DROP TABLE IF EXISTS tenant_prompts;
+DROP TABLE IF EXISTS company_contexts;
+DROP TABLE IF EXISTS audit_logs;
+DROP TABLE IF EXISTS interview_tokens;
+DROP TABLE IF EXISTS interviews;
+DROP TABLE IF EXISTS applications;
+DROP TABLE IF EXISTS candidates;
+DROP TABLE IF EXISTS jobs;
+DROP TABLE IF EXISTS questions;
+DROP TABLE IF EXISTS users;
+DROP TABLE IF EXISTS orgs;
+DROP FUNCTION IF EXISTS login_lookup(TEXT, TEXT);
+DROP FUNCTION IF EXISTS validate_interview_token(TEXT);
+DROP EXTENSION IF EXISTS vector;
