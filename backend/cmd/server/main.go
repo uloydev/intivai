@@ -23,6 +23,7 @@ import (
 	cvapp "github.com/intivai/backend/internal/cv/application"
 	cvrepo "github.com/intivai/backend/internal/cv/infrastructure/persistence"
 	emb "github.com/intivai/backend/internal/embedding"
+	evapi "github.com/intivai/backend/internal/evaluation/api"
 	evalapp "github.com/intivai/backend/internal/evaluation/application"
 	evalllm "github.com/intivai/backend/internal/evaluation/infrastructure/llm"
 	"github.com/intivai/backend/internal/iam/api"
@@ -178,6 +179,8 @@ func main() {
 	evalWorker := evalapp.NewEvaluationWorker(pool, ivRepo, evalllm.NewEvaluator(llmClient))
 	interviewService := ivapp.NewInterviewService(pool, ivRepo, tokenRepo, questionBank, appRepo, candidateRepo, jobRepo, contextRepo, store, tokens, ivdomain.SystemClock(), evalEnqueuer{client: queueClient})
 	chatHandler := ivapi.NewChatHandler(interviewService, llmClient, tokens, logger)
+	evalService := evalapp.NewEvaluationService(pool, ivRepo, appRepo, candidateRepo, jobRepo)
+	evalHandler := evapi.NewEvaluationHandler(evalService)
 
 	// --- Workers ---
 	parseWorker := cvapp.NewParseWorker(pool, candidateRepo, store, queueClient, logger)
@@ -278,6 +281,8 @@ func main() {
 	authed.Get("/orgs/:orgId/prompt", contextHandler.GetPrompt)
 
 	authed.Post("/interviews", chatHandler.Create)
+	authed.Get("/interviews/:id", evalHandler.GetInterview)
+	authed.Get("/candidates/:id/report", evalHandler.GetCandidateReport)
 
 	// --- Worker (asynq) ---
 	worker := queue.NewServer(cfg.Redis.Addr, 10, logger)

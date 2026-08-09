@@ -76,6 +76,30 @@ func (r *PostgresInterviewRepo) SaveEvaluation(ctx context.Context, id uuid.UUID
 		report, id).Error
 }
 
+func (r *PostgresInterviewRepo) ByApplication(ctx context.Context, applicationID uuid.UUID) ([]*ivdomain.Interview, error) {
+	q, err := r.q(ctx)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := q.Raw(
+		`SELECT id, application_id, status, transcript, last_question_idx, context_version,
+		 evaluation, started_at, completed_at, expires_at, created_at
+		 FROM interviews WHERE application_id = $1 ORDER BY created_at DESC`, applicationID).Rows()
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	out := []*ivdomain.Interview{}
+	for rows.Next() {
+		iv, err := scanInterview(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, iv)
+	}
+	return out, rows.Err()
+}
+
 type transcript struct {
 	Questions []ivdomain.Question `json:"questions"`
 	Answers   []ivdomain.Answer   `json:"answers"`

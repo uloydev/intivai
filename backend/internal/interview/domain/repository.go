@@ -13,6 +13,8 @@ type InterviewRepository interface {
 	Update(ctx context.Context, iv *Interview) error
 	// SaveEvaluation persists the post-interview report (evaluation JSONB).
 	SaveEvaluation(ctx context.Context, id uuid.UUID, report []byte) error
+	// ByApplication lists interviews for an application (recruiter report).
+	ByApplication(ctx context.Context, applicationID uuid.UUID) ([]*Interview, error)
 }
 
 // TokenStatus — result of validating an invitation token (definer function).

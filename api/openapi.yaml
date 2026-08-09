@@ -374,6 +374,56 @@ paths:
                       invitation_token: { type: string }
                       expires_at: { type: string, format: date-time }
         "400": { description: APPLICATION_NOT_PASSED / JOB_NOT_ACTIVE }
+  /interviews/{id}:
+    get:
+      summary: Interview detail — questions, answers, status, evaluation (recruiter)
+      security: [bearerAuth]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: Detail
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      interview_id: { type: string, format: uuid }
+                      status: { type: string }
+                      context_version: { type: integer }
+                      total_questions: { type: integer }
+                      questions: { type: array, items: { type: object } }
+                      answers: { type: array, items: { type: object } }
+                      evaluation: { type: object, nullable: true }
+                      candidate: { type: object, properties: { id: { type: string }, name: { type: string }, email: { type: string } } }
+                      job: { type: object, properties: { id: { type: string }, title: { type: string } } }
+                      completed_at: { type: string, format: date-time, nullable: true }
+        "403": { description: FORBIDDEN — interview belongs to another org }
+        "404": { description: Not found }
+  /candidates/{id}/report:
+    get:
+      summary: Candidate report — candidate + all interviews with evaluations (recruiter)
+      security: [bearerAuth]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: Report
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      candidate: { type: object, properties: { id: { type: string }, name: { type: string }, email: { type: string } } }
+                      interviews: { type: array, items: { type: object } }
+        "403": { description: FORBIDDEN — candidate belongs to another org }
+        "404": { description: Not found }
   /candidate/interviews/{id}/ticket:
     post:
       summary: Exchange invitation token for a 10-min WS ticket (candidate, public)

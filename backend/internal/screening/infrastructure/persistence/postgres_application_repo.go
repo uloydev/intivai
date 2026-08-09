@@ -96,6 +96,31 @@ func (r *PostgresApplicationRepo) List(ctx context.Context, orgID, jobID uuid.UU
 	return out, rows.Err()
 }
 
+// ByCandidate returns all applications for one candidate (report view).
+func (r *PostgresApplicationRepo) ByCandidate(ctx context.Context, orgID, candidateID uuid.UUID) ([]*scrdomain.Application, error) {
+	q, err := r.q(ctx)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := q.Raw(
+		`SELECT id, org_id, candidate_id, job_id, cv_score, score_breakdown, passed_screening, status, created_at
+		 FROM applications WHERE org_id = $1 AND candidate_id = $2 ORDER BY created_at DESC`,
+		orgID, candidateID).Rows()
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	out := []*scrdomain.Application{}
+	for rows.Next() {
+		a, err := scanApplication(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
 func (r *PostgresApplicationRepo) Update(ctx context.Context, app *scrdomain.Application) error {
 	q, err := r.q(ctx)
 	if err != nil {
