@@ -37,6 +37,9 @@ jobs:
       - name: Test
         run: go test ./...
 
+      - name: Test (race detector)
+        run: go test -race ./...
+
   backend-integration:
     runs-on: ubuntu-latest
     services:
@@ -129,7 +132,9 @@ jobs:
           %%EOF''')
 
       - name: Smoke scenario
-        run: bash scripts/smoke.sh /tmp/cv.pdf
+        run: |
+          pip3 install --quiet websocket-client
+          bash scripts/smoke.sh /tmp/cv.pdf
 
       - name: Tear down
         if: always()
