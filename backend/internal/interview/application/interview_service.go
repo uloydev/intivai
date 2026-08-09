@@ -57,9 +57,10 @@ type CreateInterviewCommand struct {
 }
 
 type CreateInterviewResult struct {
-	InterviewID uuid.UUID `json:"interview_id"`
-	Token       string    `json:"invitation_token"`
-	ExpiresAt   time.Time `json:"expires_at"`
+	InterviewID    uuid.UUID `json:"interview_id"`
+	Token          string    `json:"invitation_token"`
+	ExpiresAt      time.Time `json:"expires_at"`
+	ContextVersion int       `json:"context_version"`
 }
 
 // CreateInterview: load application → CV-gap questions → persist interview +
@@ -110,6 +111,14 @@ func (s *InterviewService) CreateInterview(ctx context.Context, actor applicatio
 		if err != nil {
 			return err
 		}
+		// Pin the company-context version the interviewer will see (audit).
+		contexts, err := s.contextRepo.ListContexts(tctx, actor.OrgID)
+		if err != nil {
+			return err
+		}
+		if len(contexts) > 0 {
+			iv.ContextVersion = contexts[0].Version
+		}
 		if err := s.ivRepo.Create(tctx, iv); err != nil {
 			return err
 		}
@@ -122,7 +131,7 @@ func (s *InterviewService) CreateInterview(ctx context.Context, actor applicatio
 		if err := s.tokenRepo.Create(tctx, invite); err != nil {
 			return err
 		}
-		result = &CreateInterviewResult{InterviewID: iv.ID, Token: invite.Token, ExpiresAt: invite.ExpiresAt}
+		result = &CreateInterviewResult{InterviewID: iv.ID, Token: invite.Token, ExpiresAt: invite.ExpiresAt, ContextVersion: iv.ContextVersion}
 		return nil
 	})
 	return result, err

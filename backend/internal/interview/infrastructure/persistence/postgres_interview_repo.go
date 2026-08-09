@@ -36,10 +36,10 @@ func (r *PostgresInterviewRepo) Create(ctx context.Context, iv *ivdomain.Intervi
 	raw, _ := json.Marshal(transcript{Questions: iv.Questions, Answers: iv.Answers})
 	return q.WithContext(ctx).Exec(
 		`INSERT INTO interviews (id, application_id, type, status, transcript, last_question_idx,
-		 started_at, completed_at, expires_at, created_at)
-		 VALUES ($1, $2, 'chat', $3, $4, $5, $6, $7, $8, $9)`,
+		 context_version, started_at, completed_at, expires_at, created_at)
+		 VALUES ($1, $2, 'chat', $3, $4, $5, $6, $7, $8, $9, $10)`,
 		iv.ID, iv.ApplicationID, string(iv.Status), raw, iv.LastQuestionIdx,
-		iv.StartedAt, iv.CompletedAt, iv.ExpiresAt, iv.CreatedAt).Error
+		iv.ContextVersion, iv.StartedAt, iv.CompletedAt, iv.ExpiresAt, iv.CreatedAt).Error
 }
 
 func (r *PostgresInterviewRepo) GetByID(ctx context.Context, id uuid.UUID) (*ivdomain.Interview, error) {
@@ -48,7 +48,8 @@ func (r *PostgresInterviewRepo) GetByID(ctx context.Context, id uuid.UUID) (*ivd
 		return nil, err
 	}
 	row := q.Raw(
-		`SELECT id, application_id, status, transcript, last_question_idx, started_at, completed_at, expires_at, created_at
+		`SELECT id, application_id, status, transcript, last_question_idx, context_version,
+		 started_at, completed_at, expires_at, created_at
 		 FROM interviews WHERE id = $1`, id).Row()
 	return scanInterview(row)
 }
@@ -80,7 +81,7 @@ func scanInterview(row rowScanner) (*ivdomain.Interview, error) {
 		rawTranscript []byte
 	)
 	err := row.Scan(&iv.ID, &iv.ApplicationID, &iv.Status, &rawTranscript, &iv.LastQuestionIdx,
-		&iv.StartedAt, &iv.CompletedAt, &iv.ExpiresAt, &iv.CreatedAt)
+		&iv.ContextVersion, &iv.StartedAt, &iv.CompletedAt, &iv.ExpiresAt, &iv.CreatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ivdomain.ErrNotFound
 	}

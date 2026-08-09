@@ -51,6 +51,7 @@ type Interview struct {
 	Questions       []Question
 	Answers         []Answer
 	LastQuestionIdx int
+	ContextVersion  int // company-context version pinned at creation (audit)
 	StartedAt       *time.Time
 	CompletedAt     *time.Time
 	ExpiresAt       *time.Time
