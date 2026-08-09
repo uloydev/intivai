@@ -17,6 +17,15 @@ const (
 	StatusExpired    Status = "expired"
 )
 
+// Realtime config (Research §2, "Heartbeat, Timeout & Reconnection").
+const (
+	// MaxInterviewDuration — wall-clock cap from Start; activity does not
+	// extend it.
+	MaxInterviewDuration = 30 * time.Minute
+	// PerQuestionTimeout — max wait for a candidate frame (question answer).
+	PerQuestionTimeout = 3 * time.Minute
+)
+
 // Question VO — one step of the interview.
 type Question struct {
 	Idx      int    `json:"idx"` // 1-based, stable across resume
@@ -128,10 +137,18 @@ func (iv *Interview) Complete() error {
 	return nil
 }
 
-// ExpireIfNeeded transitions to expired when the deadline passed.
+// ExpireIfNeeded transitions to expired when the deadline passed: either the
+// invitation deadline (7 days) or the 30-minute duration cap from Start.
 func (iv *Interview) ExpireIfNeeded() {
-	if iv.ExpiresAt != nil && iv.clock.Now().After(*iv.ExpiresAt) && iv.Status != StatusCompleted {
-		iv.Status = StatusExpired
+	now := iv.clock.Now()
+	if iv.Status != StatusCompleted && iv.Status != StatusExpired {
+		if iv.ExpiresAt != nil && now.After(*iv.ExpiresAt) {
+			iv.Status = StatusExpired
+			return
+		}
+		if iv.StartedAt != nil && now.Sub(*iv.StartedAt) >= MaxInterviewDuration {
+			iv.Status = StatusExpired
+		}
 	}
 }
 

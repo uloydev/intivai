@@ -21,14 +21,19 @@ import (
 	"github.com/rs/zerolog"
 )
 
-const idleTimeout = 5 * time.Minute
+// Read deadline per candidate frame (Research §2: PerQuestionTimeout = 3 min).
+// Stricter than the domain idle rule — a silent candidate disconnects at 3
+// minutes; the 5-minute idle/expiry path still guards server-side state.
+const readDeadline = ivdomain.PerQuestionTimeout
 
 // turnState serializes the "next question" dispatch between the streaming
-// goroutine and the interrupt path — exactly one sends it.
+// goroutine and the interrupt path — exactly one sends it. onSent fires with
+// the dispatched question (used to track the last question for history pairs).
 type turnState struct {
 	mu           sync.Mutex
 	next         *ivdomain.Question
 	questionSent bool
+	onSent       func(q *ivdomain.Question)
 }
 
 func (t *turnState) sendQuestionOnce(send func(any)) {
@@ -37,6 +42,9 @@ func (t *turnState) sendQuestionOnce(send func(any)) {
 	if !t.questionSent && t.next != nil {
 		t.questionSent = true
 		send(ivdomain.QuestionMessage{Type: ivdomain.MsgQuestion, Content: t.next.Content, Idx: t.next.Idx})
+		if t.onSent != nil {
+			t.onSent(t.next)
+		}
 	}
 }
 
@@ -174,18 +182,26 @@ func (h *ChatHandler) Chat(origins []string) fiber.Handler {
 		}
 		// Compose the prompt ONCE per connection (version pinned at connect).
 		prompt := h.composePromptOnce(connCtx, orgID)
-		h.sendStartAndQuestion(connCtx, send, sessionID, orgID, interviewID)
+		// History window seeded from the persisted transcript (resume support);
+		// appended in-session for the current connection.
+		history, err := h.svc.RecentContext(connCtx, orgID, interviewID)
+		if err != nil {
+			history = nil
+		}
+		var lastQuestion *ivdomain.Question
+		questionSent := func(q *ivdomain.Question) { lastQuestion = q }
+		h.sendStartAndQuestion(connCtx, send, sessionID, orgID, interviewID, questionSent)
 
 		var streamCancel context.CancelFunc
 		var turn *turnState
 
 		for {
-			_ = conn.SetReadDeadline(time.Now().Add(idleTimeout))
+			_ = conn.SetReadDeadline(time.Now().Add(readDeadline))
 			_, raw, err := conn.ReadMessage()
 			if err != nil {
 				var netErr net.Error
 				if errors.As(err, &netErr) && netErr.Timeout() {
-					send(ivdomain.ErrorMessage{Type: ivdomain.MsgError, Message: "idle timeout"})
+					send(ivdomain.ErrorMessage{Type: ivdomain.MsgError, Message: "question timeout"})
 				}
 				return
 			}
@@ -202,7 +218,7 @@ func (h *ChatHandler) Chat(origins []string) fiber.Handler {
 					send(ivdomain.ErrorMessage{Type: ivdomain.MsgError, Message: "session mismatch"})
 					continue
 				}
-				h.sendStartAndQuestion(connCtx, send, sessionID, orgID, interviewID)
+				h.sendStartAndQuestion(connCtx, send, sessionID, orgID, interviewID, questionSent)
 			case ivdomain.InterruptMessage:
 				if streamCancel != nil {
 					streamCancel() // stops the LLM stream mid-response
@@ -223,10 +239,16 @@ func (h *ChatHandler) Chat(origins []string) fiber.Handler {
 					send(ivdomain.ErrorMessage{Type: ivdomain.MsgError, Message: err.Error()})
 					return
 				}
-				turn = &turnState{next: next}
+				if lastQuestion != nil {
+					history = append(history,
+						gensvc.ContextMessage{Role: gensvc.RoleAssistant, Content: lastQuestion.Content},
+						gensvc.ContextMessage{Role: gensvc.RoleUser, Content: m.Content},
+					)
+				}
+				turn = &turnState{next: next, onSent: questionSent}
 				streamCtx, cancelStream := context.WithCancel(connCtx)
 				streamCancel = cancelStream
-				go h.streamAndRespond(streamCtx, send, prompt, m.Content, next, turn)
+				go h.streamAndRespond(streamCtx, send, prompt, m.Content, next, turn, &history)
 			}
 		}
 	}, fiberws.Config{Origins: origins})
@@ -243,7 +265,7 @@ func (h *ChatHandler) composePromptOnce(ctx context.Context, orgID string) strin
 	return prompt
 }
 
-func (h *ChatHandler) sendStartAndQuestion(ctx context.Context, send func(any), sessionID, orgID string, interviewID uuid.UUID) {
+func (h *ChatHandler) sendStartAndQuestion(ctx context.Context, send func(any), sessionID, orgID string, interviewID uuid.UUID, onSent func(*ivdomain.Question)) {
 	next, total, status, err := h.svc.CurrentState(ctx, orgID, interviewID)
 	if err != nil {
 		return
@@ -251,19 +273,34 @@ func (h *ChatHandler) sendStartAndQuestion(ctx context.Context, send func(any), 
 	send(ivdomain.InterviewStartMessage{Type: ivdomain.MsgStart, SessionID: sessionID, TotalQuestions: total})
 	if status == ivdomain.StatusInProgress && next != nil {
 		send(ivdomain.QuestionMessage{Type: ivdomain.MsgQuestion, Content: next.Content, Idx: next.Idx})
+		if onSent != nil {
+			onSent(next)
+		}
 	}
 }
 
 // streamAndRespond runs the LLM stream in its own goroutine. On normal
 // completion it sends response + next question; a canceled ctx (interrupt /
 // disconnect) suppresses both — the interrupt path dispatches the question.
-func (h *ChatHandler) streamAndRespond(ctx context.Context, send func(any), prompt, answer string, next *ivdomain.Question, turn *turnState) {
-	ch, err := h.llm.ChatStream(ctx, llm.ChatRequest{
-		Messages: []llm.Message{
-			{Role: "system", Content: prompt},
-			{Role: "user", Content: answer},
-		},
-	})
+// History is trimmed to the sliding window (last 10 Q&A); the total message
+// budget (8K tokens) is enforced before streaming — overruns degrade to an
+// error frame and the interview keeps moving.
+func (h *ChatHandler) streamAndRespond(ctx context.Context, send func(any), prompt, answer string, next *ivdomain.Question, turn *turnState, history *[]gensvc.ContextMessage) {
+	msgs := []gensvc.ContextMessage{{Role: gensvc.RoleSystem, Content: prompt}}
+	msgs = append(msgs, gensvc.TrimContext(*history, gensvc.DefaultContextWindow)...)
+
+	chatMsgs := make([]llm.Message, 0, len(msgs))
+	for _, m := range msgs {
+		chatMsgs = append(chatMsgs, llm.Message{Role: m.Role, Content: m.Content})
+	}
+	if gensvc.ExceedsBudget(msgs, gensvc.DefaultTokenBudget, h.llm.CountTokens) {
+		h.log.Warn().Int("messages", len(msgs)).Msg("context budget exceeded")
+		send(ivdomain.ErrorMessage{Type: ivdomain.MsgError, Message: "context budget exceeded"})
+		turn.sendQuestionOnce(send)
+		return
+	}
+
+	ch, err := h.llm.ChatStream(ctx, llm.ChatRequest{Messages: chatMsgs})
 	if err != nil {
 		h.log.Error().Err(err).Msg("chat stream failed")
 		send(ivdomain.ErrorMessage{Type: ivdomain.MsgError, Message: "llm unavailable"})

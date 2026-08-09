@@ -29,10 +29,15 @@ import (
 
 type streamMockLLM struct{}
 
+// lastStreamRequest records the most recent ChatStream request so tests can
+// assert the context window passed to the LLM.
+var lastStreamRequest llm.ChatRequest
+
 func (streamMockLLM) Chat(ctx context.Context, req llm.ChatRequest) (*llm.ChatResponse, error) {
 	return &llm.ChatResponse{Content: "mock response"}, nil
 }
 func (streamMockLLM) ChatStream(ctx context.Context, req llm.ChatRequest) (<-chan string, error) {
+	lastStreamRequest = req
 	ch := make(chan string)
 	go func() {
 		defer close(ch)
@@ -200,7 +205,33 @@ nextQuestion:
 		t.Fatalf("expected next question, got %v", q2)
 	}
 
-	// 7. Wrong ticket rejected (401, no upgrade).
+	// 6b. Context window: second stream request must carry the history pair
+	// (assistant question 1 + user answer 1) after the system prompt.
+	if len(lastStreamRequest.Messages) != 3 {
+		t.Fatalf("stream request messages = %d, want 3 (system + q1 + a1)", len(lastStreamRequest.Messages))
+	}
+	if lastStreamRequest.Messages[0].Role != "system" ||
+		lastStreamRequest.Messages[1].Role != "assistant" ||
+		lastStreamRequest.Messages[2].Role != "user" ||
+		lastStreamRequest.Messages[2].Content != "I built Go services" {
+		t.Fatalf("history window wrong: %+v", lastStreamRequest.Messages)
+	}
+
+	// 7. Answer the second question; window grows to 5 messages.
+	if err := conn.WriteJSON(map[string]any{"type": "answer", "content": "I ship production Go", "idx": 2}); err != nil {
+		t.Fatal(err)
+	}
+	for {
+		m := read()
+		if m["type"] == ivdomain.MsgResponse {
+			break
+		}
+	}
+	if len(lastStreamRequest.Messages) != 5 {
+		t.Fatalf("stream request messages = %d, want 5 (system + 2 pairs)", len(lastStreamRequest.Messages))
+	}
+
+	// 8. Wrong ticket rejected (401, no upgrade).
 	dialer2 := websocket.Dialer{HandshakeTimeout: 2 * time.Second}
 	_, _, err = dialer2.Dial("ws://"+ln.Addr().String()+"/candidate/interviews/"+created.InterviewID.String(), map[string][]string{"Authorization": {"Bearer not-a-ticket"}})
 	if err == nil {

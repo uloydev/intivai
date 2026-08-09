@@ -283,6 +283,33 @@ func (s *InterviewService) CurrentState(ctx context.Context, orgID string, inter
 	return next, total, status, err
 }
 
+// RecentContext rebuilds the conversation history (assistant question + user
+// answer pairs) from the persisted transcript, windowed to the last 10 Q&A.
+// Used at WS connect/resume to seed the LLM context window.
+func (s *InterviewService) RecentContext(ctx context.Context, orgID string, interviewID uuid.UUID) ([]gensvc.ContextMessage, error) {
+	var history []gensvc.ContextMessage
+	err := db.RunInTx(ctx, s.pool, orgID, func(tctx context.Context) error {
+		iv, err := s.ivRepo.GetByID(tctx, interviewID)
+		if err != nil {
+			return err
+		}
+		for _, a := range iv.Answers {
+			if a.Idx < 1 || a.Idx > len(iv.Questions) {
+				continue
+			}
+			history = append(history,
+				gensvc.ContextMessage{Role: gensvc.RoleAssistant, Content: iv.Questions[a.Idx-1].Content},
+				gensvc.ContextMessage{Role: gensvc.RoleUser, Content: a.Content},
+			)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return gensvc.TrimContext(history, gensvc.DefaultContextWindow), nil
+}
+
 func (s *InterviewService) generateQuestions(candidate *cvdomain.Candidate, job *jobdomain.Job, count int) []gensvc.Question {
 	profile := gensvc.CandidateProfile{Skills: candidateSkills(candidate), Summary: candidateSummary(candidate)}
 	reqs := gensvc.JobRequirements{Title: job.Title, Description: job.Description, RequiredSkills: job.RequiredSkills}
