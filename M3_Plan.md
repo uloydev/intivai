@@ -7,11 +7,13 @@ deliverables and doc testing criteria — mark boxes as executed, not just coded
 
 | Area | Files | Status |
 |------|-------|--------|
-| Interview domain: Interview entity, Question VO, Answer VO | `internal/interview/domain/` | [ ] |
-| Question generator: CV-gap strategy, bias detection | `internal/interview/domain/service/question_generator.go` | [ ] |
-| Prompt composer: default + tenant prompt + company context + safety rails (pinned LAST) | `internal/interview/domain/service/prompt_composer.go` | [ ] |
+| Interview domain: Interview entity, Question VO, Answer VO | `internal/interview/domain/` | [ ] (protocol + clock landed) |
+| Question generator: CV-gap strategy | `internal/interview/domain/service/question_generator.go` | [x] unit-tested |
+| Bias detection: protected-class rules | `internal/interview/domain/service/bias.go` | [x] unit-tested |
+| Prompt composer: default + tenant prompt + company context + safety rails (pinned LAST) | `internal/interview/domain/service/prompt_composer.go` | [x] unit-tested |
+| Clock injection (idle timeout, expiry) | `internal/interview/domain/clock.go` | [x] |
 | Context management: sliding window, tiktoken counting | `internal/interview/domain/service/` | [ ] |
-| WebSocket hub: connections, heartbeat, per-interview room | `internal/interview/api/chat_handler.go` | [ ] |
+| WebSocket hub: connections, heartbeat, per-interview room | `internal/interview/api/chat_handler.go` | [ ] (harness landed: upgrade/echo/ping) |
 | API: `POST /interviews`, `WS /interviews/:id/chat` | `internal/interview/api/` | [ ] |
 | Reconnection: last unanswered question stored, resume | `internal/interview/application/` | [ ] |
 | WS ticket auth: 10-min JWT bound to session+interview (Research §3); candidates never use internal JWT | `internal/iam/` + interview api | [ ] |
@@ -37,16 +39,16 @@ output) — verify `ChatStream` against the interview flow.
 - [ ] `make smoke` extended with interview endpoints
 - [ ] Schema change = migration + repo + domain in SAME change
 
-## TDD order (M3)
+## TDD order (M3) — progress
 
-1. WS protocol test harness FIRST (in-process fiber + ws client) — nothing realtime proceeds without it
-2. Question generator + bias detection: unit tests first (type-driven), then implementation
-3. Prompt composer: unit tests — safety rails pinned LAST asserted first
-4. LLM streaming: mock provider with deterministic token chunks; ChatStream contract pinned by test
-5. Interview domain (entity, question/answer VOs): pure unit tests
-6. Repos (interview/transcript persistence): integration spec first, batched
-7. Handlers + WS handler: protocol + app.Test against the harness
-8. Idle timeout: injectable clock; never test real 5-min waits
+1. [x] WS protocol test harness FIRST (in-process fiber + ws client) — upgrade/echo/ping proof; ticket-auth tests land with the chat handler
+2. [x] Question generator + bias detection: unit tests first, then implementation
+3. [x] Prompt composer: unit tests — safety rails pinned LAST asserted first
+4. [ ] LLM streaming: mock provider with deterministic token chunks; ChatStream contract pinned by test
+5. [ ] Interview domain (entity, question/answer VOs): pure unit tests
+6. [ ] Repos (interview/transcript persistence): integration spec first, batched
+7. [ ] Handlers + WS handler: protocol + app.Test against the harness
+8. [ ] Idle timeout: injectable clock (landed); never test real 5-min waits
 
 ## Doc testing criteria (execute, then check)
 

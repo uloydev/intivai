@@ -23,8 +23,11 @@ while IFS= read -r line; do
       ;;
     ok\ *|FAIL\ *)
       pkg=$(echo "$line" | awk '{print $2}')
-      pct=$(echo "$line" | grep -oE '[0-9.]+%' | head -1 | tr -d '%')
+      pct=$(echo "$line" | grep -oE '[0-9.]+%' | head -1 | tr -d '%' || true)
       if [ -z "$pct" ]; then
+        case "$line" in
+          *\[no\ statements\]*) continue ;; # test-only package, nothing to cover
+        esac
         # e.g. "FAIL pkg [build failed]" — treat as gate failure.
         echo "BROKEN: $line"
         FAIL=1
