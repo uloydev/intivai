@@ -8,7 +8,7 @@ RUN CGO_ENABLED=0 go build -o /out/server ./cmd/server
 
 # Run
 FROM alpine:3.20
-RUN apk add --no-cache ca-certificates tzdata
+RUN apk add --no-cache ca-certificates tzdata tesseract-ocr tesseract-ocr-data-eng poppler-utils ghostscript
 WORKDIR /app
 COPY --from=builder /out/server .
 EXPOSE 8080
