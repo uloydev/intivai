@@ -83,7 +83,14 @@ func SetTenant(ctx context.Context, q *gorm.DB, orgID string) error {
 // RunInTx executes fn inside a transaction with app.org_id set, so RLS
 // policies apply. Workers and handlers outside the tenant-tx middleware use
 // this to wrap repo calls. Commits on success, rolls back on error.
+// RunInTx executes fn inside a tenant-configured transaction. If the context
+// already carries a request transaction (tenant-tx middleware), it is reused —
+// opening a second pool connection per request deadlocks the pool under
+// concurrency (N goroutines × 2 conns vs MaxOpenConns).
 func RunInTx(ctx context.Context, pool *gorm.DB, orgID string, fn func(ctx context.Context) error) error {
+	if _, ok := TxFrom(ctx); ok {
+		return fn(ctx)
+	}
 	return pool.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := SetTenant(ctx, tx, orgID); err != nil {
 			return err

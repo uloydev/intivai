@@ -1,4 +1,4 @@
-.PHONY: check lint vet build test coverage test-integration test-integration-dev migrate dev redis-clear smoke
+.PHONY: check lint vet build test coverage test-integration test-integration-dev migrate dev redis-clear smoke load-ws
 
 # Full pre-commit gate (unit-level)
 check: lint vet build test
@@ -55,3 +55,9 @@ CV_PDF ?= /tmp/kilo/cv.pdf
 
 smoke:
 	bash ../scripts/smoke.sh $(CV_PDF)
+
+# 100-concurrent-WS load check (M3 criterion). Needs the dev stack up.
+# CONNS overrides the connection count.
+load-ws:
+	TEST_DATABASE_URL='postgres://intivai_app:intivai_app@localhost:5433/intivai?sslmode=disable' \
+	BASE_URL='http://localhost:8081' CONNS=$(or $(CONNS),100) go run ./cmd/loadcheck
