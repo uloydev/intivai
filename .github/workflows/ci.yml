@@ -22,6 +22,12 @@ jobs:
       - name: Format check
         run: test -z "$(gofmt -l .)"
 
+      - name: Lint
+        uses: golangci/golangci-lint-action@v7
+        with:
+          version: v2.10.1
+          working-directory: backend
+
       - name: Vet
         run: go vet ./...
 
@@ -30,3 +36,101 @@ jobs:
 
       - name: Test
         run: go test ./...
+
+  backend-integration:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: intivai
+          POSTGRES_PASSWORD: intivai
+          POSTGRES_DB: intivai
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U intivai"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+          cache-dependency-path: backend/go.sum
+
+      - name: Migrate (admin)
+        run: go run ./cmd/server -migrate-only
+        env:
+          INTIVAI_MIGRATE_URL: postgres://intivai:intivai@localhost:5432/intivai?sslmode=disable
+
+      - name: Integration tests (as intivai_app, real RLS)
+        run: go test ./...
+        env:
+          TEST_DATABASE_URL: postgres://intivai_app:intivai_app@localhost:5432/intivai?sslmode=disable
+          TEST_REDIS_ADDR: localhost:6379
+
+      - name: Coverage gate
+        run: bash ../scripts/check-coverage.sh
+        env:
+          TEST_DATABASE_URL: postgres://intivai_app:intivai_app@localhost:5432/intivai?sslmode=disable
+          TEST_REDIS_ADDR: localhost:6379
+
+  backend-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Boot stack (docker compose, default ports free on runner)
+        run: docker compose up -d --build
+
+      - name: Wait for health
+        run: |
+          for i in $(seq 1 30); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8080/health || true)
+            [ "$code" = "200" ] && break
+            sleep 2
+          done
+          [ "$code" = "200" ] || { echo "app not healthy"; exit 1; }
+
+      - name: Generate CV fixture
+        run: |
+          python3 - <<'EOF'
+          content = 'Senior Go engineer with PostgreSQL and Kubernetes experience, 5 years, Master degree'
+          stream = 'BT /F1 12 Tf 72 720 Td (' + content + ') Tj ET'
+          open('/tmp/cv.pdf','w').write(f'''%PDF-1.4
+          1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj
+          2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj
+          3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >> endobj
+          4 0 obj << /Length {len(stream)} >> stream
+          {stream}
+          endstream endobj
+          5 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> endobj
+          xref
+          0 6
+          0000000000 65535 f 
+          trailer << /Size 6 /Root 1 0 R >>
+          startxref
+          0
+          %%EOF''')
+
+      - name: Smoke scenario
+        run: bash scripts/smoke.sh /tmp/cv.pdf
+
+      - name: Tear down
+        if: always()
+        run: docker compose down -v

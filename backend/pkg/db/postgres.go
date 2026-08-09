@@ -25,14 +25,14 @@ func NewPool(ctx context.Context, url string) (*gorm.DB, error) {
 
 	gdb, err := gorm.Open(postgres.New(postgres.Config{Conn: sqlDB}), &gorm.Config{})
 	if err != nil {
-		sqlDB.Close()
+		_ = sqlDB.Close()
 		return nil, fmt.Errorf("gorm open: %w", err)
 	}
 
 	pingCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	if err := sqlDB.PingContext(pingCtx); err != nil {
-		sqlDB.Close()
+		_ = sqlDB.Close()
 		return nil, fmt.Errorf("ping database: %w", err)
 	}
 	return gdb, nil
@@ -78,4 +78,16 @@ func SetTenant(ctx context.Context, q *gorm.DB, orgID string) error {
 		return ErrNoTenant
 	}
 	return q.WithContext(ctx).Exec("SELECT set_config('app.org_id', $1, true)", orgID).Error
+}
+
+// RunInTx executes fn inside a transaction with app.org_id set, so RLS
+// policies apply. Workers and handlers outside the tenant-tx middleware use
+// this to wrap repo calls. Commits on success, rolls back on error.
+func RunInTx(ctx context.Context, pool *gorm.DB, orgID string, fn func(ctx context.Context) error) error {
+	return pool.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := SetTenant(ctx, tx, orgID); err != nil {
+			return err
+		}
+		return fn(WithTx(ctx, tx))
+	})
 }

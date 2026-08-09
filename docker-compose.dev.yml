@@ -1,0 +1,18 @@
+# Dev overlay: non-conflicting host ports for machines that already run
+# postgres:5432 / redis:6379. Used via:
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+# App still reaches services by container name internally.
+services:
+  postgres:
+    ports:
+      - "5433:5432"
+  redis:
+    ports:
+      - "6380:6379"
+  minio:
+    ports:
+      - "9002:9000"
+      - "9003:9001"
+  app:
+    ports:
+      - "8081:8080"
