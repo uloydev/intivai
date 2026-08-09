@@ -54,8 +54,6 @@ import (
 	"github.com/rs/zerolog"
 )
 
-var _ = ivdomain.Clock(nil)
-
 // evalEnqueuer — async evaluation retry via the shared asynq client.
 type evalEnqueuer struct {
 	client *queue.Client
@@ -219,6 +217,9 @@ func main() {
 				return false
 			}
 			if err := rdb.Ping(ctx).Err(); err != nil {
+				return false
+			}
+			if err := store.Ping(ctx); err != nil {
 				return false
 			}
 			return true

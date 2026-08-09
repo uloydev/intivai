@@ -7,6 +7,7 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
 	cvdomain "github.com/intivai/backend/internal/cv/domain"
 	"github.com/intivai/backend/internal/cv/infrastructure/ocr"
@@ -39,6 +40,9 @@ func (w *ParseWorker) Register(mux *asynq.ServeMux) {
 func (w *ParseWorker) handle(ctx context.Context, t *asynq.Task) error {
 	var p ParseCVPayload
 	if err := json.Unmarshal(t.Payload(), &p); err != nil {
+		return asynq.SkipRetry
+	}
+	if _, err := payloadUUID(p.CandidateID); err != nil {
 		return asynq.SkipRetry
 	}
 
@@ -93,7 +97,7 @@ func (w *ParseWorker) fetch(ctx context.Context, p ParseCVPayload) (*cvdomain.Ca
 	var candidate *cvdomain.Candidate
 	err := db.RunInTx(ctx, w.pool, p.OrgID, func(tctx context.Context) error {
 		var err error
-		candidate, err = w.repo.GetByID(tctx, mustUUID(p.CandidateID))
+		candidate, err = w.repo.GetByID(tctx, uuid.MustParse(p.CandidateID))
 		if errors.Is(err, cvdomain.ErrNotFound) {
 			return asynq.SkipRetry
 		}
@@ -113,7 +117,7 @@ func (w *ParseWorker) mark(ctx context.Context, p ParseCVPayload, status string,
 		w.log.Error().Err(cause).Str("candidate_id", p.CandidateID).Msg("parse_cv failed")
 	}
 	return db.RunInTx(ctx, w.pool, p.OrgID, func(tctx context.Context) error {
-		c, err := w.repo.GetByID(tctx, mustUUID(p.CandidateID))
+		c, err := w.repo.GetByID(tctx, uuid.MustParse(p.CandidateID))
 		if errors.Is(err, cvdomain.ErrNotFound) {
 			return asynq.SkipRetry
 		}

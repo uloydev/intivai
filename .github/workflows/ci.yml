@@ -65,6 +65,23 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
+      minio:
+        image: minio/minio:latest
+        env:
+          MINIO_ROOT_USER: minioadmin
+          MINIO_ROOT_PASSWORD: minioadmin
+          # clear image-default MINIO_*_FILE vars (files absent → random creds)
+          MINIO_ROOT_USER_FILE: ""
+          MINIO_ROOT_PASSWORD_FILE: ""
+          MINIO_ACCESS_KEY_FILE: ""
+          MINIO_SECRET_KEY_FILE: ""
+        ports:
+          - 9000:9000
+        options: >-
+          --health-cmd "curl -f http://localhost:9000/minio/health/live"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     defaults:
       run:
         working-directory: backend
@@ -86,12 +103,18 @@ jobs:
         env:
           TEST_DATABASE_URL: postgres://intivai_app:intivai_app@localhost:5432/intivai?sslmode=disable
           TEST_REDIS_ADDR: localhost:6379
+          TEST_MINIO_ENDPOINT: localhost:9000
+          TEST_MINIO_ACCESS: minioadmin
+          TEST_MINIO_SECRET: minioadmin
 
       - name: Coverage gate
         run: bash ../scripts/check-coverage.sh
         env:
           TEST_DATABASE_URL: postgres://intivai_app:intivai_app@localhost:5432/intivai?sslmode=disable
           TEST_REDIS_ADDR: localhost:6379
+          TEST_MINIO_ENDPOINT: localhost:9000
+          TEST_MINIO_ACCESS: minioadmin
+          TEST_MINIO_SECRET: minioadmin
 
   backend-smoke:
     runs-on: ubuntu-latest

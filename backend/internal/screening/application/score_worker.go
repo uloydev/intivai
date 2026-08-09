@@ -46,7 +46,10 @@ func (w *ScoreWorker) handle(ctx context.Context, t *asynq.Task) error {
 	if err := json.Unmarshal(t.Payload(), &p); err != nil {
 		return asynq.SkipRetry
 	}
-	appID := mustUUID(p.ApplicationID)
+	appID, err := uuid.Parse(p.ApplicationID)
+	if err != nil || p.ApplicationID == "" {
+		return asynq.SkipRetry
+	}
 
 	return db.RunInTx(ctx, w.pool, p.OrgID, func(tctx context.Context) error {
 		app, err := w.appRepo.GetByID(tctx, appID)
@@ -116,9 +119,4 @@ func jobMin(j *jobdomain.Job) float64 {
 		return *j.MinScoreToProceed
 	}
 	return 0
-}
-
-func mustUUID(s string) uuid.UUID {
-	id, _ := uuid.Parse(s)
-	return id
 }

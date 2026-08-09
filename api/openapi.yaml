@@ -266,7 +266,7 @@ paths:
         - { name: job_id, in: query, schema: { type: string, format: uuid } }
       responses:
         "200":
-          description: Applications
+          description: Applications (rows enriched with candidate_name, candidate_email, job_title)
           content:
             application/json:
               schema:
@@ -477,7 +477,10 @@ paths:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
         - { name: Authorization, in: header, required: true, schema: { type: string } }
       responses:
-        "101": { description: Switching Protocols }
+        "101":
+          description: Switching Protocols — frames: interview.start, question,
+            token, response, evaluation {scores, overall, recommendation, status:
+            complete|pending}, error {code, message}
         "401": { description: missing/invalid ws ticket or not bound to this interview }
         "403": { description: origin not allowed }
 components:
