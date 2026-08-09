@@ -83,42 +83,106 @@ Canonical schema (Phases doc, single source of truth):
 
 ---
 
-## 2. Workstream B — Frontend (new, `frontend/`)
+## 2. Workstream B — Frontend (new, `frontend/`) — DETAILED BUILD PLAN
 
-### Stack (decision B1 — proposed)
-- React 18 + Vite + TypeScript, Tailwind + shadcn/ui (design tokens from
-  design-system/MASTER.md if present), `@phosphor-icons/react` (project
-  convention), gorilla-compatible WS via native `WebSocket`
-- Vite dev proxy → `http://localhost:8081`; `INTIVAI_ALLOWED_ORIGINS` must
-  include the FE origin (CSWSH — already enforced server-side)
+Design system: `design-system/intivai/MASTER.md` (rev 2, corrected) +
+`pages/candidate-interview.md` + `pages/dashboard.md` overrides. Page lookup
+order: page file first → Master. shadcn token mapping table lives in Master
+(§shadcn/ui Token Mapping) — copy the values into `globals.css` verbatim.
 
-### Pages (routes)
-| Route | Purpose | Depends on |
-|---|---|---|
-| `/login` | recruiter auth (JWT) | API |
-| `/jobs` | list + create job | `POST /jobs`, `GET /jobs` |
-| `/cvs` | upload CV, status poll (parsed/extracted/failed) | `POST /cvs`, `GET /cvs/:id` |
-| `/candidates` | list, screening score, pass/fail | `GET /screenings` |
-| `/interviews` | create interview (from passed app), invite link copy | `POST /interviews` |
-| `/interviews/:id` | result view: answers + report | `GET /interviews/:id` (A3) |
-| `/invite/:interviewID?t=` | candidate entry: consent checkbox → ws chat | consent endpoint (A4) + ticket |
-| `/chat/:interviewID` | candidate chat: start, answer, stream tokens, interrupt, resume, evaluation frame | WS protocol (exists) |
+### B0. Scaffold (0.5d) — do FIRST, everything depends on it
+```
+frontend/
+  package.json (react@18, vite, typescript, tailwindcss@3, shadcn/ui,
+                @phosphor-icons/react, react-router-dom@6, @tanstack/react-query@5,
+                ws-native (browser WebSocket — no dep), vitest, @testing-library/react,
+                playwright)
+  vite.config.ts        — proxy /api → http://localhost:8081 (ws:true for /chat)
+  tsconfig.json         — strict
+  tailwind.config.ts    — font-display: Space Grotesk; font-body: DM Sans;
+                          colors from CSS vars (dark via .dark class)
+  src/
+    styles/globals.css  — shadcn theme vars (Master mapping) + tokens (light+dark)
+    lib/api.ts          — fetch wrapper: baseURL from VITE_API_BASE, bearer token
+                          injection, error normalization ({code,error} → typed ApiError)
+    lib/auth.ts         — token storage (localStorage), login/logout, RequireAuth guard
+    lib/ws.ts           — chat socket client (typed frames, auto-pong, reconnect+resume)
+    types/api.ts        — DTO types mirroring OpenAPI (snake_case)
+    components/ui/      — shadcn primitives (button, input, card, dialog, table,
+                          skeleton, badge, toast, textarea, select)
+    pages/…             — see B2
+```
+- `npm create vite@latest . -- --template react-ts`; init Tailwind + shadcn
+  (`npx shadcn@latest init` — theme values from Master mapping)
+- Commit scaffold + design tokens + CI smoke of `npm run build`
 
-### Candidate chat client spec
-- Connect: `ws://…/candidate/interviews/:id/chat` with `Authorization: Bearer <ws_ticket>`
-- Frames: render `interview.start`, `question`, `token` (streaming append),
-  `response`, `evaluation` (show report summary + recommendation), `error`
-- Actions: answer submit, interrupt button, ping keepalive (browser native
-  WS auto-pongs server pings), resume on reconnect (re-use session_id)
-- Consent gate: checkbox before WS connect; POST consent first
-- Reduced-motion + basic a11y; mobile-first (candidate likely phones)
+### B1. Auth + shell (0.5d)
+- `/login` — email/password → POST /auth/login → store token; error surface
+  (AUTH_FAILED etc.); redirect to /jobs
+- `RequireAuth` route guard: no token → /login; 401 on any call → force logout
+- App shell: sidebar (nav: Jobs, CVs, Candidates, Interviews) — Phosphor line
+  icons, active = primary; org slug in header; mobile: bottom nav (≥44px)
 
-### FE tests
-- Chat client: ws-mock harness in Vitest (frames → state); pages: component
-  tests; E2E: Playwright happy path (login → job → cv → interview → invite →
-  chat) — the P3 "browser end-to-end" criterion
+### B2. Recruiter pages (2.5d) — each with react-query + skeleton/empty/error states
+| Page | Route | API | Notes |
+|------|-------|-----|-------|
+| Jobs list | /jobs | GET /jobs | cards or table; create button |
+| Job form (modal) | — | POST /jobs | required: title, description, required_skills, min_experience; PATCH status (active/archived) |
+| CVs | /cvs | GET /cvs, POST /cvs (multipart), GET /cvs/:id | upload dropzone; status poll via react-query refetchInterval (2s while parsing/extracting); failed → error_message + retry (POST /cvs/:id/extract) |
+| Candidates | /candidates | GET /applications | table: candidate_name/email, job_title, cv_score, passed pill; row → drawer: GET /candidates/:id/report (interviews + evaluations) |
+| Interviews | /interviews | POST /interviews, GET /interviews/:id | pick passed application → question_count → create; response shows invitation_token + copy **invite link** (`${origin}/invite/:id?t=:token`) |
+| Interview result | /interviews/:id | GET /interviews/:id | transcript (Q/A), status, context_version, evaluation report (scores, dimensions, per_question, strengths/weaknesses, recommendation pill) |
 
----
+Status pill mapping (Master §Status Pills): parsing/processing → pill-processing;
+passed → pill-passed; rejected/failed → pill-rejected; new → pill-neutral.
+
+### B3. Candidate flow (2d)
+- `/invite/:interviewID?t=:token` — entry page: role title, question count,
+  duration notice, **consent checkbox** (POST /candidate/interviews/:id/consent,
+  disabled until accepted), then auto-exchange ticket
+  (POST /candidate/interviews/:id/ticket) → /chat/:interviewID
+- `/chat/:interviewID` — `lib/ws.ts` client:
+  - Connect: Authorization: Bearer ws_ticket
+  - Frames: interview.start → header (question x of n); question → render +
+    store as current; token → append to streaming bubble; response → finalize;
+    evaluation (complete) → result screen (scores + recommendation);
+    evaluation (pending) → "report preparing" + poll GET /interviews/:id (as
+    recruiter would) — actually candidate: show thank-you, report later
+    via invite link re-entry? — show summary from frame only
+  - error frame: {code,message} → CONSENT_REQUIRED → redirect to invite page;
+    session mismatch → reconnect with resume {session_id}; else show error + retry
+  - Actions: answer (Enter send, Shift+Enter newline, disabled while streaming),
+    interrupt (cancels stream, next question arrives), ping keepalive (native
+    auto-pong for server pings — no code needed, but verify)
+  - Reconnect: on ws close → banner (amber) → auto-reconnect with resume frame
+    (session_id) → resume from current question; never lose transcript locally
+  - Completion: thank-you + "what happens next"; transcript download link
+    (GDPR) — local render of the session transcript
+  - Mobile-first: 720px column (candidate override), input 48px, touch ≥44px
+- `/login` shared with recruiters (no separate candidate account — token flow)
+
+### B4. Quality (1d)
+- Vitest: lib/ws.ts frame machine (mock WebSocket), lib/api.ts error mapping,
+  auth guard, status pill mapping, invite URL parsing
+- Playwright E2E happy path: login → create job → upload CV (fixture PDF) →
+  poll to extracted → candidate passed → create interview → copy invite →
+  consent → chat (answer + tokens) → evaluation frame → result visible
+  (mirrors scripts/smoke.sh; needs stack + INTIVAI_DEEPSEEK_API_KEY)
+- a11y + responsive pass (Master checklist), reduced-motion, dark mode toggle
+  (recruiter shell only; candidate stays light)
+
+### B5. FE → BE integration notes
+- `INTIVAI_ALLOWED_ORIGINS` must include the FE dev origin (5173) + prod
+  domain (VITE_API_BASE/origin) — CSWSH rejects browsers without it
+- Vite dev proxy: `/api` → 8081 with `ws: true` for the chat socket
+- All DTOs snake_case from OpenAPI — types/api.ts generated by hand from
+  api/openapi.yaml (keep in sync when endpoints change)
+
+### Definition of done per page
+- [ ] Renders from real API (no fixtures), loading/empty/error states present
+- [ ] Status codes handled (401 logout, 400 show {error}, 403 forbidden)
+- [ ] Master tokens used (no ad-hoc hex), a11y checklist passed
+- [ ] Vitest unit + Playwright E2E green for the flow it belongs to
 
 ## 3. Workstream C — P6a Beta Ops
 

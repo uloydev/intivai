@@ -26,11 +26,11 @@
 
 - Questions: Space Grotesk 600, 20-24px (distinct from answer text)
 - Answers + messages: DM Sans 400, 16-17px (readability over density)
-- No font family override — Master typography only
+- No font family override — Master typography only (Space Grotesk questions, DM Sans body)
 
 ### Color Overrides
 
-- **Trust strategy:** calm surfaces, no bright gradients. Background `#F8FAFC`; AI bubbles muted `#E8ECF1`; candidate bubbles accent-tinted with white text
+- **Trust strategy:** calm surfaces, no bright gradients. Background `var(--color-background)`; AI bubbles `--color-muted-surface`; candidate bubbles accent-tinted (`color-mix(in srgb, var(--color-accent) 85%, white)`) with white text
 - Destructive only for "end interview" + error states; amber for time warnings
 - Live/evaluating status: pulsing dot (subtle, respects reduced-motion)
 

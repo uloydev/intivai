@@ -24,14 +24,14 @@
 
 ### Typography Overrides
 
-- KPI numbers: Space Grotesk 600, tabular-nums (stable column alignment)
+- KPI numbers: Space Grotesk 600 (Master heading font), tabular-nums (stable column alignment)
 - Table + labels: DM Sans 400/500, 13-14px
-- No overrides to font family — Master typography only
+- No overrides to font family — Master typography only (Space Grotesk + DM Sans)
 
 ### Color Overrides
 
 - Surfaces stay light (`--color-background #F8FAFC`) — light mode is default for recruiter workflow
-- Accent `--color-accent #0369A1` reserved for primary actions + focus ring; destructive `#DC2626` for reject/delete
+- Accent `--color-accent #059669` (Master) reserved for positive outcomes; focus ring = primary `#2563EB`; destructive `#DC2626` for reject/delete
 - No dark-mode-by-default (Master avoid rule applies); dark theme = opt-in toggle only
 
 ### Component Overrides
