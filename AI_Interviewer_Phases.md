@@ -26,9 +26,12 @@ Phase 6: Production Polish (Observability, Deploy, Scale)
 
 ---
 
-## Phase 0: Customer Discovery (Week 1-2) — MANDATORY BEFORE CODING
+## Phase 0: Customer Discovery (Week 1-2) — VALIDATION RUNS THROUGH BETA
 
-**Goal:** Validate the problem + get 5 pilot customers BEFORE writing a line of code. A real founder: talks first, codes after.
+**Goal:** Validate the problem + get 5 pilot customers. Talking-first still
+stands, but validation does not END at Phase 0 — the 5 pilots become the beta
+cohort: their feedback loop (onboarding, usage, interview quality, pricing
+willingness) is the primary launch signal. Beta = validation vehicle.
 
 ### Deliverables
 
@@ -36,14 +39,14 @@ Phase 6: Production Polish (Observability, Deploy, Scale)
 |-----------|-----|--------|
 | **Interview 10 recruiters/HR** | Agency recruiters + BPO + tech startups (Jakarta-Bandung, Hyperscal/OCBC network) | Pain points verified, 5 pilot interests |
 | **Problem validation** | "What's the most painful problem in your screening/interview?" — don't ask about features | Answer "interview process slow/biased/inconsistent" = validation, not a feature ask |
-| **Pilot commitment** | 5 companies agree to try free for 1 month | Pilot list + contacts |
+| **Pilot commitment** | 5 companies agree to try free for 1 month (beta cohort) | Pilot list + contacts + feedback channel |
 | **Pricing validation** | Ask: "to screen 100 candidates, how much would you pay?" | Real pricing numbers from the market |
 | **Scope trim** | Features pilots didn't ask for → cut from MVP | MVP scope final |
 
 ### Exit Criteria (do not start Phase 1 before this)
 - [ ] 10+ recruiter/HR interviews done
 - [ ] Interview process problem confirmed (not a guess)
-- [ ] 5 pilot customers committed
+- [ ] 5 pilot customers committed (beta cohort)
 - [ ] Pricing validated (not assumptions)
 
 ---
@@ -190,6 +193,7 @@ type ScoreResult struct {
 | **Context management** | Sliding window, token counting via tiktoken-go | `internal/interview/domain/service/` |
 | **API endpoints** | `POST /interviews` (recruiter), `POST /candidate/interviews/:id/ticket` (invitation → WS ticket), `WS /candidate/interviews/:id/chat` (ticket auth) | `internal/interview/api/` |
 | **Reconnection** | Store last answered question, allow resume | `internal/interview/application/` |
+| **Candidate chat UI (FE)** | Browser WS client: ticket connect, answer/stream, interrupt, resume, consent checkbox at start | `frontend/chat.tsx` |
 
 ### Chat Flow
 ```
@@ -236,6 +240,7 @@ type ScoreResult struct {
 - [x] Bias detection catches prohibited questions
 - [x] Idle timeout disconnects after 5 minutes (ws read deadline; clock injectable)
 - [x] 100 concurrent WebSocket connections stable (cmd/loadcheck: 100/100 pass)
+- [ ] Browser candidate interview runs end-to-end (chat UI ↔ WS: ticket → consent → questions → streamed answers → evaluation frame)
 - [x] System prompt composer: tenant prompt + company context + safety rails composed correctly (composed once per connection)
 - [x] Safety rails always last (tenant cannot override)
 - [x] Interrupt stops the AI mid-response (streaming goroutine + ctx cancel; live-verified)
@@ -245,19 +250,31 @@ type ScoreResult struct {
 
 ## Phase 4: Evaluation & Reports (Week 11-12)
 
-**Goal:** Post-interview evaluation, report generation, recruiter dashboard
+**Goal:** Post-interview evaluation, report generation, recruiter visibility.
+SPLIT for beta: P4a is part of the MVP — the interview loop is not closed
+without an evaluation outcome (the P3 `evaluation` frame currently sends
+empty scores). P4b stays post-MVP.
 
-### Deliverables
+### P4a — Beta/MVP: evaluation core + recruiter visibility
 
 | Area | What | Files |
 |------|------|-------|
 | **Evaluation domain** | Report entity, criteria, scoring | `internal/evaluation/domain/` |
-| **LLM evaluation** | Structured output via function calling | `internal/evaluation/infrastructure/llm/` |
-| **Report generation** | Aggregate per-question scores → final report | `internal/evaluation/application/generate_report.go` |
+| **LLM evaluation** | Per-question scoring → structured report (fills the P3 `evaluation` frame + persisted) | `internal/evaluation/infrastructure/llm/` |
+| **Report generation** | Aggregate per-question scores → report JSON | `internal/evaluation/application/generate_report.go` |
+| **API endpoints** | `GET /interviews/:id` (answers, status, scores), `GET /candidates/:id/report` (JSON) | `internal/evaluation/api/` |
+| **Recruiter dashboard-lite (FE)** | Job + CV upload, interview list, per-candidate result view | `frontend/pages/` |
+| **Invite flow (FE+BE)** | Shareable interview invite URL from the invitation token | `frontend/pages/` + `internal/interview/api/` |
+| **Consent capture (FE+BE)** | `consent_given` recorded at interview start | `frontend/chat.tsx` + interview api |
+
+### P4b — Post-MVP
+
+| Area | What | Files |
+|------|------|-------|
+| **PDF report generation** | Downloadable PDF (skip in MVP — JSON first) | `internal/evaluation/application/pdf.go` |
 | **Semantic index (interview)** | Sync interview_summary + reflection into the tenant's Mnemosyne bank | `internal/memory/application/` |
 | **Cross-interview reflect** | Cross-interview recall/reflect: skill patterns, failing questions, skill gaps | `internal/evaluation/application/reflect.go` |
-| **API endpoints** | `GET /interviews/:id/evaluation`, `GET /candidates/:id/report` | `internal/evaluation/api/` |
-| **Recruiter dashboard (FE)** | Candidate list, scores, report view | `frontend/pages/` |
+| **Dashboard polish** | Full candidate list, filters, comparisons | `frontend/pages/` |
 
 ### Evaluation Schema
 
@@ -305,11 +322,17 @@ similar, _ := mn.Recall(ctx,
     "strong Go + fintech candidates who passed screening")
 ```
 
-### Testing Criteria
-- [ ] Evaluation returns valid structured JSON
-- [ ] Report aggregates correctly
-- [ ] PDF report download works
+### Testing Criteria (P4a — beta gate)
+- [ ] Evaluation returns valid structured JSON (per-question scores + overall)
+- [ ] Report aggregates correctly (dimensions × weights → overall_score)
+- [ ] `evaluation` frame in the WS flow carries real scores (not empty map)
+- [ ] `GET /interviews/:id` returns answers + status + scores to recruiter
+- [ ] Recruiter dashboard-lite: upload CV → create job → create interview → see result (browser, end-to-end)
+- [ ] Invite URL flow: recruiter shares link → candidate opens → consent → interview
 - [ ] Edge cases: empty transcript, single answer, very long interview
+
+### Testing Criteria (P4b — post-MVP)
+- [ ] PDF report download works
 - [ ] Interview summary synced to the tenant bank
 - [ ] Cross-interview reflect returns valid patterns/insights
 
@@ -373,23 +396,31 @@ Browser mic → Opus → WebRTC (Pion) → PCM → VAD (silero-vad) → segment 
 
 ## Phase 6: Production Polish (Week 17-18)
 
-**Goal:** Observability, error tracking, deployment automation, performance tuning
+**Goal:** Observability, error tracking, deployment automation, performance
+tuning. SPLIT for beta: P6a ships with the beta gate, P6b later.
 
-### Deliverables
+### P6a — Beta essentials
 
 | Area | What |
 |------|------|
-| **Observability** | Prometheus metrics (request count, latency, LLM token usage, queue depth) |
-| **Health checks** | `/health`, `/ready` endpoints (checks DB, Redis, MinIO, DeepSeek API) |
-| **Graceful shutdown** | SIGTERM handler for WebSocket drain + LLM request drain |
-| **Rate limiting** | Per-tenant sliding window (Redis) for API, fixed 1-min window for LLM tokens, per-user rate limit |
-| **Error tracking** | Sentry integration for Go + frontend |
-| **Structured logging** | All logs in JSON format with request ID, tenant ID, trace ID |
-| **Audit log** | All data access logged to `audit_logs` table |
-| **Deployment** | GitHub Actions → Docker build → push to registry → deploy |
-| **Backup & DR** | Postgres daily dump ke MinIO, rclone ke B2, Mnemosyne bank backup, test restore bulanan |
-| **Infrastructure** | Terraform/Pulumi for cloud resources (optional) |
-| **Load testing** | k6 for WebSocket + REST; voice = manual smoke test (k6 doesn't support WebRTC) |
+| **Deployment** | Docker Compose on VPS, domain + TLS, env management; push pipeline (GitHub Actions → build → deploy) |
+| **Backup & DR** | Postgres daily dump to MinIO + rclone to B2; Mnemosyne bank backup; restore test run monthly (docs: survival — 1 server + 0 backups = losing everything) |
+| **Health checks** | `/health`, `/ready` (DB, Redis, MinIO, DeepSeek reachability) |
+| **Graceful shutdown** | SIGTERM: WS drain + LLM request drain (implemented — verify live) |
+| **Rate limiting** | Per-tenant sliding window + auth limits (implemented — tune limits for beta) |
+| **Structured logging** | JSON logs with request ID + tenant ID (implemented — verify retention/rotation) |
+| **Error alerting (lite)** | Error visibility on beta failures (Sentry Go or minimal log-shipping) |
+
+### P6b — Post-MVP
+
+| Area | What |
+|------|------|
+| **Observability** | Prometheus metrics (request count, latency, LLM token usage, queue depth) + Grafana dashboard |
+| **Error tracking** | Sentry for Go + frontend (full) |
+| **Load testing** | k6: WebSocket + REST (voice = manual smoke, k6 no WebRTC) |
+| **Audit persistence** | `audit_logs` table writes (currently console-only) |
+| **Infrastructure** | Terraform/Pulumi (optional) |
+| **Compliance** | SOC 2 prep, GDPR consent docs (consent capture ships in P4a) |
 
 ### Monitoring Dashboard (Grafana)
 ```
@@ -418,16 +449,20 @@ Browser mic → Opus → WebRTC (Pion) → PCM → VAD (silero-vad) → segment 
 ## Timeline Summary
 
 ```
-Week 1-2   〓〓 Phase 0: Customer Discovery (MANDATORY — 10 recruiters, 5 pilots)
+Week 1-2   〓〓 Phase 0: Customer Discovery (10 recruiters, 5 pilots → beta cohort)
 Week 3-4   〓〓 Phase 1: Foundation (+ Mnemosyne bank setup)
 Week 5-7   〓〓〓 Phase 2: Core Business Logic (+ semantic CV index, company context, tenant prompt)
-Week 8-10  〓〓〓 Phase 3: Chat Interview (+ prompt composer)
-Week 11-12 〓〓 Phase 4: Evaluation & Reports (+ cross-interview reflect)
+Week 8-10  〓〓〓 Phase 3: Chat Interview (+ prompt composer, candidate chat UI)
+Week 11-12 〓〓 Phase 4a: Evaluation core + recruiter dashboard-lite + invite/consent (MVP/BETA GATE)
 Week 13-16 〓〓〓〓 Phase 5: Voice Interview — POST-MVP, ONLY with a paying customer
-Week 17-18 〓〓 Phase 6: Production Polish (+ backup & DR)
+Week 17-18 〓〓 Phase 6a: Beta ops — deploy, backup & DR, alerting (parallel with beta)
          ────────────────────────
-Total: 18 weeks (~4.5 months) solo — including Phase 0 validation
+Total: 18 weeks (~4.5 months) solo — including Phase 0 validation + beta cohort
 ```
+
+**P4b + P6b** (PDF report, full dashboard, cross-interview reflect, Prometheus,
+Sentry full, k6, Terraform, SOC 2) run post-MVP — scheduled after beta
+feedback decides what pilots actually use.
 
 **Hybrid memory DB (Mnemosyne)** spans 4 phases: bank setup (P1), CV sync (P2), interview sync (P4), reflect/recall features (P4). Doesn't add to total duration — runs in parallel with core deliverables.
 
@@ -459,13 +494,14 @@ Phase 0 ──► Phase 1 ──► Phase 2 ──► Phase 3 ──► Phase 4
 | **Voice interview** | 5 | ✅ **SKIP entirely in MVP** | Chat-only MVP first; voice only if there's a paying customer (solo dev: don't build features nobody pays for) |
 | Batch CV upload | 2 | ✅ MVP | Single upload first |
 | SSO/SAML | 1 | ✅ MVP | Email + Google OAuth enough |
-| PDF report generation | 4 | ✅ MVP | JSON report first |
-| Load testing | 6 | ✅ MVP | Manual smoke test |
-| Terraform | 6 | ✅ MVP | Docker Compose enough |
-| SOC 2 | 6 | ✅ MVP | Enterprise item, 1-2 years; focus on GDPR + consent basics |
-| Cross-interview reflect | 4 | ✅ MVP | Needs interview volume; runs post-MVP |
+| PDF report generation | 4b | ✅ MVP | JSON report first |
+| Full recruiter dashboard | 4b | ✅ MVP | Dashboard-lite required (P4a) |
+| Cross-interview reflect | 4b | ✅ MVP | Needs interview volume; runs post-MVP |
+| Load testing | 6b | ✅ MVP | Manual smoke test + loadcheck harness |
+| Terraform | 6b | ✅ MVP | Docker Compose enough |
+| SOC 2 | 6b | ✅ MVP | Enterprise item, 1-2 years; focus on GDPR + consent basics (consent capture ships in P4a) |
 | **Mnemosyne bank + CV semantic index** | 1-2 | ❌ Mandatory | Foundation for semantic recall; index-time $0 (reflect = small LLM call at query-time), big value add |
 | **Company context + tenant prompt** | 2-3 | ❌ Mandatory | Main differentiator: tenant-specific interviewer; cheap (context index $0) |
 | **Backup & DR** | 1 | ❌ Mandatory | Survival: 1 server + 0 backups = losing everything |
 
-**True MVP = Phase 0 + Phase 1 + Phase 2 + Phase 3 = 10 weeks** (no voice). Mnemosyne bank + CV sync + company context stay in MVP — cross-interview reflect + voice are skipped.
+**True MVP = Phase 0 + Phase 1 + Phase 2 + Phase 3 + Phase 4a = ~12 weeks** (no voice). Mnemosyne bank + CV sync + company context stay in MVP; the evaluation core (P4a) closes the interview loop — empty scores = no product. Cross-interview reflect + voice + P4b/P6b extras are skipped. Beta gate sits at the end of P4a: deploy live, backup restore tested, 5 pilot interviews completed end-to-end, feedback channel open.

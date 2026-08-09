@@ -106,6 +106,31 @@ Remaining for M3 done-criteria: sliding-window context management (tiktoken), 10
 
 ---
 
+## Beta Gate — definition of "beta started" (EM decision, 2026-08-10)
+
+Scope change approved: P4a (evaluation core + recruiter dashboard-lite + invite
++ consent) and P6a (deploy + backup + alerting-lite) move INTO the MVP; the
+candidate chat UI becomes a P3 deliverable. Beta = Phase 0 cohort (5 pilots).
+
+| # | Gate item | Status |
+|---|-----------|--------|
+| 1 | P4a: evaluation LLM → report JSON; `evaluation` frame carries real scores | [ ] |
+| 2 | P4a: `GET /interviews/:id` + `GET /candidates/:id/report` (JSON) | [ ] |
+| 3 | P3 FE: candidate chat UI (ticket → consent → interview → evaluation frame) | [ ] |
+| 4 | P4a FE: recruiter dashboard-lite (CV/job upload, interview list, result view) | [ ] |
+| 5 | Invite flow: shareable interview URL from invitation token | [ ] |
+| 6 | Consent capture: `consent_given` recorded at interview start | [ ] |
+| 7 | Live DeepSeek streaming verified with real key (smoke, not just mock) | [ ] |
+| 8 | Fresh-volume boot 001–007 (`make dev` from clean volume) | [ ] |
+| 9 | Deploy: compose on VPS, domain + TLS, env management, push pipeline | [ ] |
+| 10 | Backup & DR: postgres dump → MinIO + rclone B2; restore test executed | [ ] |
+| 11 | Error alerting lite (Sentry Go or log shipping) | [ ] |
+| 12 | 5 pilot companies onboarded; feedback channel + retention criteria set | [ ] |
+| 13 | `make check` + `make coverage` + `make test-integration-dev` green | [ ] |
+| 14 | All commits pushed; deploy from tagged release | [ ] |
+
+Beta starts when gates 1–13 are checked and 14 is done — no silent partial beta.
+
 ## Fix plan — M1–M3 gap closure (2026-08-10 → 08-15)
 
 Order = date + dependency. Each item: TDD per AGENTS, `make check` +
