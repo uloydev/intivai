@@ -29,9 +29,18 @@ docker run --rm --network "$NETWORK" \
   minio/mc mirror --overwrite /backups "intivai/intivai-backups" >/dev/null
 echo "mirrored to minio://intivai-backups"
 
-# 3. Retention: drop dumps older than RETENTION_DAYS (local + remote).
-find "$BACKUP_DIR" -name 'intivai-*.sql.gz' -mtime "+${RETENTION_DAYS}" -delete
+# 3. Object storage (CVs, company contexts) — same bucket, cvs/ prefix.
+# CV files are candidate data; losing MinIO = losing all candidates.
 docker run --rm --network "$NETWORK" \
   -e "MC_HOST_intivai=http://${MINIO_ROOT_USER:-intivai}:${MINIO_ROOT_PASSWORD}@minio:9000" \
-  minio/mc rm --recursive --older-than "${RETENTION_DAYS}d" --force "intivai/intivai-backups" >/dev/null
+  minio/mc mirror --overwrite "intivai/intivai" "intivai/intivai-backups/cvs" >/dev/null
+echo "mirrored object storage to minio://intivai-backups/cvs"
+
+# 4. Retention: drop dumps older than RETENTION_DAYS (local + remote).
+find "$BACKUP_DIR" -name 'intivai-*.sql.gz' -mtime "+${RETENTION_DAYS}" -delete
+for REMOTE in "intivai/intivai-backups" "intivai/intivai-backups/cvs"; do
+  docker run --rm --network "$NETWORK" \
+    -e "MC_HOST_intivai=http://${MINIO_ROOT_USER:-intivai}:${MINIO_ROOT_PASSWORD}@minio:9000" \
+    minio/mc rm --recursive --older-than "${RETENTION_DAYS}d" --force "$REMOTE" >/dev/null || true
+done
 echo "retention: ${RETENTION_DAYS}d applied"

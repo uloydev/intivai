@@ -1,18 +1,48 @@
 # Production overlay — single VPS (docs: 1 server). Usage:
-#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
-# Secrets live in .env.prod (never committed) — see .env.prod.example.
-# Only Caddy publishes ports (80/443); everything else is internal.
+#   docker compose --env-file .env.prod \
+#     -f docker-compose.yml -f docker-compose.prod.yml up -d
+#
+# CRITICAL: compose `environment:` beats `env_file:` — the base file's dev
+# environment must be OVERRIDDEN key-by-key here, or prod boots with dev
+# secrets (JWT, MinIO, origins). All values interpolate from .env.prod via
+# --env-file; `${VAR:?}` fails fast when a required secret is missing.
 # !override REPLACES the base port lists (compose v5 appends otherwise).
 services:
   migrate:
     image: ghcr.io/intivai/backend:${TAG:-latest}
-    env_file: .env.prod
+    environment:
+      INTIVAI_MIGRATE_URL: ${INTIVAI_MIGRATE_URL:?set in .env.prod}
     restart: "no"
 
   app:
     image: ghcr.io/intivai/backend:${TAG:-latest}
     ports: !override []
-    env_file: .env.prod
+    environment:
+      INTIVAI_APP_PORT: ${INTIVAI_APP_PORT:-8080}
+      INTIVAI_ENV: ${INTIVAI_ENV:-prod}
+      INTIVAI_DATABASE_URL: ${INTIVAI_DATABASE_URL:?set in .env.prod}
+      INTIVAI_REDIS_ADDR: ${INTIVAI_REDIS_ADDR:-redis:6379}
+      INTIVAI_MINIO_ENDPOINT: ${INTIVAI_MINIO_ENDPOINT:-minio:9000}
+      INTIVAI_MINIO_ACCESS_KEY: ${INTIVAI_MINIO_ACCESS_KEY:?set in .env.prod}
+      INTIVAI_MINIO_SECRET_KEY: ${INTIVAI_MINIO_SECRET_KEY:?set in .env.prod}
+      INTIVAI_MINIO_BUCKET: ${INTIVAI_MINIO_BUCKET:-intivai}
+      INTIVAI_MINIO_USE_SSL: ${INTIVAI_MINIO_USE_SSL:-false}
+      INTIVAI_JWT_SECRET: ${INTIVAI_JWT_SECRET:?set in .env.prod}
+      INTIVAI_JWT_EXPIRY_HRS: ${INTIVAI_JWT_EXPIRY_HRS:-12}
+      INTIVAI_BCRYPT_COST: ${INTIVAI_BCRYPT_COST:-12}
+      INTIVAI_DEEPSEEK_API_KEY: ${INTIVAI_DEEPSEEK_API_KEY:-}
+      INTIVAI_DEEPSEEK_BASE_URL: ${INTIVAI_DEEPSEEK_BASE_URL:-https://api.deepseek.com}
+      INTIVAI_DEEPSEEK_MODEL: ${INTIVAI_DEEPSEEK_MODEL:-deepseek-chat}
+      INTIVAI_LLM_MAX_RETRIES: ${INTIVAI_LLM_MAX_RETRIES:-3}
+      INTIVAI_ALLOWED_ORIGINS: ${INTIVAI_ALLOWED_ORIGINS:?set in .env.prod}
+      INTIVAI_MEMORY_DRIVER: ${INTIVAI_MEMORY_DRIVER:-postgres}
+      INTIVAI_MEMORY_DATA_DIR: ${INTIVAI_MEMORY_DATA_DIR:-/data}
+      INTIVAI_EMBEDDINGS_ENABLED: ${INTIVAI_EMBEDDINGS_ENABLED:-false}
+      INTIVAI_EMBED_MODEL_DIR: ${INTIVAI_EMBED_MODEL_DIR:-/data/models}
+      INTIVAI_RATE_LIMIT_AUTH_PER_MIN: ${INTIVAI_RATE_LIMIT_AUTH_PER_MIN:-10}
+      INTIVAI_RATE_LIMIT_TENANT_PER_MIN: ${INTIVAI_RATE_LIMIT_TENANT_PER_MIN:-1000}
+      INTIVAI_RATE_LIMIT_USER_PER_MIN: ${INTIVAI_RATE_LIMIT_USER_PER_MIN:-100}
+      INTIVAI_SENTRY_DSN: ${INTIVAI_SENTRY_DSN:-}
     restart: always
     mem_limit: 1g
     volumes:
@@ -29,6 +59,8 @@ services:
 
   postgres:
     ports: !override []
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set in .env.prod}
     restart: always
 
   redis:
@@ -40,6 +72,9 @@ services:
 
   minio:
     ports: !override []
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-intivai}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set in .env.prod}
     restart: always
 
   caddy:
@@ -48,6 +83,7 @@ services:
     ports: !override ["80:80", "443:443"]
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./frontend/dist:/srv/frontend:ro
       - caddydata:/data
       - caddyconfig:/config
     depends_on:

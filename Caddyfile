@@ -1,5 +1,17 @@
-# Intivai — Caddy reverse proxy (TLS auto via Let's Encrypt).
+# Intivai — Caddy reverse proxy + static frontend (TLS auto via Let's Encrypt).
 # Replace intivai.example.com with the real domain before first deploy.
+# Frontend build ships to ./frontend/dist (see CI deploy job).
 intivai.example.com {
-	reverse_proxy app:8080
+	# API + WebSocket (chat) → Go app. Caddy handles the WS upgrade.
+	handle /api/* {
+		reverse_proxy app:8080
+	}
+
+	# Static SPA; hashed assets are immutable — cache them hard.
+	handle {
+		root * /srv/frontend
+		file_server
+		@hashed path *.js *.css *.png *.svg *.woff2 *.ico
+		header @hashed Cache-Control "public, max-age=31536000, immutable"
+	}
 }

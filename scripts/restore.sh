@@ -28,6 +28,12 @@ docker exec -i intivai-postgres-1 createdb -U intivai intivai_restore
 gzip -dc "$WORK/restore.sql.gz" | docker exec -i intivai-postgres-1 psql -U intivai -d intivai_restore >/dev/null
 
 echo "restore complete into database 'intivai_restore'"
+
+echo "restoring object storage (cvs/) into the intivai bucket — OVERWRITES"
+docker run --rm --network "$NETWORK" \
+  -e "MC_HOST_intivai=http://${MINIO_ROOT_USER:-intivai}:${MINIO_ROOT_PASSWORD}@minio:9000" \
+  minio/mc mirror --overwrite "intivai/intivai-backups/cvs" "intivai/intivai" >/dev/null
+echo "object storage restored"
 echo "review it, then promote:"
 echo "  docker exec -i intivai-postgres-1 psql -U intivai -c 'ALTER DATABASE intivai RENAME TO intivai_old'"
 echo "  docker exec -i intivai-postgres-1 psql -U intivai -c 'ALTER DATABASE intivai_restore RENAME TO intivai'"

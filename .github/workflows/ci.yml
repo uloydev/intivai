@@ -40,6 +40,25 @@ jobs:
       - name: Test (race detector)
         run: go test -race ./...
 
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install
+        run: npm ci
+      - name: Build
+        run: npm run build
+      - name: Unit tests
+        run: npx vitest run
+
   backend-integration:
     runs-on: ubuntu-latest
     services:
@@ -177,13 +196,30 @@ jobs:
       - name: Build + push backend image (ghcr)
         env:
           REGISTRY: ghcr.io
-          IMAGE: ${{ github.repository }}/backend
         run: |
+          IMAGE=$(echo ${GITHUB_REPOSITORY} | tr '[:upper:]' '[:lower:]')/backend
+          echo "IMAGE=${IMAGE}" >> "$GITHUB_OUTPUT"
           echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
-          docker build -t ${REGISTRY}/${IMAGE}:${{ steps.tag.outputs.tag }} ./backend
-          docker tag ${REGISTRY}/${IMAGE}:${{ steps.tag.outputs.tag }} ${REGISTRY}/${IMAGE}:latest
-          docker push ${REGISTRY}/${IMAGE}:${{ steps.tag.outputs.tag }}
-          docker push ${REGISTRY}/${IMAGE}:latest
+          docker build -t ghcr.io/${IMAGE}:${{ steps.tag.outputs.tag }} ./backend
+          docker tag ghcr.io/${IMAGE}:${{ steps.tag.outputs.tag }} ghcr.io/${IMAGE}:latest
+          docker push ghcr.io/${IMAGE}:${{ steps.tag.outputs.tag }}
+          docker push ghcr.io/${IMAGE}:latest
+        id: image
+
+      - name: Build frontend
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Ship frontend dist
+        uses: appleboy/scp-action@v1
+        with:
+          host: ${{ secrets.PROD_HOST }}
+          username: ${{ secrets.PROD_USER }}
+          key: ${{ secrets.PROD_SSH_KEY }}
+          source: "frontend/dist/*"
+          target: /opt/intivai/frontend/dist
 
       - name: Deploy to VPS (compose pull + migrate + app)
         uses: appleboy/ssh-action@v1
@@ -193,7 +229,10 @@ jobs:
           key: ${{ secrets.PROD_SSH_KEY }}
           script: |
             cd /opt/intivai
-            TAG=${{ steps.tag.outputs.tag }} docker compose -f docker-compose.yml -f docker-compose.prod.yml pull app migrate
-            TAG=${{ steps.tag.outputs.tag }} docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d migrate
-            TAG=${{ steps.tag.outputs.tag }} docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d app
+            export TAG=${{ steps.tag.outputs.tag }}
+            IMAGE=${{ steps.image.outputs.IMAGE }}
+            sed -i "s|ghcr.io/intivai/backend|ghcr.io/${IMAGE}|g" docker-compose.prod.yml
+            docker compose --env-file .env.prod -f docker-compose.yml -f docker-compose.prod.yml pull app migrate
+            docker compose --env-file .env.prod -f docker-compose.yml -f docker-compose.prod.yml up -d migrate
+            docker compose --env-file .env.prod -f docker-compose.yml -f docker-compose.prod.yml up -d app
             docker image prune -f
