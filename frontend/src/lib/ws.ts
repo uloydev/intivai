@@ -24,7 +24,14 @@ export interface ChatClientOptions {
   sessionId?: string
 }
 
-const WS_BASE = (import.meta.env.VITE_API_BASE ?? "/api/v1").replace(/^http/, "ws")
+// Absolute ws URL — the WebSocket constructor rejects relative paths.
+// Through the Vite proxy the host stays :5173 and /api is forwarded with ws.
+const WS_BASE = (() => {
+  const base = import.meta.env.VITE_API_BASE ?? "/api/v1"
+  if (base.startsWith("http")) return base.replace(/^http/, "ws")
+  const proto = window.location.protocol === "https:" ? "wss" : "ws"
+  return `${proto}://${window.location.host}${base}`
+})()
 
 export class ChatClient {
   private ws: WebSocket | null = null
