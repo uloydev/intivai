@@ -9,9 +9,9 @@ import (
 	"time"
 
 	fiberws "github.com/gofiber/contrib/websocket"
-	"github.com/gorilla/websocket"
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
+	"github.com/gorilla/websocket"
 	"github.com/intivai/backend/internal/iam/api"
 	"github.com/intivai/backend/internal/iam/application"
 	ivapp "github.com/intivai/backend/internal/interview/application"
