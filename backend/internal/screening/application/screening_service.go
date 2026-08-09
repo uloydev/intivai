@@ -37,7 +37,10 @@ type CreateScreeningCommand struct {
 type ApplicationResult struct {
 	ID              uuid.UUID `json:"id"`
 	CandidateID     uuid.UUID `json:"candidate_id"`
+	CandidateName   string    `json:"candidate_name"`
+	CandidateEmail  string    `json:"candidate_email"`
 	JobID           uuid.UUID `json:"job_id"`
+	JobTitle        string    `json:"job_title"`
 	Status          string    `json:"status"`
 	CVScore         *float64  `json:"cv_score,omitempty"`
 	PassedScreening *bool     `json:"passed_screening,omitempty"`
@@ -121,10 +124,18 @@ func (s *ScreeningService) List(ctx context.Context, actor application.AuthConte
 	}
 	out := make([]*ApplicationResult, 0, len(apps))
 	for _, a := range apps {
-		out = append(out, &ApplicationResult{
+		r := &ApplicationResult{
 			ID: a.ID, CandidateID: a.CandidateID, JobID: a.JobID, Status: a.Status,
 			CVScore: a.CVScore, PassedScreening: a.PassedScreening,
-		})
+		}
+		if c, err := s.candRepo.GetByID(ctx, a.CandidateID); err == nil {
+			r.CandidateName = c.Name
+			r.CandidateEmail = c.Email
+		}
+		if j, err := s.jobRepo.GetByID(ctx, a.JobID); err == nil {
+			r.JobTitle = j.Title
+		}
+		out = append(out, r)
 	}
 	return out, nil
 }

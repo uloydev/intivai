@@ -38,7 +38,14 @@ func (s *Storage) EnsureBucket(ctx context.Context) error {
 	return nil
 }
 
+// Upload writes an object, creating the bucket on first use (fresh volumes
+// / new tenants must not require an app restart after EnsureBucket).
 func (s *Storage) Upload(ctx context.Context, path string, r io.Reader, size int64, contentType string) error {
+	if exists, err := s.client.BucketExists(ctx, s.bucket); err == nil && !exists {
+		if err := s.EnsureBucket(ctx); err != nil {
+			return fmt.Errorf("ensure bucket %s: %w", s.bucket, err)
+		}
+	}
 	_, err := s.client.PutObject(ctx, s.bucket, path, r, size, minio.PutObjectOptions{
 		ContentType: contentType,
 	})

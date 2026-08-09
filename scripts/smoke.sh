@@ -90,6 +90,8 @@ if [ -n "$PASSED_APP" ]; then
     -d "{\"application_id\":\"$PASSED_APP\",\"question_count\":3}")
   IV=$(echo "$IVR" | jq_get "['data']['interview_id']")
   ITK=$(echo "$IVR" | jq_get "['data']['invitation_token']")
+  curl -sf -X POST "$BASE/candidate/interviews/$IV/consent" -H 'Content-Type: application/json' \
+    -d "{\"invitation_token\":\"$ITK\"}" >/dev/null && echo "consent ok"
   TICKET=$(curl -sf -X POST "$BASE/candidate/interviews/$IV/ticket" -H 'Content-Type: application/json' \
     -d "{\"invitation_token\":\"$ITK\"}" | jq_get "['data']['ticket']")
   [ -n "$TICKET" ] && echo "ticket ok"
@@ -100,7 +102,8 @@ import json, sys, websocket
 iv, ticket = sys.argv[1], sys.argv[2]
 ws = websocket.create_connection(
     f"ws://localhost:8081/api/v1/candidate/interviews/{iv}/chat",
-    header=["Authorization: Bearer " + ticket, "Origin: http://localhost:3000"], timeout=15)
+    header=["Authorization: Bearer " + ticket, "Origin: http://localhost:3000"],
+    suppress_origin=True, timeout=15)
 frames = []
 for _ in range(2):
     frames.append(json.loads(ws.recv()))  # start + question

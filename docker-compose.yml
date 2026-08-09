@@ -31,6 +31,13 @@ services:
     environment:
       MINIO_ROOT_USER: intivai
       MINIO_ROOT_PASSWORD: intivai123
+      # The 2026 minio image defaults MINIO_*_FILE to bare filenames and
+      # prefers them over the USER/PASSWORD vars — with no such files the
+      # server boots with RANDOM root credentials. Clear the file vars.
+      MINIO_ROOT_USER_FILE: ""
+      MINIO_ROOT_PASSWORD_FILE: ""
+      MINIO_ACCESS_KEY_FILE: ""
+      MINIO_SECRET_KEY_FILE: ""
     ports:
       - "9000:9000"
       - "9001:9001"
@@ -82,7 +89,7 @@ services:
       # Dev: load checks (100-conn harness) hit ticket issuance in bursts.
       INTIVAI_RATE_LIMIT_AUTH_PER_MIN: 2000
       INTIVAI_MEMORY_DATA_DIR: /data
-      INTIVAI_ALLOWED_ORIGINS: http://localhost:3000
+      INTIVAI_ALLOWED_ORIGINS: http://localhost:3000,http://localhost:5173
     ports:
       - "8080:8080"
     volumes:
