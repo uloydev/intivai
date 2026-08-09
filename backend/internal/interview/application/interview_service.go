@@ -228,9 +228,12 @@ func (s *InterviewService) ComposePrompt(ctx context.Context, orgID uuid.UUID) (
 	return gensvc.ComposeSystemPrompt(in), nil
 }
 
-// AnswerAndAdvance: record answer, persist, return the next question.
+// AnswerAndAdvance: record answer, persist, return the next question. Shallow
+// answers (weakness, Research §2) produce a deterministic probe follow-up on
+// the same topic; detailed answers move to the next planned question.
 func (s *InterviewService) AnswerAndAdvance(ctx context.Context, orgID string, interviewID uuid.UUID, content string) (*ivdomain.Question, error) {
 	var next *ivdomain.Question
+	var answered *ivdomain.Question
 	err := db.RunInTx(ctx, s.pool, orgID, func(tctx context.Context) error {
 		iv, err := s.ivRepo.GetByID(tctx, interviewID)
 		if err != nil {
@@ -241,10 +244,23 @@ func (s *InterviewService) AnswerAndAdvance(ctx context.Context, orgID string, i
 		if iv.Status == ivdomain.StatusExpired {
 			return errors.NewDomainError("INTERVIEW_EXPIRED", "interview expired")
 		}
+		answered = iv.NextQuestion()
 		if err := iv.Answer(content); err != nil {
 			return err
 		}
 		next = iv.NextQuestion()
+		// Weakness probe: follow up on the CURRENT topic (the question just
+		// answered) when the answer was shallow.
+		if answered != nil && gensvc.ShouldProbe(gensvc.ProbeInput{Answer: content}) {
+			probe := gensvc.ProbeQuestion(answered.Category, answered.Skill)
+			if p, err := iv.InsertProbeAfter(answered.Idx, probe.Prompt, probe.Category, probe.Skill); err == nil {
+				// NOTE: iv.OrgID is NOT hydrated by GetByID (interviews have no
+				// org_id column; RLS resolves via applications) — use the arg.
+				if err := s.bank.Create(tctx, uuid.MustParse(orgID), ivdomain.Question{Idx: p.Idx, Content: p.Content, Category: p.Category, Skill: p.Skill}); err == nil {
+					next = p
+				}
+			}
+		}
 		if next == nil {
 			_ = iv.Complete()
 		}

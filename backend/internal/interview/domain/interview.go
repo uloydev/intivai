@@ -126,6 +126,33 @@ func (iv *Interview) NextQuestion() *Question {
 	return &q
 }
 
+// InsertProbeAfter appends a dynamic follow-up (weakness probe) right after
+// the current question, renumbering the rest so the cursor (LastQuestionIdx)
+// stays sequential. Persisted with the normal transcript, so resume and
+// evaluation see it like any other question.
+func (iv *Interview) InsertProbeAfter(currentIdx int, content, category, skill string) (*Question, error) {
+	if iv.Status != StatusInProgress {
+		return nil, errors.NewDomainError("INTERVIEW_NOT_IN_PROGRESS", "interview is not in progress")
+	}
+	insertAt := currentIdx // 0-based position after the answered question
+	if insertAt < 0 || insertAt > len(iv.Questions) {
+		return nil, errors.NewDomainError("INTERVIEW_PROBE_INDEX", "invalid probe position")
+	}
+	q := Question{
+		Idx:      insertAt + 1,
+		Content:  content,
+		Category: category,
+		Skill:    skill,
+	}
+	iv.Questions = append(iv.Questions, Question{})
+	copy(iv.Questions[insertAt+1:], iv.Questions[insertAt:len(iv.Questions)-1])
+	iv.Questions[insertAt] = q
+	for i := insertAt + 1; i < len(iv.Questions); i++ {
+		iv.Questions[i].Idx = i + 1
+	}
+	return &q, nil
+}
+
 // Complete marks the interview finished (all questions answered or recruiter
 // ended it).
 func (iv *Interview) Complete() error {
