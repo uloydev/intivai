@@ -42,7 +42,7 @@ say "cv pipeline (poll up to 30s)"
 for i in $(seq 1 15); do
   STATUS=$(curl -sf "$BASE/cvs/$CV_ID" -H "Authorization: Bearer $TOKEN" | jq_get "['data']['status']")
   case "$STATUS" in
-    parsed|extracted|failed_ocr|failed_extract) break ;; # terminal states
+    extracted|failed_ocr|failed_extract) break ;; # terminal states
   esac
   sleep 2
 done
@@ -78,5 +78,50 @@ V3=$(curl -sf -X POST "$BASE/orgs/$ORG/contexts" -H "Authorization: Bearer $TOKE
   -d '{"content":"Smoke context two"}' | jq_get "['data']['version']")
 echo "versions: $V1 (dedup=$V2, bump=$V3)"
 [ "$V1" = "$V2" ] && [ "$V3" = "$((V1+1))" ] || { echo "versioning broken"; exit 1; }
+
+# Interview flow: only runs when the CV pipeline reached "extracted" (needs
+# INTIVAI_DEEPSEEK_API_KEY in the stack). Without the key the extract step
+# fails honestly and there is no passed application to interview.
+PASSED_APP=$(curl -sf "$BASE/applications" -H "Authorization: Bearer $TOKEN" | \
+  python3 -c 'import sys,json; apps=[a for a in json.load(sys.stdin)["data"] if a.get("passed_screening")]; print(apps[0]["id"] if apps else "")' 2>/dev/null || true)
+if [ -n "$PASSED_APP" ]; then
+  say "interview: create + ticket"
+  IVR=$(curl -sf -X POST "$BASE/interviews" -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+    -d "{\"application_id\":\"$PASSED_APP\",\"question_count\":3}")
+  IV=$(echo "$IVR" | jq_get "['data']['interview_id']")
+  ITK=$(echo "$IVR" | jq_get "['data']['invitation_token']")
+  TICKET=$(curl -sf -X POST "$BASE/candidate/interviews/$IV/ticket" -H 'Content-Type: application/json' \
+    -d "{\"invitation_token\":\"$ITK\"}" | jq_get "['data']['ticket']")
+  [ -n "$TICKET" ] && echo "ticket ok"
+
+  say "interview: ws chat (ticket auth, ping/pong, answer)"
+  python3 - "$IV" "$TICKET" <<'PYEOF'
+import json, sys, websocket
+iv, ticket = sys.argv[1], sys.argv[2]
+ws = websocket.create_connection(
+    f"ws://localhost:8081/api/v1/candidate/interviews/{iv}/chat",
+    header=["Authorization: Bearer " + ticket, "Origin: http://localhost:3000"], timeout=15)
+frames = []
+for _ in range(2):
+    frames.append(json.loads(ws.recv()))  # start + question
+ws.send(json.dumps({"type": "ping"}))
+frames.append(json.loads(ws.recv()))
+assert frames[2]["type"] == "pong", frames
+ws.send(json.dumps({"type": "answer", "content": "Smoke answer about Go services.", "idx": 1}))
+while True:
+    m = json.loads(ws.recv())
+    frames.append(m)
+    if m["type"] in ("question", "error"):
+        break
+ws.close()
+assert frames[0]["type"] == "interview.start", frames
+assert frames[1]["type"] == "question", frames
+last = frames[-1]
+assert last["type"] in ("question", "error"), frames[-1]
+print(f"ws ok: start({frames[0]['total_questions']}) -> question -> ping/pong -> answer -> {last['type']}")
+PYEOF
+else
+  echo "interview flow skipped (no extracted/passed candidate — DeepSeek key missing in stack?)"
+fi
 
 say "SMOKE PASSED"
