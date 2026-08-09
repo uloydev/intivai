@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link as LinkIcon } from "@phosphor-icons/react"
 import { Link } from "react-router-dom"
 import { api } from "@/lib/api"
-import type { Application, CreateInterviewResult } from "@/types/api"
+import type { Application, CreateInterviewResult, InterviewListItem } from "@/types/api"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -41,6 +41,10 @@ export function InterviewsPage() {
       query.state.data?.some((a) => a.cv_score == null) ? 2000 : false,
   })
   const passed = (apps ?? []).filter((a) => a.passed_screening)
+  const { data: createdInterviews, isLoading: loadingList } = useQuery({
+    queryKey: ["interviews"],
+    queryFn: () => api.get<InterviewListItem[]>("/interviews"),
+  })
 
   const [open, setOpen] = useState(false)
   const [selectedApp, setSelectedApp] = useState<Application | null>(null)
@@ -79,6 +83,45 @@ export function InterviewsPage() {
         </Button>
       </div>
 
+      <h2 className="font-display text-lg">Created interviews</h2>
+      {loadingList ? (
+        <Skeleton className="h-24 w-full" />
+      ) : !createdInterviews?.length ? (
+        <p className="text-sm text-muted-foreground">
+          None yet — create one below from a candidate who passed screening.
+        </p>
+      ) : (
+        <div className="rounded-md border border-border bg-card shadow-sm">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Candidate</TableHead>
+                <TableHead>Job</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead />
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {createdInterviews.map((iv) => (
+                <TableRow key={iv.interview_id}>
+                  <TableCell className="font-medium">{iv.candidate_name || "—"}</TableCell>
+                  <TableCell>{iv.job_title || "—"}</TableCell>
+                  <TableCell>
+                    <Badge variant="secondary">{iv.status}</Badge>
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <Link to={`/interviews/${iv.interview_id}`} className="text-sm text-primary hover:underline">
+                      View →
+                    </Link>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+      )}
+
+      <h2 className="font-display text-lg">Start a new interview</h2>
       {passed.length === 0 && (
         <p className="text-sm text-muted-foreground">
           No passed applications yet — interviews require a candidate who passed screening.

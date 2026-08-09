@@ -283,6 +283,7 @@ func main() {
 	authed.Get("/orgs/:orgId/prompt", contextHandler.GetPrompt)
 
 	authed.Post("/interviews", chatHandler.Create)
+	authed.Get("/interviews", evalHandler.ListInterviews)
 	authed.Get("/interviews/:id", evalHandler.GetInterview)
 	authed.Get("/candidates/:id/report", evalHandler.GetCandidateReport)
 

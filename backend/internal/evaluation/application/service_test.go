@@ -152,3 +152,39 @@ func TestCandidateReport(t *testing.T) {
 func evalActor(orgID, role string) iamapp.AuthContext {
 	return iamapp.AuthContext{OrgID: uuid.MustParse(orgID), Role: role}
 }
+
+func TestListInterviews(t *testing.T) {
+	svc, orgID, ivID, candID, _ := seedEvalScenario(t)
+	actor := evalActor(orgID, "admin")
+
+	list, err := svc.ListInterviews(context.Background(), actor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 1 {
+		t.Fatalf("list len = %d, want 1", len(list))
+	}
+	item := list[0]
+	if item.InterviewID != ivID || item.CandidateID != candID {
+		t.Fatalf("item = %+v", item)
+	}
+	if item.CandidateName != "Jane Doe" || item.JobTitle != "Go Engineer" {
+		t.Fatalf("enrichment missing: %+v", item)
+	}
+	if len(item.Evaluation) == 0 {
+		t.Fatal("evaluation missing from list row")
+	}
+}
+
+func TestListInterviewsCrossOrgEmpty(t *testing.T) {
+	svc, _, _, _, _ := seedEvalScenario(t)
+	other := evalActor(uuid.NewString(), "admin")
+
+	list, err := svc.ListInterviews(context.Background(), other)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 0 {
+		t.Fatalf("cross-org list len = %d, want 0", len(list))
+	}
+}

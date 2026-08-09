@@ -21,8 +21,19 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     headers.set("Content-Type", "application/json")
   }
 
-  const res = await fetch(`${API_BASE}${path}`, { ...init, headers })
+  // Dead backend must not spin spinners forever.
+  const signal = init?.signal ?? AbortSignal.timeout(15_000)
+  const res = await fetch(`${API_BASE}${path}`, { ...init, headers, signal })
   const body = await res.json().catch(() => null)
+
+  if (res.status === 401 && !path.startsWith("/auth/")) {
+    // Expired/revoked session: force logout once, redirect to login.
+    // Auth endpoints excluded — a failed login is not a session problem.
+    localStorage.removeItem("intivai_token")
+    if (window.location.pathname !== "/login") {
+      window.location.assign("/login")
+    }
+  }
 
   if (!res.ok) {
     const err = body as { code?: string; error?: string } | null
@@ -40,9 +51,4 @@ export const api = {
     request<T>(path, { method: "PATCH", body: JSON.stringify(body) }),
   put: <T>(path: string, body: unknown) =>
     request<T>(path, { method: "PUT", body: JSON.stringify(body) }),
-}
-
-export function authHeaders(): Record<string, string> {
-  const token = localStorage.getItem("intivai_token")
-  return token ? { Authorization: `Bearer ${token}` } : {}
 }

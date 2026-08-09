@@ -31,13 +31,16 @@ export function JobsPage() {
   const [skills, setSkills] = useState("")
   const [minExp, setMinExp] = useState("0")
 
+  const minExpNum = Number.parseInt(minExp || "0", 10)
+  const minExpValid = Number.isFinite(minExpNum) && minExpNum >= 0
+
   const create = useMutation({
     mutationFn: () =>
       api.post<Job>("/jobs", {
         title,
         description,
         required_skills: skills.split(",").map((s) => s.trim()).filter(Boolean),
-        min_experience: parseInt(minExp || "0", 10),
+        min_experience: minExpNum,
       }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["jobs"] })
@@ -153,7 +156,7 @@ export function JobsPage() {
             <Button variant="secondary" onClick={() => setOpen(false)}>
               Cancel
             </Button>
-            <Button onClick={() => create.mutate()} disabled={!title.trim() || create.isPending}>
+            <Button onClick={() => create.mutate()} disabled={!title.trim() || !minExpValid || create.isPending}>
               {create.isPending ? "Creating…" : "Create"}
             </Button>
           </DialogFooter>

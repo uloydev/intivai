@@ -35,7 +35,13 @@ export function CandidatesPage() {
       query.state.data?.some((a) => a.cv_score == null) ? 2000 : false,
   })
 
-  const [selected, setSelected] = useState<CandidateReport | null>(null)
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const report = useQuery({
+    queryKey: ["candidate-report", selectedId],
+    queryFn: () => api.get<CandidateReport>(`/candidates/${selectedId}/report`),
+    enabled: selectedId !== null,
+  })
+  const selected = report.data ?? null
 
   return (
     <div className="space-y-4">
@@ -60,13 +66,7 @@ export function CandidatesPage() {
             </TableHeader>
             <TableBody>
               {apps.map((app) => (
-                <TableRow
-                  key={app.id}
-                  className="cursor-pointer"
-                  onClick={() => {
-                    void api.get<CandidateReport>(`/candidates/${app.candidate_id}/report`).then(setSelected).catch(() => undefined)
-                  }}
-                >
+                <TableRow key={app.id} className="cursor-pointer" onClick={() => setSelectedId(app.candidate_id)}>
                   <TableCell>
                     <p className="font-medium">{app.candidate_name}</p>
                     <p className="text-xs text-muted-foreground">{app.candidate_email}</p>
@@ -83,7 +83,7 @@ export function CandidatesPage() {
         </div>
       )}
 
-      <Dialog open={selected !== null} onOpenChange={(open) => !open && setSelected(null)}>
+      <Dialog open={selectedId !== null} onOpenChange={(open) => !open && setSelectedId(null)}>
         <DialogContent className="max-h-[80vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="font-display">{selected?.candidate.name}</DialogTitle>

@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { Link } from "react-router-dom"
+import { Link, useLocation } from "react-router-dom"
 import { ArrowRight, SpinnerGap } from "@phosphor-icons/react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -9,6 +9,8 @@ import { ApiError } from "@/lib/api"
 import { login } from "@/lib/auth"
 
 export function LoginPage() {
+  const location = useLocation()
+  const from = (location.state as { from?: string } | null)?.from ?? "/jobs"
   const [orgSlug, setOrgSlug] = useState("")
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
@@ -21,7 +23,7 @@ export function LoginPage() {
     setLoading(true)
     try {
       await login(orgSlug.trim(), email.trim(), password)
-      window.location.assign("/jobs")
+      window.location.assign(from)
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Login failed")
     } finally {

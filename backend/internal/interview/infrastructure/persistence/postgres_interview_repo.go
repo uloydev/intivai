@@ -119,6 +119,36 @@ func (r *PostgresInterviewRepo) ByApplication(ctx context.Context, applicationID
 	return out, rows.Err()
 }
 
+// ListByOrg — interviews of one org, newest first. RLS applies through the
+// applications join (interviews have no org_id column).
+func (r *PostgresInterviewRepo) ListByOrg(ctx context.Context, orgID uuid.UUID) ([]*ivdomain.Interview, error) {
+	q, err := r.q(ctx)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := q.Raw(
+		`SELECT iv.id, iv.application_id, iv.status, iv.transcript, iv.last_question_idx,
+		 iv.context_version, iv.evaluation, iv.consent_given, iv.started_at, iv.completed_at,
+		 iv.expires_at, iv.created_at
+		 FROM interviews iv
+		 JOIN applications a ON a.id = iv.application_id
+		 WHERE a.org_id = $1
+		 ORDER BY iv.created_at DESC`, orgID).Rows()
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	out := []*ivdomain.Interview{}
+	for rows.Next() {
+		iv, err := scanInterview(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, iv)
+	}
+	return out, rows.Err()
+}
+
 type transcript struct {
 	Questions []ivdomain.Question `json:"questions"`
 	Answers   []ivdomain.Answer   `json:"answers"`

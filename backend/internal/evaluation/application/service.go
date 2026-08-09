@@ -83,6 +83,53 @@ type CandidateReport struct {
 	Interviews []InterviewSummary `json:"interviews"`
 }
 
+// InterviewListItem — recruiter list row (no full transcript, keeps the list light).
+type InterviewListItem struct {
+	InterviewID    uuid.UUID       `json:"interview_id"`
+	Status         ivdomain.Status `json:"status"`
+	CandidateID    uuid.UUID       `json:"candidate_id"`
+	CandidateName  string          `json:"candidate_name"`
+	JobTitle       string          `json:"job_title"`
+	Evaluation     json.RawMessage `json:"evaluation"`
+	CreatedAt      time.Time       `json:"created_at"`
+}
+
+// ListInterviews returns the org's interviews, newest first, with candidate
+// + job context for the recruiter list view.
+func (s *EvaluationService) ListInterviews(ctx context.Context, actor application.AuthContext) ([]*InterviewListItem, error) {
+	if err := application.Authorize(actor, iamdomain.RoleAdmin, iamdomain.RoleRecruiter, iamdomain.RoleInterviewer); err != nil {
+		return nil, err
+	}
+	var out []*InterviewListItem
+	err := db.RunInTx(ctx, s.pool, actor.OrgID.String(), func(tctx context.Context) error {
+		ivs, err := s.ivRepo.ListByOrg(tctx, actor.OrgID)
+		if err != nil {
+			return err
+		}
+		out = make([]*InterviewListItem, 0, len(ivs))
+		for _, iv := range ivs {
+			item := &InterviewListItem{
+				InterviewID: iv.ID,
+				Status:      iv.Status,
+				Evaluation:  json.RawMessage(iv.Evaluation),
+				CreatedAt:   iv.CreatedAt,
+			}
+			if app, err := s.appRepo.GetByID(tctx, iv.ApplicationID); err == nil {
+				item.CandidateID = app.CandidateID
+				if c, err := s.candRepo.GetByID(tctx, app.CandidateID); err == nil {
+					item.CandidateName = c.Name
+				}
+				if j, err := s.jobRepo.GetByID(tctx, app.JobID); err == nil {
+					item.JobTitle = j.Title
+				}
+			}
+			out = append(out, item)
+		}
+		return nil
+	})
+	return out, err
+}
+
 // InterviewDetail returns the full interview (questions, answers, evaluation)
 // with candidate + job context. Org-scoped via RLS + explicit org checks.
 func (s *EvaluationService) InterviewDetail(ctx context.Context, actor application.AuthContext, interviewID uuid.UUID) (*InterviewDetail, error) {

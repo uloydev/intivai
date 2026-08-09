@@ -13,6 +13,15 @@ import { JobsPage } from "@/pages/Jobs"
 import { LoginPage } from "@/pages/Login"
 import { RegisterPage } from "@/pages/Register"
 
+function NotFoundPage() {
+  return (
+    <div className="flex min-h-screen flex-col items-center justify-center gap-2 bg-background text-center">
+      <h1 className="font-display text-2xl">404</h1>
+      <p className="text-sm text-muted-foreground">Page not found</p>
+    </div>
+  )
+}
+
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, refetchOnWindowFocus: false } },
 })
@@ -35,7 +44,7 @@ export default function App() {
               <Route path="/interviews/:id" element={<InterviewResultPage />} />
             </Route>
           </Route>
-          <Route path="*" element={<LoginPage />} />
+          <Route path="*" element={<NotFoundPage />} />
         </Routes>
       </BrowserRouter>
       <Toaster position="top-right" />

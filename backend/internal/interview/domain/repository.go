@@ -17,6 +17,9 @@ type InterviewRepository interface {
 	ByApplication(ctx context.Context, applicationID uuid.UUID) ([]*Interview, error)
 	// SetConsent records GDPR consent (consent_given), idempotent.
 	SetConsent(ctx context.Context, id uuid.UUID) error
+	// ListByOrg lists the org's interviews (RLS-scoped via the applications
+	// join), newest first.
+	ListByOrg(ctx context.Context, orgID uuid.UUID) ([]*Interview, error)
 }
 
 // TokenStatus — result of validating an invitation token (definer function).

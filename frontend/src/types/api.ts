@@ -114,3 +114,13 @@ export interface CandidateReport {
 export interface ConsentResult {
   consent_given: boolean
 }
+
+export interface InterviewListItem {
+  interview_id: string
+  status: string
+  candidate_id: string
+  candidate_name: string
+  job_title: string
+  evaluation: EvaluationReport | null
+  created_at: string
+}

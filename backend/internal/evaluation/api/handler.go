@@ -50,3 +50,16 @@ func (h *EvaluationHandler) GetCandidateReport(c *fiber.Ctx) error {
 	}
 	return c.Status(200).JSON(fiber.Map{"data": report})
 }
+
+// ListInterviews — GET /interviews (recruiter list view).
+func (h *EvaluationHandler) ListInterviews(c *fiber.Ctx) error {
+	actor, ok := api.Actor(c)
+	if !ok {
+		return c.Status(401).JSON(fiber.Map{"error": "unauthorized"})
+	}
+	list, err := h.svc.ListInterviews(c.UserContext(), actor)
+	if err != nil {
+		return httpapi.Error(c, err)
+	}
+	return c.Status(200).JSON(fiber.Map{"data": list})
+}

@@ -76,4 +76,25 @@ describe("ChatClient", () => {
     ws.onclose?.({ wasClean: false })
     expect(reasons).toEqual(["error"])
   })
+it("notifies close exactly once when error+close both fire", () => {
+  const reasons: string[] = []
+  const client = new ChatClient({ ticket: "t", onFrame: () => undefined, onClose: (r) => reasons.push(r) })
+  client.connect("iv-1")
+  const ws = FakeWebSocket.instances[0]
+  ws.onerror?.()
+  ws.onclose?.({ wasClean: false })
+  expect(reasons).toEqual(["error"])
+})
+
+it("isOpen reflects socket state and answer reports delivery", () => {
+  const client = new ChatClient({ ticket: "t", onFrame: () => undefined, onClose: () => undefined })
+  client.connect("iv-1")
+  const ws = FakeWebSocket.instances[0]
+  expect(client.isOpen()).toBe(true)
+  expect(client.answer("x")).toBe(true)
+  ws.readyState = 3
+  expect(client.isOpen()).toBe(false)
+  expect(client.answer("y")).toBe(false)
+})
+
 })

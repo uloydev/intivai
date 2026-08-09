@@ -62,6 +62,10 @@ export function InvitePage() {
               I consent to my answers being recorded and used for this interview's evaluation.
             </Label>
           </div>
+          <p className="text-xs text-muted-foreground">
+            By starting you agree to the interview privacy notice — your answers are used only for this
+            role's evaluation and are accessible to you on request.
+          </p>
           <Button className="w-full" onClick={start} disabled={!consented || busy || !token}>
             {busy ? "Starting…" : "Start interview"}
           </Button>

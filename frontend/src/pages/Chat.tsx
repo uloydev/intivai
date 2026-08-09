@@ -1,15 +1,19 @@
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { useParams, useSearchParams } from "react-router-dom"
 import { ChatClient, type ChatFrame } from "@/lib/ws"
 import { Button } from "@/components/ui/button"
+import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { cn } from "@/lib/utils"
+import { toast } from "sonner"
 
 interface Bubble {
   kind: "question" | "answer" | "assistant" | "system"
   content: string
   streaming?: boolean
 }
+
+const MAX_RECONNECTS = 5
 
 export function ChatPage() {
   const { id } = useParams<{ id: string }>()
@@ -24,31 +28,52 @@ export function ChatPage() {
   const [currentIdx, setCurrentIdx] = useState(0)
   const [evaluation, setEvaluation] = useState<Extract<ChatFrame, { type: "evaluation" }> | null>(null)
   const [reconnecting, setReconnecting] = useState(false)
+  const [expired, setExpired] = useState(false)
   const sessionIdRef = useRef<string>("")
-  const currentQuestionRef = useRef<string>("")
+  const reconnectCountRef = useRef(0)
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const evaluatedRef = useRef(false)
+  const [pendingAnswer, setPendingAnswer] = useState(false)
   const scrollRef = useRef<HTMLDivElement>(null)
+
+  const reduceMotion = useMemo(
+    () => window.matchMedia("(prefers-reduced-motion: reduce)").matches,
+    [],
+  )
 
   useEffect(() => {
     if (!id || !ticket) return
+    reconnectCountRef.current = 0
+
     const client = new ChatClient({
       ticket,
-      sessionId: sessionIdRef.current,
-      onFrame: (frame) => handleFrame(frame),
+      onFrame: handleFrame,
       onClose: (reason) => {
-        if (reason === "error") {
-          setReconnecting(true)
-          // Auto-resume: same ticket stays valid; server re-sends start + question.
-          setTimeout(() => {
-            if (!clientRef.current) return
-            clientRef.current.connect(id)
-            if (sessionIdRef.current) clientRef.current.resume(sessionIdRef.current)
-          }, 1500)
+        // Terminal states: evaluation delivered or reconnect budget spent.
+        if (evaluatedRef.current) return
+        if (reason === "closed") return
+        if (reconnectCountRef.current >= MAX_RECONNECTS) {
+          setExpired(true)
+          setReconnecting(false)
+          return
         }
+        reconnectCountRef.current += 1
+        setReconnecting(true)
+        const delay = Math.min(1500 * reconnectCountRef.current, 10_000)
+        reconnectTimerRef.current = setTimeout(() => {
+          const current = clientRef.current
+          if (!current || evaluatedRef.current) return
+          current.connect(id)
+          if (sessionIdRef.current) current.resume(sessionIdRef.current)
+        }, delay)
       },
     })
     clientRef.current = client
     client.connect(id)
-    return () => client.close()
+    return () => {
+      if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current)
+      client.close()
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, ticket])
 
@@ -59,10 +84,10 @@ export function ChatPage() {
         setTotal(frame.total_questions)
         break
       case "question":
-        currentQuestionRef.current = frame.content
         setCurrentIdx(frame.idx)
         setReconnecting(false)
         setStreaming(false)
+        setPendingAnswer(false)
         setBubbles((prev) => [...prev, { kind: "question", content: frame.content }])
         break
       case "token":
@@ -71,8 +96,7 @@ export function ChatPage() {
           const next = [...prev]
           const last = next[next.length - 1]
           if (last && last.kind === "assistant" && last.streaming) {
-            last.content += frame.content
-            next[next.length - 1] = { ...last }
+            next[next.length - 1] = { ...last, content: last.content + frame.content }
             return next
           }
           return [...next, { kind: "assistant", content: frame.content, streaming: true }]
@@ -83,25 +107,22 @@ export function ChatPage() {
         setBubbles((prev) => {
           const next = [...prev]
           const last = next[next.length - 1]
-          if (last && last.kind === "assistant" && last.streaming) {
-            next[next.length - 1] = { ...last, streaming: false }
-          } else if (last && last.kind === "assistant") {
-            next[next.length - 1] = { ...last, content: frame.content }
+          if (last && last.kind === "assistant") {
+            next[next.length - 1] = { ...last, content: frame.content, streaming: false }
           }
           return next
         })
         break
       case "evaluation":
+        evaluatedRef.current = true
         setEvaluation(frame)
         setStreaming(false)
+        setPendingAnswer(false)
         break
       case "error":
         setStreaming(false)
-        if (frame.code === "CONSENT_REQUIRED") {
-          setBubbles((prev) => [...prev, { kind: "system", content: "Consent is required — go back to the invite page." }])
-        } else {
-          setBubbles((prev) => [...prev, { kind: "system", content: frame.message }])
-        }
+        setPendingAnswer(false)
+        setBubbles((prev) => [...prev, { kind: "system", content: frame.message }])
         break
       case "pong":
         break
@@ -109,15 +130,22 @@ export function ChatPage() {
   }
 
   useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" })
-  }, [bubbles])
+    const behavior = streaming || reduceMotion ? "auto" : "smooth"
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior })
+  }, [bubbles, streaming, reduceMotion])
 
   function sendAnswer() {
     const content = input.trim()
-    if (!content || streaming) return
+    if (!content || streaming || pendingAnswer || !clientRef.current?.isOpen()) {
+      if (!clientRef.current?.isOpen()) {
+        toast.error("Connection lost — reconnecting. Please retry in a moment.")
+      }
+      return
+    }
     setInput("")
+    setPendingAnswer(true)
     setBubbles((prev) => [...prev, { kind: "answer", content }])
-    clientRef.current?.answer(content)
+    clientRef.current.answer(content)
   }
 
   return (
@@ -131,13 +159,24 @@ export function ChatPage() {
         )}
       </header>
 
+      {expired && (
+        <div className="bg-amber-100 px-4 py-2 text-center text-sm text-amber-800 dark:bg-amber-950 dark:text-amber-200">
+          Session expired — reopen your invite link to continue.
+        </div>
+      )}
       {reconnecting && (
         <div className="bg-amber-100 px-4 py-2 text-center text-sm text-amber-800 dark:bg-amber-950 dark:text-amber-200">
           Connection lost — reconnecting…
         </div>
       )}
 
-      <div ref={scrollRef} className="flex-1 space-y-4 overflow-y-auto p-4">
+      <div
+        ref={scrollRef}
+        role="log"
+        aria-live="polite"
+        aria-label="Interview transcript"
+        className="flex-1 space-y-4 overflow-y-auto p-4"
+      >
         {bubbles.length === 0 && !streaming && (
           <p className="pt-16 text-center text-sm text-muted-foreground">Connecting…</p>
         )}
@@ -172,11 +211,16 @@ export function ChatPage() {
         </div>
       ) : (
         <div className="border-t border-border bg-card p-3">
+          <Label htmlFor="chat-input" className="sr-only">
+            Your answer
+          </Label>
           <div className="flex items-end gap-2">
             <Textarea
+              id="chat-input"
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => {
+                if (e.nativeEvent.isComposing) return
                 if (e.key === "Enter" && !e.shiftKey) {
                   e.preventDefault()
                   sendAnswer()
@@ -184,7 +228,7 @@ export function ChatPage() {
               }}
               placeholder="Type your answer… (Enter to send)"
               rows={2}
-              disabled={streaming || !!evaluation}
+              disabled={streaming || pendingAnswer || !!evaluation || expired}
               className="min-h-[48px] resize-none"
             />
             {streaming && (

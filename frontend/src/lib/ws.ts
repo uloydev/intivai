@@ -36,6 +36,7 @@ const WS_BASE = (() => {
 export class ChatClient {
   private ws: WebSocket | null = null
   private closed = false
+  private closeNotified = false
   private opts: ChatClientOptions
 
   constructor(opts: ChatClientOptions) {
@@ -44,6 +45,7 @@ export class ChatClient {
 
   connect(interviewId: string): void {
     this.closed = false
+    this.closeNotified = false
     // Browsers cannot set WS headers — the ticket rides the query param
     // (?ticket=), accepted by RequireTicket alongside the header form.
     const url = `${WS_BASE}/candidate/interviews/${interviewId}/chat?ticket=${encodeURIComponent(this.opts.ticket)}`
@@ -58,21 +60,35 @@ export class ChatClient {
       }
     }
     ws.onclose = (ev) => {
-      if (!this.closed) this.opts.onClose(ev.wasClean ? "closed" : "error")
+      if (!this.closed && !this.closeNotified) {
+        this.closeNotified = true
+        this.opts.onClose(ev.wasClean ? "closed" : "error")
+      }
     }
+    // onerror fires BEFORE onclose for the same failure — notify only once
+    // or reconnect logic would schedule twice.
     ws.onerror = () => {
-      if (!this.closed) this.opts.onClose("error")
+      if (!this.closed && !this.closeNotified) {
+        this.closeNotified = true
+        this.opts.onClose("error")
+      }
     }
   }
 
-  send(frame: Record<string, unknown>): void {
+  isOpen(): boolean {
+    return this.ws?.readyState === WebSocket.OPEN
+  }
+
+  send(frame: Record<string, unknown>): boolean {
     if (this.ws?.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify(frame))
+      return true
     }
+    return false
   }
 
-  answer(content: string): void {
-    this.send({ type: "answer", content })
+  answer(content: string): boolean {
+    return this.send({ type: "answer", content })
   }
 
   interrupt(): void {
