@@ -9,6 +9,7 @@ import (
 	"time"
 
 	fiberws "github.com/gofiber/contrib/websocket"
+	"github.com/gorilla/websocket"
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
 	"github.com/intivai/backend/internal/iam/api"
@@ -25,6 +26,43 @@ import (
 // Stricter than the domain idle rule — a silent candidate disconnects at 3
 // minutes; the 5-minute idle/expiry path still guards server-side state.
 const readDeadline = ivdomain.PerQuestionTimeout
+
+// Server heartbeat (Research §2): ping every 30s; drop the socket when the
+// client does not answer with a pong within 10s.
+const (
+	heartbeatInterval = 30 * time.Second
+	pongWait          = 10 * time.Second
+)
+
+// pingWriter is the minimal surface heartbeat needs (gorilla control frames).
+type pingWriter interface {
+	WriteControl(messageType int, data []byte, deadline time.Time) error
+}
+
+// heartbeat pings the client every interval and waits up to wait for a pong.
+// Returns true when the client went silent (caller closes the socket), false
+// on cancellation (done closed). The pong channel is fed by SetPongHandler.
+func heartbeat(conn pingWriter, interval, wait time.Duration, pong <-chan struct{}, done <-chan struct{}) bool {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			if err := conn.WriteControl(websocket.PingMessage, nil, time.Now().Add(5*time.Second)); err != nil {
+				return false // socket already gone
+			}
+			select {
+			case <-pong:
+			case <-time.After(wait):
+				return true // silent client
+			case <-done:
+				return false
+			}
+		case <-done:
+			return false
+		}
+	}
+}
 
 // turnState serializes the "next question" dispatch between the streaming
 // goroutine and the interrupt path — exactly one sends it. onSent fires with
@@ -191,6 +229,23 @@ func (h *ChatHandler) Chat(origins []string) fiber.Handler {
 		var lastQuestion *ivdomain.Question
 		questionSent := func(q *ivdomain.Question) { lastQuestion = q }
 		h.sendStartAndQuestion(connCtx, send, sessionID, orgID, interviewID, questionSent)
+
+		// Heartbeat: ping every 30s, drop the socket if the client never pongs.
+		pongCh := make(chan struct{}, 1)
+		conn.SetPongHandler(func(string) error {
+			select {
+			case pongCh <- struct{}{}:
+			default:
+			}
+			return nil
+		})
+		hbDone := make(chan struct{})
+		defer close(hbDone)
+		go func() {
+			if heartbeat(conn, heartbeatInterval, pongWait, pongCh, hbDone) {
+				_ = conn.Close() // silent client; read loop errors out
+			}
+		}()
 
 		var streamCancel context.CancelFunc
 		var turn *turnState
