@@ -103,7 +103,7 @@ func (b *PostgresBank) cosineRecall(ctx context.Context, queryVec []float32) ([]
 		if err != nil {
 			return err
 		}
-		defer rows.Close()
+		defer func() { _ = rows.Close() }()
 		for rows.Next() {
 			var h memdomain.MemoryHit
 			if err := rows.Scan(&h.ID, &h.Content, &h.Score); err != nil {

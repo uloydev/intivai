@@ -39,7 +39,7 @@ type connResult struct {
 func main() {
 	conns := 100
 	if v := os.Getenv("CONNS"); v != "" {
-		fmt.Sscanf(v, "%d", &conns)
+		_, _ = fmt.Sscanf(v, "%d", &conns)
 	}
 	base := os.Getenv("BASE_URL")
 	if base == "" {
@@ -135,7 +135,7 @@ func runConn(base, token, org string, appID uuid.UUID, i int) connResult {
 		}
 		return connResult{stage: stage, latency: time.Since(connStart)}
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	_ = conn.SetReadDeadline(time.Now().Add(10 * time.Second))
 
 	stage = "start"
@@ -305,7 +305,7 @@ func rawProbe(wsURL, ticket string) {
 		log.Printf("raw dial: %v", err)
 		return
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	req := "GET " + u.RequestURI() + " HTTP/1.1\r\n" +
 		"Host: " + u.Host + "\r\n" +
 		"Connection: Upgrade\r\n" +

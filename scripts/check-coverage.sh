@@ -39,6 +39,9 @@ while IFS= read -r line; do
 
   case "$pkg" in
     pkg/*|*/shared/*|*/api|cmd/server|*/infrastructure/auth|*/memory/domain|*/pkg/db/migrations|github.com/intivai/backend/cmd/server) continue ;;
+    # Tool/model-gated: tests skip without tesseract/poppler (ocr) or the
+    # downloaded embedding model; covered when run inside the app image.
+    */infrastructure/ocr|github.com/intivai/backend/internal/embedding|github.com/intivai/backend/cmd/loadcheck) continue ;;
   esac
 
   floor=$FLOOR_ALL
