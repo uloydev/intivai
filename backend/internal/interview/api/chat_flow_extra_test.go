@@ -107,7 +107,7 @@ func seedChatOrg(t *testing.T) (*gorm.DB, *ivapp.InterviewService, string, strin
 	svc := ivapp.NewInterviewService(pool,
 		ivrepo.NewPostgresInterviewRepo(pool), ivrepo.NewPostgresTokenRepo(pool), ivrepo.NewPostgresQuestionBank(pool),
 		scrrepo.NewPostgresApplicationRepo(pool), cvrepo.NewPostgresCandidateRepo(pool), jobrepo.NewPostgresJobRepo(pool),
-		ctxrepo.NewPostgresContextRepo(pool), minio, auth.NewJWTProvider("test-secret-for-chat-flow"), ivdomain.SystemClock())
+		ctxrepo.NewPostgresContextRepo(pool), minio, auth.NewJWTProvider("test-secret-for-chat-flow"), ivdomain.SystemClock(), nil)
 	return pool, svc, orgUUID.String(), appID.String()
 }
 

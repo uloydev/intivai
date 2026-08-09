@@ -46,8 +46,11 @@ type ResponseMessage struct {
 }
 
 type EvaluationMessage struct {
-	Type   string             `json:"type"`
-	Scores map[string]float64 `json:"scores"`
+	Type           string             `json:"type"`
+	Scores         map[string]float64 `json:"scores"`
+	Overall        float64            `json:"overall,omitempty"`
+	Recommendation string             `json:"recommendation,omitempty"`
+	Status         string             `json:"status"` // complete | pending
 }
 
 type ErrorMessage struct {

@@ -49,7 +49,7 @@ func (r *PostgresInterviewRepo) GetByID(ctx context.Context, id uuid.UUID) (*ivd
 	}
 	row := q.Raw(
 		`SELECT id, application_id, status, transcript, last_question_idx, context_version,
-		 started_at, completed_at, expires_at, created_at
+		 evaluation, started_at, completed_at, expires_at, created_at
 		 FROM interviews WHERE id = $1`, id).Row()
 	return scanInterview(row)
 }
@@ -64,6 +64,16 @@ func (r *PostgresInterviewRepo) Update(ctx context.Context, iv *ivdomain.Intervi
 		`UPDATE interviews SET status = $1, transcript = $2, last_question_idx = $3,
 		 started_at = $4, completed_at = $5, expires_at = $6, updated_at = NOW() WHERE id = $7`,
 		string(iv.Status), raw, iv.LastQuestionIdx, iv.StartedAt, iv.CompletedAt, iv.ExpiresAt, iv.ID).Error
+}
+
+func (r *PostgresInterviewRepo) SaveEvaluation(ctx context.Context, id uuid.UUID, report []byte) error {
+	q, err := r.q(ctx)
+	if err != nil {
+		return err
+	}
+	return q.WithContext(ctx).Exec(
+		`UPDATE interviews SET evaluation = $1, updated_at = NOW() WHERE id = $2`,
+		report, id).Error
 }
 
 type transcript struct {
@@ -81,7 +91,7 @@ func scanInterview(row rowScanner) (*ivdomain.Interview, error) {
 		rawTranscript []byte
 	)
 	err := row.Scan(&iv.ID, &iv.ApplicationID, &iv.Status, &rawTranscript, &iv.LastQuestionIdx,
-		&iv.ContextVersion, &iv.StartedAt, &iv.CompletedAt, &iv.ExpiresAt, &iv.CreatedAt)
+		&iv.ContextVersion, &iv.Evaluation, &iv.StartedAt, &iv.CompletedAt, &iv.ExpiresAt, &iv.CreatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ivdomain.ErrNotFound
 	}

@@ -48,7 +48,16 @@ func (streamMockLLM) ChatStream(ctx context.Context, req llm.ChatRequest) (<-cha
 	return ch, nil
 }
 func (streamMockLLM) StructuredOutput(ctx context.Context, req llm.StructuredRequest) (any, error) {
-	return nil, errors.New("unused")
+	return map[string]any{
+		"per_question": []any{
+			map[string]any{"question_idx": 1, "category": "technical", "score": 80.0, "rationale": "ok", "strengths": []any{}, "weaknesses": []any{}},
+			map[string]any{"question_idx": 2, "category": "communication", "score": 70.0, "rationale": "ok", "strengths": []any{}, "weaknesses": []any{}},
+			map[string]any{"question_idx": 3, "category": "problem_solving", "score": 60.0, "rationale": "ok", "strengths": []any{}, "weaknesses": []any{}},
+		},
+		"strengths":      []any{},
+		"weaknesses":     []any{},
+		"recommendation": "proceed",
+	}, nil
 }
 func (streamMockLLM) Embed(ctx context.Context, text string) ([]float32, error) {
 	return nil, errors.New("unused")
@@ -112,7 +121,7 @@ func TestChatFlowEndToEnd(t *testing.T) {
 	svc := ivapp.NewInterviewService(pool,
 		ivrepo.NewPostgresInterviewRepo(pool), ivrepo.NewPostgresTokenRepo(pool), ivrepo.NewPostgresQuestionBank(pool),
 		scrrepo.NewPostgresApplicationRepo(pool), cvrepo.NewPostgresCandidateRepo(pool), jobrepo.NewPostgresJobRepo(pool),
-		ctxrepo.NewPostgresContextRepo(pool), minio, jwt, ivdomain.SystemClock())
+		ctxrepo.NewPostgresContextRepo(pool), minio, jwt, ivdomain.SystemClock(), nil)
 
 	// 1. Create interview (recruiter role).
 	created, err := svc.CreateInterview(ctx, actorWith(orgUUID, "admin"), ivapp.CreateInterviewCommand{ApplicationID: appID, QuestionCount: 3})
@@ -229,6 +238,53 @@ nextQuestion:
 	}
 	if len(lastStreamRequest.Messages) != 5 {
 		t.Fatalf("stream request messages = %d, want 5 (system + 2 pairs)", len(lastStreamRequest.Messages))
+	}
+
+	// 7b. Detailed answers (no probe) drive to completion; the final frame is
+	// the evaluation with REAL scores (not the old empty map).
+	for i := 0; i < 6; i++ {
+		if err := conn.WriteJSON(map[string]any{"type": "answer", "content": "I have deep experience with distributed systems and production microservices at scale"}); err != nil {
+			t.Fatal(err)
+		}
+		for {
+			m := read()
+			switch m["type"] {
+			case ivdomain.MsgToken, ivdomain.MsgQuestion:
+				continue
+			case ivdomain.MsgResponse:
+				goto answered
+			case ivdomain.MsgEvaluation:
+				if m["status"] != "complete" {
+					t.Fatalf("evaluation status = %v, want complete", m["status"])
+				}
+				scores, ok := m["scores"].(map[string]any)
+				if !ok || len(scores) == 0 {
+					t.Fatalf("evaluation scores empty: %v", m)
+				}
+				if m["overall"].(float64) <= 0 {
+					t.Fatalf("evaluation overall = %v, want > 0", m["overall"])
+				}
+				goto evaluated
+			default:
+				t.Fatalf("unexpected frame %v", m)
+			}
+		}
+	answered:
+	}
+	t.Fatal("interview never completed (no evaluation frame)")
+evaluated:
+
+	// 7c. Evaluation persisted to the interviews row.
+	var evalJSON []byte
+	err = db.RunInTx(ctx, pool, orgUUID.String(), func(tctx context.Context) error {
+		tx, _ := db.TxFrom(tctx)
+		return tx.Raw(`SELECT evaluation FROM interviews WHERE id = $1`, created.InterviewID).Row().Scan(&evalJSON)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(evalJSON) == 0 {
+		t.Fatal("evaluation not persisted")
 	}
 
 	// 8. Wrong ticket rejected (401, no upgrade).

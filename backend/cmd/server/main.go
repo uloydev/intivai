@@ -23,6 +23,8 @@ import (
 	cvapp "github.com/intivai/backend/internal/cv/application"
 	cvrepo "github.com/intivai/backend/internal/cv/infrastructure/persistence"
 	emb "github.com/intivai/backend/internal/embedding"
+	evalapp "github.com/intivai/backend/internal/evaluation/application"
+	evalllm "github.com/intivai/backend/internal/evaluation/infrastructure/llm"
 	"github.com/intivai/backend/internal/iam/api"
 	"github.com/intivai/backend/internal/iam/application"
 	"github.com/intivai/backend/internal/iam/infrastructure/auth"
@@ -50,6 +52,20 @@ import (
 	"github.com/intivai/backend/pkg/storage"
 	"github.com/rs/zerolog"
 )
+
+var _ = ivdomain.Clock(nil)
+
+// evalEnqueuer — async evaluation retry via the shared asynq client.
+type evalEnqueuer struct {
+	client *queue.Client
+}
+
+func (e evalEnqueuer) EnqueueEvaluation(ctx context.Context, orgID, interviewID string) error {
+	_, err := e.client.Enqueue(ctx, evalapp.TaskEvaluateInterview, evalapp.EvaluatePayload{
+		OrgID: orgID, InterviewID: interviewID,
+	})
+	return err
+}
 
 func main() {
 	migrateOnly := flag.Bool("migrate-only", false, "apply migrations with INTIVAI_MIGRATE_URL and exit")
@@ -159,7 +175,8 @@ func main() {
 	ivRepo := ivrepo.NewPostgresInterviewRepo(pool)
 	tokenRepo := ivrepo.NewPostgresTokenRepo(pool)
 	questionBank := ivrepo.NewPostgresQuestionBank(pool)
-	interviewService := ivapp.NewInterviewService(pool, ivRepo, tokenRepo, questionBank, appRepo, candidateRepo, jobRepo, contextRepo, store, tokens, ivdomain.SystemClock())
+	evalWorker := evalapp.NewEvaluationWorker(pool, ivRepo, evalllm.NewEvaluator(llmClient))
+	interviewService := ivapp.NewInterviewService(pool, ivRepo, tokenRepo, questionBank, appRepo, candidateRepo, jobRepo, contextRepo, store, tokens, ivdomain.SystemClock(), evalEnqueuer{client: queueClient})
 	chatHandler := ivapi.NewChatHandler(interviewService, llmClient, tokens, logger)
 
 	// --- Workers ---
@@ -173,6 +190,7 @@ func main() {
 	extractWorker.Register(workerMux)
 	scoreWorker.Register(workerMux)
 	indexWorker.Register(workerMux)
+	evalWorker.Register(workerMux)
 
 	// --- HTTP ---
 	app := fiber.New(fiber.Config{

@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	ctxdomain "github.com/intivai/backend/internal/context/domain"
 	cvdomain "github.com/intivai/backend/internal/cv/domain"
+	evalllm "github.com/intivai/backend/internal/evaluation/infrastructure/llm"
 	"github.com/intivai/backend/internal/iam/application"
 	iamdomain "github.com/intivai/backend/internal/iam/domain"
 	ivdomain "github.com/intivai/backend/internal/interview/domain"
@@ -25,6 +26,12 @@ import (
 )
 
 const ticketTTL = 10 * time.Minute
+
+// TaskEnqueuer — async evaluation retry seam (main wires the asynq client;
+// tests pass nil).
+type TaskEnqueuer interface {
+	EnqueueEvaluation(ctx context.Context, orgID, interviewID string) error
+}
 
 // InterviewService — create interviews (recruiter), issue WS tickets
 // (candidate, invitation token → short-lived JWT bound to session+interview).
@@ -40,15 +47,16 @@ type InterviewService struct {
 	store       *storage.Storage
 	tokens      application.TokenProvider
 	clock       ivdomain.Clock
+	enqueuer    TaskEnqueuer
 }
 
 func NewInterviewService(pool *gorm.DB, ivRepo ivdomain.InterviewRepository, tokenRepo ivdomain.TokenRepository,
 	bank ivdomain.QuestionBank, appRepo scrdomain.ApplicationRepository, candRepo cvdomain.CandidateRepository,
 	jobRepo jobdomain.JobRepository, contextRepo ctxdomain.ContextRepository, store *storage.Storage,
-	tokens application.TokenProvider, clock ivdomain.Clock) *InterviewService {
+	tokens application.TokenProvider, clock ivdomain.Clock, enqueuer TaskEnqueuer) *InterviewService {
 	return &InterviewService{pool: pool, ivRepo: ivRepo, tokenRepo: tokenRepo, bank: bank,
 		appRepo: appRepo, candRepo: candRepo, jobRepo: jobRepo, contextRepo: contextRepo,
-		store: store, tokens: tokens, clock: clock}
+		store: store, tokens: tokens, clock: clock, enqueuer: enqueuer}
 }
 
 type CreateInterviewCommand struct {
@@ -333,6 +341,54 @@ func (s *InterviewService) RecentContext(ctx context.Context, orgID string, inte
 		return nil, err
 	}
 	return gensvc.TrimContext(history, gensvc.DefaultContextWindow), nil
+}
+
+// Transcript returns question/answer pairs for the evaluator, in order.
+func (s *InterviewService) Transcript(ctx context.Context, orgID string, interviewID uuid.UUID) ([]evalllm.TranscriptPair, error) {
+	var pairs []evalllm.TranscriptPair
+	err := db.RunInTx(ctx, s.pool, orgID, func(tctx context.Context) error {
+		iv, err := s.ivRepo.GetByID(tctx, interviewID)
+		if err != nil {
+			return err
+		}
+		for _, a := range iv.Answers {
+			if a.Idx < 1 || a.Idx > len(iv.Questions) {
+				continue
+			}
+			q := iv.Questions[a.Idx-1]
+			pairs = append(pairs, evalllm.TranscriptPair{
+				Idx:      a.Idx,
+				Category: q.Category,
+				Question: q.Content,
+				Answer:   a.Content,
+			})
+		}
+		return nil
+	})
+	return pairs, err
+}
+
+// EvaluateAndPersist stores the report (evaluation JSONB). Idempotent: an
+// existing evaluation wins — retries never double-run the LLM.
+func (s *InterviewService) EvaluateAndPersist(ctx context.Context, orgID string, interviewID uuid.UUID, report []byte) error {
+	return db.RunInTx(ctx, s.pool, orgID, func(tctx context.Context) error {
+		iv, err := s.ivRepo.GetByID(tctx, interviewID)
+		if err != nil {
+			return err
+		}
+		if len(iv.Evaluation) > 0 {
+			return nil
+		}
+		return s.ivRepo.SaveEvaluation(tctx, interviewID, report)
+	})
+}
+
+// EnqueueEvaluation schedules the async retry worker (no-op without enqueuer).
+func (s *InterviewService) EnqueueEvaluation(ctx context.Context, orgID string, interviewID uuid.UUID) error {
+	if s.enqueuer == nil {
+		return nil
+	}
+	return s.enqueuer.EnqueueEvaluation(ctx, orgID, interviewID.String())
 }
 
 func (s *InterviewService) generateQuestions(candidate *cvdomain.Candidate, job *jobdomain.Job, count int) []gensvc.Question {

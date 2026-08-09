@@ -51,7 +51,8 @@ type Interview struct {
 	Questions       []Question
 	Answers         []Answer
 	LastQuestionIdx int
-	ContextVersion  int // company-context version pinned at creation (audit)
+	ContextVersion  int    // company-context version pinned at creation (audit)
+	Evaluation      []byte // post-interview report (evaluation JSONB), hydrated by GetByID
 	StartedAt       *time.Time
 	CompletedAt     *time.Time
 	ExpiresAt       *time.Time

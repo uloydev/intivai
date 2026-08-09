@@ -8,10 +8,12 @@ import (
 	"sync"
 	"time"
 
+	"encoding/json"
 	fiberws "github.com/gofiber/contrib/websocket"
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
+	evalllm "github.com/intivai/backend/internal/evaluation/infrastructure/llm"
 	"github.com/intivai/backend/internal/iam/api"
 	"github.com/intivai/backend/internal/iam/application"
 	ivapp "github.com/intivai/backend/internal/interview/application"
@@ -303,7 +305,7 @@ func (h *ChatHandler) Chat(origins []string) fiber.Handler {
 				turn = &turnState{next: next, onSent: questionSent}
 				streamCtx, cancelStream := context.WithCancel(connCtx)
 				streamCancel = cancelStream
-				go h.streamAndRespond(streamCtx, send, prompt, m.Content, next, turn, &history)
+				go h.streamAndRespond(streamCtx, send, prompt, m.Content, next, turn, &history, orgID, interviewID)
 			}
 		}
 	}, fiberws.Config{Origins: origins})
@@ -340,7 +342,7 @@ func (h *ChatHandler) sendStartAndQuestion(ctx context.Context, send func(any), 
 // History is trimmed to the sliding window (last 10 Q&A); the total message
 // budget (8K tokens) is enforced before streaming — overruns degrade to an
 // error frame and the interview keeps moving.
-func (h *ChatHandler) streamAndRespond(ctx context.Context, send func(any), prompt, answer string, next *ivdomain.Question, turn *turnState, history *[]gensvc.ContextMessage) {
+func (h *ChatHandler) streamAndRespond(ctx context.Context, send func(any), prompt, answer string, next *ivdomain.Question, turn *turnState, history *[]gensvc.ContextMessage, orgID string, interviewID uuid.UUID) {
 	msgs := []gensvc.ContextMessage{{Role: gensvc.RoleSystem, Content: prompt}}
 	msgs = append(msgs, gensvc.TrimContext(*history, gensvc.DefaultContextWindow)...)
 
@@ -375,6 +377,56 @@ func (h *ChatHandler) streamAndRespond(ctx context.Context, send func(any), prom
 	send(ivdomain.ResponseMessage{Type: ivdomain.MsgResponse, Content: final.String()})
 	turn.sendQuestionOnce(send)
 	if next == nil {
-		send(ivdomain.EvaluationMessage{Type: ivdomain.MsgEvaluation, Scores: map[string]float64{}})
+		h.sendEvaluation(ctx, send, orgID, interviewID)
 	}
+}
+
+// sendEvaluation computes the post-interview report inline (≤20s) and sends
+// the evaluation frame with real scores. On LLM failure: pending frame +
+// async retry via the evaluation worker.
+func (h *ChatHandler) sendEvaluation(ctx context.Context, send func(any), orgID string, interviewID uuid.UUID) {
+	evalCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+
+	pairs, err := h.svc.Transcript(evalCtx, orgID, interviewID)
+	if err != nil {
+		h.pendingEvaluation(send, orgID, interviewID)
+		return
+	}
+	report, err := evalllm.NewEvaluator(h.llm).Evaluate(evalCtx, pairs)
+	if err != nil {
+		h.log.Warn().Err(err).Msg("inline evaluation failed, deferring to worker")
+		h.pendingEvaluation(send, orgID, interviewID)
+		return
+	}
+	raw, err := json.Marshal(report)
+	if err != nil {
+		h.pendingEvaluation(send, orgID, interviewID)
+		return
+	}
+	if err := h.svc.EvaluateAndPersist(evalCtx, orgID, interviewID, raw); err != nil {
+		h.log.Warn().Err(err).Msg("persist evaluation")
+	}
+	scores := make(map[string]float64, len(report.Dimensions))
+	for name, d := range report.Dimensions {
+		scores[name] = d.Score
+	}
+	send(ivdomain.EvaluationMessage{
+		Type:           ivdomain.MsgEvaluation,
+		Scores:         scores,
+		Overall:        report.OverallScore,
+		Recommendation: report.Recommendation,
+		Status:         "complete",
+	})
+}
+
+func (h *ChatHandler) pendingEvaluation(send func(any), orgID string, interviewID uuid.UUID) {
+	if err := h.svc.EnqueueEvaluation(context.Background(), orgID, interviewID); err != nil {
+		h.log.Warn().Err(err).Msg("enqueue evaluation retry")
+	}
+	send(ivdomain.EvaluationMessage{
+		Type:   ivdomain.MsgEvaluation,
+		Scores: map[string]float64{},
+		Status: "pending",
+	})
 }
