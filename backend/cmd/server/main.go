@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/getsentry/sentry-go"
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/healthcheck"
 	"github.com/gofiber/fiber/v2/middleware/recover"
@@ -75,6 +76,18 @@ func main() {
 		log.Fatalf("config: %v", err)
 	}
 	logger := logger.New(cfg.App.Env)
+
+	if cfg.Sentry.DSN != "" {
+		if err := sentry.Init(sentry.ClientOptions{
+			Dsn:              cfg.Sentry.DSN,
+			Environment:      cfg.App.Env,
+			TracesSampleRate: 0.1,
+		}); err != nil {
+			logger.Warn().Err(err).Msg("sentry init")
+		} else {
+			defer sentry.Flush(2 * time.Second)
+		}
+	}
 
 	if *migrateOnly {
 		if cfg.Database.MigrateURL == "" {
@@ -320,6 +333,9 @@ func errorHandler(c *fiber.Ctx, err error) error {
 	}
 	if logger, ok := c.Locals("logger").(zerolog.Logger); ok {
 		logger.Error().Err(err).Msg("unhandled error")
+	}
+	if sentry.CurrentHub().Client() != nil {
+		sentry.CaptureException(err)
 	}
 	return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "internal server error"})
 }

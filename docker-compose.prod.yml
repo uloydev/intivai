@@ -1,0 +1,59 @@
+# Production overlay — single VPS (docs: 1 server). Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+# Secrets live in .env.prod (never committed) — see .env.prod.example.
+# Only Caddy publishes ports (80/443); everything else is internal.
+# !override REPLACES the base port lists (compose v5 appends otherwise).
+services:
+  migrate:
+    image: ghcr.io/intivai/backend:${TAG:-latest}
+    env_file: .env.prod
+    restart: "no"
+
+  app:
+    image: ghcr.io/intivai/backend:${TAG:-latest}
+    ports: !override []
+    env_file: .env.prod
+    restart: always
+    mem_limit: 1g
+    volumes:
+      - appdata:/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+
+  postgres:
+    ports: !override []
+    restart: always
+
+  redis:
+    ports: !override []
+    restart: always
+    command: redis-server --appendonly yes
+    volumes:
+      - redisdata:/data
+
+  minio:
+    ports: !override []
+    restart: always
+
+  caddy:
+    image: caddy:2-alpine
+    restart: always
+    ports: !override ["80:80", "443:443"]
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddydata:/data
+      - caddyconfig:/config
+    depends_on:
+      - app
+
+volumes:
+  redisdata:
+  caddydata:
+  caddyconfig:

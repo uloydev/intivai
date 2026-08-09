@@ -1,0 +1,5 @@
+# Intivai — Caddy reverse proxy (TLS auto via Let's Encrypt).
+# Replace intivai.example.com with the real domain before first deploy.
+intivai.example.com {
+	reverse_proxy app:8080
+}

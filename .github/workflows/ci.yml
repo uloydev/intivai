@@ -162,3 +162,38 @@ jobs:
       - name: Tear down
         if: always()
         run: docker compose down -v
+
+  deploy:
+    needs: [backend, backend-integration]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set image tag
+        id: tag
+        run: echo "tag=$(echo ${GITHUB_SHA} | cut -c1-8)" >> "$GITHUB_OUTPUT"
+
+      - name: Build + push backend image (ghcr)
+        env:
+          REGISTRY: ghcr.io
+          IMAGE: ${{ github.repository }}/backend
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+          docker build -t ${REGISTRY}/${IMAGE}:${{ steps.tag.outputs.tag }} ./backend
+          docker tag ${REGISTRY}/${IMAGE}:${{ steps.tag.outputs.tag }} ${REGISTRY}/${IMAGE}:latest
+          docker push ${REGISTRY}/${IMAGE}:${{ steps.tag.outputs.tag }}
+          docker push ${REGISTRY}/${IMAGE}:latest
+
+      - name: Deploy to VPS (compose pull + migrate + app)
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.PROD_HOST }}
+          username: ${{ secrets.PROD_USER }}
+          key: ${{ secrets.PROD_SSH_KEY }}
+          script: |
+            cd /opt/intivai
+            TAG=${{ steps.tag.outputs.tag }} docker compose -f docker-compose.yml -f docker-compose.prod.yml pull app migrate
+            TAG=${{ steps.tag.outputs.tag }} docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d migrate
+            TAG=${{ steps.tag.outputs.tag }} docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d app
+            docker image prune -f

@@ -49,6 +49,9 @@ type Config struct {
 		Enabled  bool
 		ModelDir string
 	}
+	Sentry struct {
+		DSN string
+	}
 	Cv struct {
 		MaxUploadMB int
 	}
@@ -143,6 +146,7 @@ func Load() (*Config, error) {
 	if cfg.Embeddings.ModelDir == "" {
 		cfg.Embeddings.ModelDir = "./models"
 	}
+	cfg.Sentry.DSN = v.GetString("SENTRY_DSN")
 
 	cfg.Cv.MaxUploadMB = v.GetInt("CV_MAX_UPLOAD_MB")
 	if cfg.Cv.MaxUploadMB == 0 {
