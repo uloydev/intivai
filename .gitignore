@@ -1,0 +1,19 @@
+# Binaries
+backend/server
+backend/cmd/server/server
+*.exe
+
+# Env
+.env
+*.env.local
+
+# Runtime data
+backend/data/
+*.db
+
+# IDE
+.idea/
+.vscode/
+
+# OS
+.DS_Store
