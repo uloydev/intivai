@@ -90,6 +90,10 @@ func (s *seededInterview) create(t *testing.T) {
 	}
 	s.ivID = created.InterviewID
 	s.invite = &ivdomain.InvitationToken{Token: created.Token, InterviewID: created.InterviewID, OrgID: s.orgID}
+	// The interview flow requires consent (CONSENT_REQUIRED gate).
+	if err := s.svc.GiveConsent(context.Background(), s.ivID, created.Token); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestIssueTicketStateMachine(t *testing.T) {

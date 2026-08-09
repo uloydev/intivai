@@ -255,6 +255,7 @@ func main() {
 	// fiber's Group("", handlers...) registers app.Use("/") — global for every
 	// route registered AFTER it. Candidate endpoints would otherwise inherit
 	// the tenant/auth middleware (regression-tested in route_groups_test.go).
+	v1.Post("/candidate/interviews/:id/consent", authRateLimit, chatHandler.Consent)
 	v1.Post("/candidate/interviews/:id/ticket", authRateLimit, chatHandler.Ticket)
 	v1.Get("/candidate/interviews/:id/chat", chatHandler.RequireTicket, chatHandler.Chat(cfg.App.AllowedOrigins))
 

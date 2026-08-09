@@ -424,6 +424,23 @@ paths:
                       interviews: { type: array, items: { type: object } }
         "403": { description: FORBIDDEN — candidate belongs to another org }
         "404": { description: Not found }
+  /candidate/interviews/{id}/consent:
+    post:
+      summary: Record candidate GDPR consent (invitation token) — chat refuses to start without it
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [invitation_token]
+              properties:
+                invitation_token: { type: string }
+      responses:
+        "200": { description: consent_given: true (idempotent) }
+        "400": { description: TOKEN_INVALID / TOKEN_MISMATCH }
   /candidate/interviews/{id}/ticket:
     post:
       summary: Exchange invitation token for a 10-min WS ticket (candidate, public)

@@ -129,7 +129,10 @@ func TestChatFlowEndToEnd(t *testing.T) {
 		t.Fatalf("create interview: %v", err)
 	}
 
-	// 2. Issue ticket with the invitation token.
+	// 2. Consent + issue ticket with the invitation token.
+	if err := svc.GiveConsent(ctx, created.InterviewID, created.Token); err != nil {
+		t.Fatalf("consent: %v", err)
+	}
 	ticket, err := svc.IssueTicket(ctx, ivapp.IssueTicketCommand{InterviewID: created.InterviewID, InvitationToken: created.Token})
 	if err != nil {
 		t.Fatalf("issue ticket: %v", err)

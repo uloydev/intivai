@@ -126,6 +126,25 @@ func (h *ChatHandler) Create(c *fiber.Ctx) error {
 	return httpapi.Created(c, result)
 }
 
+// Consent — POST /candidate/interviews/:id/consent (candidate, invitation
+// token). Records GDPR consent; the chat refuses to start without it.
+func (h *ChatHandler) Consent(c *fiber.Ctx) error {
+	id, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "invalid interview id"})
+	}
+	var req struct {
+		InvitationToken string `json:"invitation_token"`
+	}
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "invalid body"})
+	}
+	if err := h.svc.GiveConsent(c.UserContext(), id, strings.TrimSpace(req.InvitationToken)); err != nil {
+		return httpapi.Error(c, err)
+	}
+	return c.Status(200).JSON(fiber.Map{"data": map[string]bool{"consent_given": true}})
+}
+
 // Ticket — POST /candidate/interviews/:id/ticket (candidate, invitation token).
 func (h *ChatHandler) Ticket(c *fiber.Ctx) error {
 	id, err := uuid.Parse(c.Params("id"))

@@ -68,6 +68,9 @@ func TestRecentContextFromTranscript(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err := svc.GiveConsent(ctx, res.InterviewID, res.Token); err != nil {
+		t.Fatal(err)
+	}
 	if err := svc.StartInterview(ctx, orgID, res.InterviewID); err != nil {
 		t.Fatal(err)
 	}

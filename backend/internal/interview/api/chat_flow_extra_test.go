@@ -118,6 +118,9 @@ func createInterviewAndTicket(t *testing.T, svc *ivapp.InterviewService, orgID, 
 	if err != nil {
 		t.Fatalf("create interview: %v", err)
 	}
+	if err := svc.GiveConsent(context.Background(), created.InterviewID, created.Token); err != nil {
+		t.Fatalf("consent: %v", err)
+	}
 	tk, err := svc.IssueTicket(context.Background(), ivapp.IssueTicketCommand{InterviewID: created.InterviewID, InvitationToken: created.Token})
 	if err != nil {
 		t.Fatalf("issue ticket: %v", err)

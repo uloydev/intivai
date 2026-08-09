@@ -277,7 +277,27 @@ func (s *InterviewService) AnswerAndAdvance(ctx context.Context, orgID string, i
 	return next, err
 }
 
-// StartInterview marks in_progress (first connect / resume).
+// GiveConsent records GDPR consent for the interview (invitation token
+// auth, same validation as ticket issuance). Idempotent.
+func (s *InterviewService) GiveConsent(ctx context.Context, interviewID uuid.UUID, invitationToken string) error {
+	invite, status := s.tokenRepo.Validate(ctx, invitationToken)
+	switch status {
+	case ivdomain.TokenValid, ivdomain.TokenUsed:
+		// ok — used tokens stay valid for the reconnect/consent path
+	default:
+		return errors.NewDomainError("TOKEN_INVALID", "invalid invitation token")
+	}
+	if invite == nil || invite.InterviewID != interviewID {
+		return errors.NewDomainError("TOKEN_MISMATCH", "token does not match this interview")
+	}
+	return db.RunInTx(ctx, s.pool, invite.OrgID.String(), func(tctx context.Context) error {
+		return s.ivRepo.SetConsent(tctx, interviewID)
+	})
+}
+
+// StartInterview marks in_progress (first connect / resume). GDPR consent
+// must be recorded first (CONSENT_REQUIRED) — candidates cannot be asked
+// questions before agreeing.
 func (s *InterviewService) StartInterview(ctx context.Context, orgID string, interviewID uuid.UUID) error {
 	return db.RunInTx(ctx, s.pool, orgID, func(tctx context.Context) error {
 		iv, err := s.ivRepo.GetByID(tctx, interviewID)
@@ -288,6 +308,9 @@ func (s *InterviewService) StartInterview(ctx context.Context, orgID string, int
 		iv.ExpireIfNeeded()
 		if iv.Status == ivdomain.StatusExpired {
 			return errors.NewDomainError("INTERVIEW_EXPIRED", "interview expired")
+		}
+		if !iv.ConsentGiven {
+			return errors.NewDomainError("CONSENT_REQUIRED", "candidate consent must be recorded before the interview")
 		}
 		if err := iv.Start(); err != nil {
 			return err

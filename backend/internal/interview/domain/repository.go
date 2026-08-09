@@ -15,6 +15,8 @@ type InterviewRepository interface {
 	SaveEvaluation(ctx context.Context, id uuid.UUID, report []byte) error
 	// ByApplication lists interviews for an application (recruiter report).
 	ByApplication(ctx context.Context, applicationID uuid.UUID) ([]*Interview, error)
+	// SetConsent records GDPR consent (consent_given), idempotent.
+	SetConsent(ctx context.Context, id uuid.UUID) error
 }
 
 // TokenStatus — result of validating an invitation token (definer function).

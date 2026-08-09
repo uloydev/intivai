@@ -49,7 +49,7 @@ func (r *PostgresInterviewRepo) GetByID(ctx context.Context, id uuid.UUID) (*ivd
 	}
 	row := q.Raw(
 		`SELECT id, application_id, status, transcript, last_question_idx, context_version,
-		 evaluation, started_at, completed_at, expires_at, created_at
+		 evaluation, consent_given, started_at, completed_at, expires_at, created_at
 		 FROM interviews WHERE id = $1`, id).Row()
 	return scanInterview(row)
 }
@@ -76,6 +76,15 @@ func (r *PostgresInterviewRepo) SaveEvaluation(ctx context.Context, id uuid.UUID
 		report, id).Error
 }
 
+func (r *PostgresInterviewRepo) SetConsent(ctx context.Context, id uuid.UUID) error {
+	q, err := r.q(ctx)
+	if err != nil {
+		return err
+	}
+	return q.WithContext(ctx).Exec(
+		`UPDATE interviews SET consent_given = true, updated_at = NOW() WHERE id = $1`, id).Error
+}
+
 func (r *PostgresInterviewRepo) ByApplication(ctx context.Context, applicationID uuid.UUID) ([]*ivdomain.Interview, error) {
 	q, err := r.q(ctx)
 	if err != nil {
@@ -83,7 +92,7 @@ func (r *PostgresInterviewRepo) ByApplication(ctx context.Context, applicationID
 	}
 	rows, err := q.Raw(
 		`SELECT id, application_id, status, transcript, last_question_idx, context_version,
-		 evaluation, started_at, completed_at, expires_at, created_at
+		 evaluation, consent_given, started_at, completed_at, expires_at, created_at
 		 FROM interviews WHERE application_id = $1 ORDER BY created_at DESC`, applicationID).Rows()
 	if err != nil {
 		return nil, err
@@ -115,7 +124,7 @@ func scanInterview(row rowScanner) (*ivdomain.Interview, error) {
 		rawTranscript []byte
 	)
 	err := row.Scan(&iv.ID, &iv.ApplicationID, &iv.Status, &rawTranscript, &iv.LastQuestionIdx,
-		&iv.ContextVersion, &iv.Evaluation, &iv.StartedAt, &iv.CompletedAt, &iv.ExpiresAt, &iv.CreatedAt)
+		&iv.ContextVersion, &iv.Evaluation, &iv.ConsentGiven, &iv.StartedAt, &iv.CompletedAt, &iv.ExpiresAt, &iv.CreatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ivdomain.ErrNotFound
 	}
