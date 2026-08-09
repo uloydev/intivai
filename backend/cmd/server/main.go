@@ -22,6 +22,7 @@ import (
 	cvapi "github.com/intivai/backend/internal/cv/api"
 	cvapp "github.com/intivai/backend/internal/cv/application"
 	cvrepo "github.com/intivai/backend/internal/cv/infrastructure/persistence"
+	emb "github.com/intivai/backend/internal/embedding"
 	"github.com/intivai/backend/internal/iam/api"
 	"github.com/intivai/backend/internal/iam/application"
 	"github.com/intivai/backend/internal/iam/infrastructure/auth"
@@ -113,7 +114,11 @@ func main() {
 
 	var memoryFactory memdomain.BankFactory
 	if cfg.Memory.Driver == "postgres" {
-		memoryFactory = pgmem.NewPostgresFactory(pool)
+		pgFactory := pgmem.NewPostgresFactory(pool)
+		if cfg.Embeddings.Enabled {
+			pgFactory = pgFactory.WithEmbedder(emb.NewBGESmall(cfg.Embeddings.ModelDir))
+		}
+		memoryFactory = pgFactory
 	} else {
 		memoryFactory = native.NewNativeFactory(cfg.Memory.DataDir)
 	}

@@ -45,6 +45,10 @@ type Config struct {
 		Driver  string // sqlite | postgres
 		DataDir string
 	}
+	Embeddings struct {
+		Enabled  bool
+		ModelDir string
+	}
 	Cv struct {
 		MaxUploadMB int
 	}
@@ -133,6 +137,11 @@ func Load() (*Config, error) {
 	cfg.Memory.DataDir = v.GetString("MEMORY_DATA_DIR")
 	if cfg.Memory.DataDir == "" {
 		cfg.Memory.DataDir = "./data"
+	}
+	cfg.Embeddings.Enabled = v.GetBool("EMBEDDINGS_ENABLED")
+	cfg.Embeddings.ModelDir = v.GetString("EMBED_MODEL_DIR")
+	if cfg.Embeddings.ModelDir == "" {
+		cfg.Embeddings.ModelDir = "./models"
 	}
 
 	cfg.Cv.MaxUploadMB = v.GetInt("CV_MAX_UPLOAD_MB")

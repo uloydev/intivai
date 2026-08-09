@@ -5,8 +5,10 @@ import (
 	"database/sql"
 	"errors"
 
+	"github.com/intivai/backend/internal/embedding"
 	memdomain "github.com/intivai/backend/internal/memory/domain"
 	"github.com/intivai/backend/pkg/db"
+	"github.com/pgvector/pgvector-go"
 	"gorm.io/gorm"
 )
 
@@ -17,19 +19,28 @@ import (
 type PostgresBank struct {
 	pool  *gorm.DB
 	orgID string
+	embed embedding.Embedder // optional; nil = keyword recall only
 }
 
 // PostgresFactory creates one bank handle per tenant (org_id partition).
 type PostgresFactory struct {
-	pool *gorm.DB
+	pool  *gorm.DB
+	embed embedding.Embedder
 }
 
 func NewPostgresFactory(pool *gorm.DB) *PostgresFactory {
 	return &PostgresFactory{pool: pool}
 }
 
+// WithEmbedder enables semantic recall: Remember embeds summaries, Recall
+// ranks by cosine distance.
+func (f *PostgresFactory) WithEmbedder(e embedding.Embedder) *PostgresFactory {
+	f.embed = e
+	return f
+}
+
 func (f *PostgresFactory) ForBank(orgID string) memdomain.MemoryBank {
-	return &PostgresBank{pool: f.pool, orgID: orgID}
+	return &PostgresBank{pool: f.pool, orgID: orgID, embed: f.embed}
 }
 
 // withTenant runs fn inside a transaction with app.org_id set so the RLS
@@ -52,17 +63,57 @@ func (b *PostgresBank) withTenant(ctx context.Context, fn func(tx *gorm.DB) erro
 
 func (b *PostgresBank) Remember(ctx context.Context, entityType, summary string, importance float64) error {
 	return b.withTenant(ctx, func(tx *gorm.DB) error {
+		var vec *pgvector.Vector
+		if b.embed != nil {
+			// Embedding failure degrades gracefully: row stored without one,
+			// still findable via keyword recall.
+			if v, err := b.embed.Embed(ctx, summary); err == nil {
+				pgv := pgvector.NewVector(v)
+				vec = &pgv
+			}
+		}
 		return tx.Exec(
-			`INSERT INTO mnemosyne_memories (org_id, entity_type, content, importance)
-			 VALUES ($1, $2, $3, $4)`,
-			b.orgID, entityType, summary, importance).Error
+			`INSERT INTO mnemosyne_memories (org_id, entity_type, content, importance, embedding)
+			 VALUES ($1, $2, $3, $4, $5)`,
+			b.orgID, entityType, summary, importance, vec).Error
 	})
 }
 
 func (b *PostgresBank) Recall(ctx context.Context, query, budget string) ([]memdomain.MemoryHit, error) {
+	if b.embed != nil {
+		if qv, err := b.embed.Embed(ctx, query); err == nil {
+			return b.cosineRecall(ctx, qv)
+		}
+	}
 	return b.query(ctx,
 		`SELECT id, content, importance FROM mnemosyne_memories
 		 WHERE content LIKE '%' || $1 || '%' ORDER BY importance DESC LIMIT 20`, query)
+}
+
+// cosineRecall ranks by embedding distance; only embedded rows participate.
+func (b *PostgresBank) cosineRecall(ctx context.Context, queryVec []float32) ([]memdomain.MemoryHit, error) {
+	var hits []memdomain.MemoryHit
+	err := b.withTenant(ctx, func(tx *gorm.DB) error {
+		rows, err := tx.Raw(
+			`SELECT id, content, 1 - (embedding <=> $1::vector) AS score
+			 FROM mnemosyne_memories
+			 WHERE embedding IS NOT NULL
+			 ORDER BY embedding <=> $1::vector, importance DESC LIMIT 20`,
+			pgvector.NewVector(queryVec)).Rows()
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var h memdomain.MemoryHit
+			if err := rows.Scan(&h.ID, &h.Content, &h.Score); err != nil {
+				return err
+			}
+			hits = append(hits, h)
+		}
+		return rows.Err()
+	})
+	return hits, err
 }
 
 func (b *PostgresBank) QueryGraph(ctx context.Context, entityType, filter string) ([]memdomain.MemoryHit, error) {
