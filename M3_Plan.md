@@ -7,16 +7,17 @@ deliverables and doc testing criteria — mark boxes as executed, not just coded
 
 | Area | Files | Status |
 |------|-------|--------|
-| Interview domain: Interview entity, Question VO, Answer VO | `internal/interview/domain/` | [ ] (protocol + clock landed) |
+| Interview domain: Interview entity, Question VO, Answer VO | `internal/interview/domain/` | [x] state machine + clock tested |
 | Question generator: CV-gap strategy | `internal/interview/domain/service/question_generator.go` | [x] unit-tested |
 | Bias detection: protected-class rules | `internal/interview/domain/service/bias.go` | [x] unit-tested |
 | Prompt composer: default + tenant prompt + company context + safety rails (pinned LAST) | `internal/interview/domain/service/prompt_composer.go` | [x] unit-tested |
 | Clock injection (idle timeout, expiry) | `internal/interview/domain/clock.go` | [x] |
 | Context management: sliding window, tiktoken counting | `internal/interview/domain/service/` | [ ] |
-| WebSocket hub: connections, heartbeat, per-interview room | `internal/interview/api/chat_handler.go` | [ ] (harness landed: upgrade/echo/ping) |
-| API: `POST /interviews`, `WS /interviews/:id/chat` | `internal/interview/api/` | [ ] |
-| Reconnection: last unanswered question stored, resume | `internal/interview/application/` | [ ] |
-| WS ticket auth: 10-min JWT bound to session+interview (Research §3); candidates never use internal JWT | `internal/iam/` + interview api | [ ] |
+| WebSocket hub: connections, heartbeat, per-interview room | `internal/interview/api/chat_handler.go` | [x] chat flow integration-tested (ticket → start → question → answer → tokens → next) |
+| API: `POST /interviews`, `POST /candidate/interviews/:id/ticket`, `WS /candidate/interviews/:id/chat` | `internal/interview/api/` | [x] live-verified |
+| Reconnection: last unanswered question stored, resume | `internal/interview/application/` | [x] resume sends start + current question (CurrentState) |
+| WS ticket auth: 10-min JWT bound to session+interview (Research §3); candidates never use internal JWT | `internal/iam/` + interview api | [x] ws_ticket rejected on API routes, accepted on chat |
+| Repos: interview, invitation token, question bank | `internal/interview/infrastructure/persistence/` | [x] round-trip + token lifecycle integration-tested |
 
 LLM provider already exists (`internal/llm`, DeepSeek streaming + structured
 output) — verify `ChatStream` against the interview flow.
@@ -41,14 +42,16 @@ output) — verify `ChatStream` against the interview flow.
 
 ## TDD order (M3) — progress
 
-1. [x] WS protocol test harness FIRST (in-process fiber + ws client) — upgrade/echo/ping proof; ticket-auth tests land with the chat handler
+1. [x] WS protocol test harness FIRST (in-process fiber + ws client) — upgrade/echo/ping proof + full chat flow test
 2. [x] Question generator + bias detection: unit tests first, then implementation
 3. [x] Prompt composer: unit tests — safety rails pinned LAST asserted first
-4. [ ] LLM streaming: mock provider with deterministic token chunks; ChatStream contract pinned by test
-5. [ ] Interview domain (entity, question/answer VOs): pure unit tests
-6. [ ] Repos (interview/transcript persistence): integration spec first, batched
-7. [ ] Handlers + WS handler: protocol + app.Test against the harness
-8. [ ] Idle timeout: injectable clock (landed); never test real 5-min waits
+4. [x] LLM streaming: mock provider with deterministic token chunks + httptest SSE contract; ChatStream fallback pinned
+5. [x] Interview domain (entity, question/answer VOs): pure unit tests + frozen-clock idle/expiry
+6. [x] Repos (interview/transcript, token lifecycle via definer, question bank): integration spec first
+7. [x] Handlers + WS handler: chat flow integration test (ticket → start → question → answer → tokens → next; bad ticket rejected)
+8. [x] Idle timeout: injectable clock; ws read deadline uses it
+
+Remaining for M3 done-criteria: sliding-window context management (tiktoken), 100-conn load check, smoke extension with interview endpoints, live DeepSeek streaming verification (needs API key).
 
 ## Doc testing criteria (execute, then check)
 

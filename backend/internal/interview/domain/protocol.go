@@ -14,6 +14,7 @@ const (
 	MsgResponse   = "response"
 	MsgEvaluation = "evaluation"
 	MsgError      = "error"
+	MsgPong       = "pong"
 
 	MsgAnswer    = "answer"
 	MsgInterrupt = "interrupt"

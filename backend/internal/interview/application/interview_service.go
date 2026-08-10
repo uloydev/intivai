@@ -1,0 +1,304 @@
+package application
+
+import (
+	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"encoding/json"
+	"io"
+	"strings"
+	"time"
+
+	"github.com/google/uuid"
+	ctxdomain "github.com/intivai/backend/internal/context/domain"
+	cvdomain "github.com/intivai/backend/internal/cv/domain"
+	"github.com/intivai/backend/internal/iam/application"
+	iamdomain "github.com/intivai/backend/internal/iam/domain"
+	ivdomain "github.com/intivai/backend/internal/interview/domain"
+	gensvc "github.com/intivai/backend/internal/interview/domain/service"
+	jobdomain "github.com/intivai/backend/internal/job/domain"
+	scrdomain "github.com/intivai/backend/internal/screening/domain"
+	"github.com/intivai/backend/internal/shared/errors"
+	"github.com/intivai/backend/pkg/db"
+	"github.com/intivai/backend/pkg/storage"
+	"gorm.io/gorm"
+)
+
+const ticketTTL = 10 * time.Minute
+
+// InterviewService — create interviews (recruiter), issue WS tickets
+// (candidate, invitation token → short-lived JWT bound to session+interview).
+type InterviewService struct {
+	pool        *gorm.DB
+	ivRepo      ivdomain.InterviewRepository
+	tokenRepo   ivdomain.TokenRepository
+	bank        ivdomain.QuestionBank
+	appRepo     scrdomain.ApplicationRepository
+	candRepo    cvdomain.CandidateRepository
+	jobRepo     jobdomain.JobRepository
+	contextRepo ctxdomain.ContextRepository
+	store       *storage.Storage
+	tokens      application.TokenProvider
+	clock       ivdomain.Clock
+}
+
+func NewInterviewService(pool *gorm.DB, ivRepo ivdomain.InterviewRepository, tokenRepo ivdomain.TokenRepository,
+	bank ivdomain.QuestionBank, appRepo scrdomain.ApplicationRepository, candRepo cvdomain.CandidateRepository,
+	jobRepo jobdomain.JobRepository, contextRepo ctxdomain.ContextRepository, store *storage.Storage,
+	tokens application.TokenProvider, clock ivdomain.Clock) *InterviewService {
+	return &InterviewService{pool: pool, ivRepo: ivRepo, tokenRepo: tokenRepo, bank: bank,
+		appRepo: appRepo, candRepo: candRepo, jobRepo: jobRepo, contextRepo: contextRepo,
+		store: store, tokens: tokens, clock: clock}
+}
+
+type CreateInterviewCommand struct {
+	ApplicationID uuid.UUID
+	QuestionCount int
+}
+
+type CreateInterviewResult struct {
+	InterviewID uuid.UUID `json:"interview_id"`
+	Token       string    `json:"invitation_token"`
+	ExpiresAt   time.Time `json:"expires_at"`
+}
+
+// CreateInterview: load application → CV-gap questions → persist interview +
+// question bank + invitation token (7-day, 32-char random).
+func (s *InterviewService) CreateInterview(ctx context.Context, actor application.AuthContext, cmd CreateInterviewCommand) (*CreateInterviewResult, error) {
+	if err := application.Authorize(actor, iamdomain.RoleAdmin, iamdomain.RoleRecruiter); err != nil {
+		return nil, err
+	}
+	var result *CreateInterviewResult
+	err := db.RunInTx(ctx, s.pool, actor.OrgID.String(), func(tctx context.Context) error {
+		app, err := s.appRepo.GetByID(tctx, cmd.ApplicationID)
+		if err == scrdomain.ErrNotFound {
+			return errors.NewNotFoundError("application", cmd.ApplicationID.String())
+		}
+		if err != nil {
+			return err
+		}
+		if app.OrgID != actor.OrgID {
+			return errors.NewDomainError("FORBIDDEN", "application belongs to another org")
+		}
+		if app.PassedScreening == nil || !*app.PassedScreening {
+			return errors.NewDomainError("APPLICATION_NOT_PASSED", "only passed applications can be interviewed")
+		}
+
+		candidate, err := s.candRepo.GetByID(tctx, app.CandidateID)
+		if err != nil {
+			return err
+		}
+		job, err := s.jobRepo.GetByID(tctx, app.JobID)
+		if err != nil {
+			return err
+		}
+
+		questions := s.generateQuestions(candidate, job, cmd.QuestionCount)
+		domainQuestions := make([]ivdomain.Question, 0, len(questions))
+		for i, q := range questions {
+			domainQuestions = append(domainQuestions, ivdomain.Question{Idx: i + 1, Content: q.Prompt, Category: q.Category, Skill: q.Skill})
+			if err := s.bank.Create(tctx, actor.OrgID, domainQuestions[i]); err != nil {
+				return err
+			}
+		}
+
+		now := s.clock.Now()
+		iv, err := ivdomain.NewInterview(actor.OrgID, app.ID, domainQuestions, now.Add(7*24*time.Hour), s.clock)
+		if err != nil {
+			return err
+		}
+		if err := s.ivRepo.Create(tctx, iv); err != nil {
+			return err
+		}
+
+		invite := &ivdomain.InvitationToken{
+			ID: uuid.New(), OrgID: actor.OrgID, InterviewID: iv.ID,
+			Token:     randomToken(),
+			ExpiresAt: now.Add(7 * 24 * time.Hour),
+		}
+		if err := s.tokenRepo.Create(tctx, invite); err != nil {
+			return err
+		}
+		result = &CreateInterviewResult{InterviewID: iv.ID, Token: invite.Token, ExpiresAt: invite.ExpiresAt}
+		return nil
+	})
+	return result, err
+}
+
+type IssueTicketCommand struct {
+	InterviewID     uuid.UUID
+	InvitationToken string
+}
+
+type IssueTicketResult struct {
+	Ticket    string    `json:"ticket"`
+	SessionID string    `json:"session_id"`
+	ExpiresAt time.Time `json:"expires_at"`
+}
+
+// IssueTicket: pre-auth validate invitation token → first start marks used →
+// issue 10-min WS ticket bound to session_id + interview_id.
+func (s *InterviewService) IssueTicket(ctx context.Context, cmd IssueTicketCommand) (*IssueTicketResult, error) {
+	invite, status := s.tokenRepo.Validate(ctx, cmd.InvitationToken)
+	switch status {
+	case ivdomain.TokenValid:
+		// ok
+	case ivdomain.TokenUsed:
+		// reconnect path — the same token stays valid for resume
+		if invite == nil || invite.InterviewID != cmd.InterviewID {
+			return nil, errors.NewDomainError("TOKEN_MISMATCH", "token does not match this interview")
+		}
+	case ivdomain.TokenExpired:
+		return nil, errors.NewDomainError("TOKEN_EXPIRED", "invitation expired")
+	case ivdomain.TokenRevoked:
+		return nil, errors.NewDomainError("TOKEN_REVOKED", "invitation revoked")
+	default:
+		return nil, errors.NewDomainError("TOKEN_INVALID", "invalid invitation token")
+	}
+	if invite == nil || invite.InterviewID != cmd.InterviewID {
+		return nil, errors.NewDomainError("TOKEN_MISMATCH", "token does not match this interview")
+	}
+
+	err := db.RunInTx(ctx, s.pool, invite.OrgID.String(), func(tctx context.Context) error {
+		if err := s.tokenRepo.MarkUsed(tctx, cmd.InvitationToken); err != nil {
+			return err
+		}
+		iv, err := s.ivRepo.GetByID(tctx, cmd.InterviewID)
+		if err != nil {
+			return err
+		}
+		iv.SetClock(s.clock)
+		return s.ivRepo.Update(tctx, iv) // touch: candidate entered
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	sessionID := uuid.New()
+	extra := map[string]any{
+		"session_id":   sessionID.String(),
+		"interview_id": cmd.InterviewID.String(),
+	}
+	ticket, err := s.tokens.Issue(cmd.InterviewID, invite.OrgID, "candidate", application.TokenTypeWSTicket, ticketTTL, extra)
+	if err != nil {
+		return nil, err
+	}
+	return &IssueTicketResult{Ticket: ticket, SessionID: sessionID.String(), ExpiresAt: s.clock.Now().Add(ticketTTL)}, nil
+}
+
+// ComposePrompt builds the interview system prompt: default + tenant prompt +
+// company context (latest versions) + safety rails.
+func (s *InterviewService) ComposePrompt(ctx context.Context, orgID uuid.UUID) (string, error) {
+	in := gensvc.ComposerInput{DefaultPrompt: gensvc.DefaultInterviewerPrompt}
+	if p, err := s.contextRepo.GetLatestPrompt(ctx, orgID); err == nil {
+		in.TenantPrompt = p.SystemPrompt
+	}
+	if contexts, err := s.contextRepo.ListContexts(ctx, orgID); err == nil && len(contexts) > 0 {
+		latest := contexts[0]
+		if reader, err := s.store.Download(ctx, latest.StoragePath); err == nil {
+			buf := new(strings.Builder)
+			_, _ = io.Copy(buf, reader)
+			_ = reader.Close()
+			in.CompanyContext = buf.String()
+		}
+	}
+	return gensvc.ComposeSystemPrompt(in), nil
+}
+
+// AnswerAndAdvance: record answer, persist, return the next question.
+func (s *InterviewService) AnswerAndAdvance(ctx context.Context, orgID string, interviewID uuid.UUID, content string) (*ivdomain.Question, error) {
+	var next *ivdomain.Question
+	err := db.RunInTx(ctx, s.pool, orgID, func(tctx context.Context) error {
+		iv, err := s.ivRepo.GetByID(tctx, interviewID)
+		if err != nil {
+			return err
+		}
+		iv.SetClock(s.clock)
+		iv.ExpireIfNeeded()
+		if iv.Status == ivdomain.StatusExpired {
+			return errors.NewDomainError("INTERVIEW_EXPIRED", "interview expired")
+		}
+		if err := iv.Answer(content); err != nil {
+			return err
+		}
+		next = iv.NextQuestion()
+		if next == nil {
+			_ = iv.Complete()
+		}
+		return s.ivRepo.Update(tctx, iv)
+	})
+	return next, err
+}
+
+// StartInterview marks in_progress (first connect / resume).
+func (s *InterviewService) StartInterview(ctx context.Context, orgID string, interviewID uuid.UUID) error {
+	return db.RunInTx(ctx, s.pool, orgID, func(tctx context.Context) error {
+		iv, err := s.ivRepo.GetByID(tctx, interviewID)
+		if err != nil {
+			return err
+		}
+		iv.SetClock(s.clock)
+		iv.ExpireIfNeeded()
+		if iv.Status == ivdomain.StatusExpired {
+			return errors.NewDomainError("INTERVIEW_EXPIRED", "interview expired")
+		}
+		if err := iv.Start(); err != nil {
+			return err
+		}
+		return s.ivRepo.Update(tctx, iv)
+	})
+}
+
+// CurrentState — resume support: current (next unanswered) question + total
+// count + interview status.
+func (s *InterviewService) CurrentState(ctx context.Context, orgID string, interviewID uuid.UUID) (next *ivdomain.Question, total int, status ivdomain.Status, err error) {
+	err = db.RunInTx(ctx, s.pool, orgID, func(tctx context.Context) error {
+		iv, err := s.ivRepo.GetByID(tctx, interviewID)
+		if err != nil {
+			return err
+		}
+		iv.SetClock(s.clock)
+		iv.ExpireIfNeeded()
+		status = iv.Status
+		total = len(iv.Questions)
+		if status == ivdomain.StatusInProgress {
+			next = iv.NextQuestion()
+		}
+		return nil
+	})
+	return next, total, status, err
+}
+
+func (s *InterviewService) generateQuestions(candidate *cvdomain.Candidate, job *jobdomain.Job, count int) []gensvc.Question {
+	profile := gensvc.CandidateProfile{Skills: candidateSkills(candidate), Summary: candidateSummary(candidate)}
+	reqs := gensvc.JobRequirements{Title: job.Title, Description: job.Description, RequiredSkills: job.RequiredSkills}
+	return gensvc.GenerateQuestions(profile, reqs, count)
+}
+
+func candidateSkills(c *cvdomain.Candidate) []string {
+	if len(c.CVStructured) == 0 {
+		return nil
+	}
+	var rd struct {
+		Skills []string `json:"skills"`
+	}
+	_ = json.Unmarshal(c.CVStructured, &rd)
+	return rd.Skills
+}
+
+func candidateSummary(c *cvdomain.Candidate) string {
+	if len(c.CVStructured) == 0 {
+		return c.CVRawText
+	}
+	var rd struct {
+		Summary string `json:"summary"`
+	}
+	_ = json.Unmarshal(c.CVStructured, &rd)
+	return rd.Summary
+}
+
+func randomToken() string {
+	b := make([]byte, 32)
+	_, _ = rand.Read(b)
+	return hex.EncodeToString(b)
+}

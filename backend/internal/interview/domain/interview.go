@@ -1,0 +1,159 @@
+package domain
+
+import (
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/intivai/backend/internal/shared/domain"
+	"github.com/intivai/backend/internal/shared/errors"
+)
+
+type Status string
+
+const (
+	StatusPending    Status = "pending"
+	StatusInProgress Status = "in_progress"
+	StatusCompleted  Status = "completed"
+	StatusExpired    Status = "expired"
+)
+
+// Question VO — one step of the interview.
+type Question struct {
+	Idx      int    `json:"idx"` // 1-based, stable across resume
+	Content  string `json:"content"`
+	Category string `json:"category"`
+	Skill    string `json:"skill,omitempty"`
+}
+
+// Answer VO — candidate response, stored for evaluation.
+type Answer struct {
+	Idx        int       `json:"idx"`
+	Content    string    `json:"content"`
+	AnsweredAt time.Time `json:"answered_at"`
+}
+
+// Interview aggregate — state machine driven by an injectable clock
+// (idle timeout + expiry are time-based; tests use FrozenClock).
+type Interview struct {
+	domain.Entity
+	OrgID           uuid.UUID
+	ApplicationID   uuid.UUID
+	Status          Status
+	Questions       []Question
+	Answers         []Answer
+	LastQuestionIdx int
+	StartedAt       *time.Time
+	CompletedAt     *time.Time
+	ExpiresAt       *time.Time
+	clock           Clock
+	lastActivity    time.Time
+}
+
+func NewInterview(orgID, applicationID uuid.UUID, questions []Question, expiresAt time.Time, clock Clock) (*Interview, error) {
+	if len(questions) == 0 {
+		return nil, errors.NewDomainError("INTERVIEW_NO_QUESTIONS", "interview requires at least one question")
+	}
+	if clock == nil {
+		clock = SystemClock()
+	}
+	exp := expiresAt.UTC()
+	return &Interview{
+		Entity:        domain.Entity{ID: domain.NewID(), CreatedAt: clock.Now()},
+		OrgID:         orgID,
+		ApplicationID: applicationID,
+		Status:        StatusPending,
+		Questions:     questions,
+		ExpiresAt:     &exp,
+		clock:         clock,
+		lastActivity:  clock.Now(),
+	}, nil
+}
+
+// Start moves pending → in_progress. No-op for already-started interviews
+// (reconnect path).
+func (iv *Interview) Start() error {
+	switch iv.Status {
+	case StatusPending:
+		now := iv.clock.Now()
+		iv.Status = StatusInProgress
+		iv.StartedAt = &now
+		iv.lastActivity = now
+		return nil
+	case StatusInProgress:
+		return nil // resume
+	default:
+		return errors.NewDomainError("INTERVIEW_NOT_STARTABLE", "interview cannot start from "+string(iv.Status))
+	}
+}
+
+// Answer records a candidate answer, advances the cursor, touches activity.
+func (iv *Interview) Answer(content string) error {
+	if iv.Status != StatusInProgress {
+		return errors.NewDomainError("INTERVIEW_NOT_IN_PROGRESS", "interview is not in progress")
+	}
+	if content == "" {
+		return errors.NewDomainError("ANSWER_EMPTY", "answer is empty")
+	}
+	idx := iv.LastQuestionIdx + 1
+	if idx > len(iv.Questions) {
+		idx = len(iv.Questions)
+	}
+	iv.Answers = append(iv.Answers, Answer{Idx: idx, Content: content, AnsweredAt: iv.clock.Now()})
+	iv.LastQuestionIdx = idx
+	iv.lastActivity = iv.clock.Now()
+	return nil
+}
+
+// NextQuestion returns the next unanswered question, or nil when done.
+func (iv *Interview) NextQuestion() *Question {
+	if iv.Status != StatusInProgress {
+		return nil
+	}
+	if iv.LastQuestionIdx >= len(iv.Questions) {
+		return nil
+	}
+	q := iv.Questions[iv.LastQuestionIdx]
+	return &q
+}
+
+// Complete marks the interview finished (all questions answered or recruiter
+// ended it).
+func (iv *Interview) Complete() error {
+	if iv.Status != StatusInProgress {
+		return errors.NewDomainError("INTERVIEW_NOT_IN_PROGRESS", "interview is not in progress")
+	}
+	now := iv.clock.Now()
+	iv.Status = StatusCompleted
+	iv.CompletedAt = &now
+	return nil
+}
+
+// ExpireIfNeeded transitions to expired when the deadline passed.
+func (iv *Interview) ExpireIfNeeded() {
+	if iv.ExpiresAt != nil && iv.clock.Now().After(*iv.ExpiresAt) && iv.Status != StatusCompleted {
+		iv.Status = StatusExpired
+	}
+}
+
+// IsIdle reports whether the candidate has been silent past the timeout.
+// The idle timeout is the ONLY time-based disconnect rule (docs: 5 min).
+func (iv *Interview) IsIdle(timeout time.Duration) bool {
+	return iv.Status == StatusInProgress && iv.clock.Now().Sub(iv.lastActivity) >= timeout
+}
+
+// Touch refreshes the activity marker (any client frame counts).
+func (iv *Interview) Touch() {
+	iv.lastActivity = iv.clock.Now()
+}
+
+// SetClock attaches the clock after persistence hydration.
+func (iv *Interview) SetClock(c Clock) {
+	if c != nil {
+		iv.clock = c
+	}
+}
+
+// ResumeIdx — reconnection resumes from the last unanswered question.
+func (iv *Interview) ResumeIdx() int {
+	return iv.LastQuestionIdx + 1
+}
