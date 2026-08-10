@@ -26,6 +26,10 @@ import (
 	"github.com/intivai/backend/internal/iam/application"
 	"github.com/intivai/backend/internal/iam/infrastructure/auth"
 	iamrepo "github.com/intivai/backend/internal/iam/infrastructure/persistence"
+	ivapi "github.com/intivai/backend/internal/interview/api"
+	ivapp "github.com/intivai/backend/internal/interview/application"
+	ivdomain "github.com/intivai/backend/internal/interview/domain"
+	ivrepo "github.com/intivai/backend/internal/interview/infrastructure/persistence"
 	jobapi "github.com/intivai/backend/internal/job/api"
 	jobapp "github.com/intivai/backend/internal/job/application"
 	jobrepo "github.com/intivai/backend/internal/job/infrastructure/persistence"
@@ -146,6 +150,13 @@ func main() {
 	contextService := ctxapp.NewContextService(pool, contextRepo, store, queueClient, logger)
 	contextHandler := ctxapi.NewContextHandler(contextService)
 
+	// --- M3: interviews ---
+	ivRepo := ivrepo.NewPostgresInterviewRepo(pool)
+	tokenRepo := ivrepo.NewPostgresTokenRepo(pool)
+	questionBank := ivrepo.NewPostgresQuestionBank(pool)
+	interviewService := ivapp.NewInterviewService(pool, ivRepo, tokenRepo, questionBank, appRepo, candidateRepo, jobRepo, contextRepo, store, tokens, ivdomain.SystemClock())
+	chatHandler := ivapi.NewChatHandler(interviewService, llmClient, tokens, logger)
+
 	// --- Workers ---
 	parseWorker := cvapp.NewParseWorker(pool, candidateRepo, store, queueClient, logger)
 	extractWorker := cvapp.NewExtractWorker(pool, candidateRepo, appRepo, jobRepo, llmClient, queueClient, logger)
@@ -214,6 +225,13 @@ func main() {
 	authRoutes.Post("/register", authRateLimit, authHandler.Register)
 	authRoutes.Post("/login", authRateLimit, authHandler.Login)
 
+	// Candidate (public) routes MUST be registered BEFORE the authed group:
+	// fiber's Group("", handlers...) registers app.Use("/") — global for every
+	// route registered AFTER it. Candidate endpoints would otherwise inherit
+	// the tenant/auth middleware (regression-tested in route_groups_test.go).
+	v1.Post("/candidate/interviews/:id/ticket", authRateLimit, chatHandler.Ticket)
+	v1.Get("/candidate/interviews/:id/chat", chatHandler.RequireTicket, chatHandler.Chat())
+
 	authed := v1.Group("", authMW, tenantMW, userRateLimit)
 	authed.Get("/me", authHandler.Me)
 	authed.Post("/users", authHandler.CreateUser)
@@ -235,6 +253,8 @@ func main() {
 	authed.Get("/orgs/:orgId/contexts", contextHandler.ListContexts)
 	authed.Put("/orgs/:orgId/prompt", contextHandler.SetPrompt)
 	authed.Get("/orgs/:orgId/prompt", contextHandler.GetPrompt)
+
+	authed.Post("/interviews", chatHandler.Create)
 
 	// --- Worker (asynq) ---
 	worker := queue.NewServer(cfg.Redis.Addr, 10, logger)
