@@ -18,6 +18,27 @@ func NewCreateUser(repo iamdomain.IAMRepository, hasher PasswordHasher) *CreateU
 	return &CreateUser{repo: repo, hasher: hasher}
 }
 
+// roleRank — creation authority order. Higher rank may create at-or-below.
+func roleRank(r iamdomain.Role) int {
+	switch r {
+	case iamdomain.RoleAdmin:
+		return 3
+	case iamdomain.RoleRecruiter:
+		return 2
+	case iamdomain.RoleInterviewer:
+		return 1
+	default: // member
+		return 0
+	}
+}
+
+func canCreateRole(actor AuthContext, target iamdomain.Role) bool {
+	if actor.Role == string(iamdomain.RoleAdmin) {
+		return true
+	}
+	return roleRank(iamdomain.Role(actor.Role)) > roleRank(target)
+}
+
 func (uc *CreateUser) Execute(ctx context.Context, actor AuthContext, cmd CreateUserCommand) (*CreateUserResult, error) {
 	if err := Authorize(actor, iamdomain.RoleAdmin, iamdomain.RoleRecruiter); err != nil {
 		return nil, err
@@ -32,6 +53,11 @@ func (uc *CreateUser) Execute(ctx context.Context, actor AuthContext, cmd Create
 	}
 	if !role.Valid() {
 		return nil, errors.NewDomainError("INVALID_ROLE", "invalid role: "+cmd.Role)
+	}
+	// No privilege escalation: a user may only create roles at or below
+	// their own rank (admin > recruiter > interviewer/member).
+	if !canCreateRole(actor, role) {
+		return nil, errors.NewDomainError("FORBIDDEN", "cannot create a user with role "+string(role))
 	}
 
 	hash, err := uc.hasher.Hash(cmd.Password)

@@ -195,6 +195,30 @@ func TestCreateUserValidationAndAuthz(t *testing.T) {
 	}
 }
 
+// RED: recruiters must not escalate — creating an admin (or recruiter) as a
+// recruiter is privilege escalation.
+func TestCreateUserNoRecruiterEscalation(t *testing.T) {
+	repo := &memRepo{}
+	orgID := uuid.New()
+	recruiter := AuthContext{UserID: uuid.New(), OrgID: orgID, Role: string(iamdomain.RoleRecruiter)}
+	uc := NewCreateUser(repo, fakeHasher{})
+
+	for _, role := range []string{"admin", "recruiter"} {
+		if _, err := uc.Execute(context.Background(), recruiter, CreateUserCommand{OrgID: orgID, Email: "r@x.io", Role: role, Password: "secret123"}); err == nil {
+			t.Fatalf("recruiter created %s user — escalation", role)
+		}
+	}
+	// Recruiter may still create peers below their rank.
+	if _, err := uc.Execute(context.Background(), recruiter, CreateUserCommand{OrgID: orgID, Email: "i@x.io", Role: "interviewer", Password: "secret123"}); err != nil {
+		t.Fatalf("recruiter creating interviewer: %v", err)
+	}
+	// Admin can create any role.
+	admin := AuthContext{UserID: uuid.New(), OrgID: orgID, Role: string(iamdomain.RoleAdmin)}
+	if _, err := uc.Execute(context.Background(), admin, CreateUserCommand{OrgID: orgID, Email: "a@x.io", Role: "admin", Password: "secret123"}); err != nil {
+		t.Fatalf("admin creating admin: %v", err)
+	}
+}
+
 func TestAuthorize(t *testing.T) {
 	if err := Authorize(AuthContext{Role: string(iamdomain.RoleAdmin)}, iamdomain.RoleAdmin, iamdomain.RoleRecruiter); err != nil {
 		t.Fatal(err)
