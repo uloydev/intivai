@@ -230,7 +230,7 @@ func main() {
 	// route registered AFTER it. Candidate endpoints would otherwise inherit
 	// the tenant/auth middleware (regression-tested in route_groups_test.go).
 	v1.Post("/candidate/interviews/:id/ticket", authRateLimit, chatHandler.Ticket)
-	v1.Get("/candidate/interviews/:id/chat", chatHandler.RequireTicket, chatHandler.Chat())
+	v1.Get("/candidate/interviews/:id/chat", chatHandler.RequireTicket, chatHandler.Chat(cfg.App.AllowedOrigins))
 
 	authed := v1.Group("", authMW, tenantMW, userRateLimit)
 	authed.Get("/me", authHandler.Me)

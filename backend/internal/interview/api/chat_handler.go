@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net"
 	"strings"
+	"sync"
 	"time"
 
 	fiberws "github.com/gofiber/contrib/websocket"
@@ -14,6 +15,7 @@ import (
 	"github.com/intivai/backend/internal/iam/application"
 	ivapp "github.com/intivai/backend/internal/interview/application"
 	ivdomain "github.com/intivai/backend/internal/interview/domain"
+	gensvc "github.com/intivai/backend/internal/interview/domain/service"
 	"github.com/intivai/backend/internal/llm"
 	"github.com/intivai/backend/internal/shared/httpapi"
 	"github.com/rs/zerolog"
@@ -21,15 +23,33 @@ import (
 
 const idleTimeout = 5 * time.Minute
 
+// turnState serializes the "next question" dispatch between the streaming
+// goroutine and the interrupt path — exactly one sends it.
+type turnState struct {
+	mu           sync.Mutex
+	next         *ivdomain.Question
+	questionSent bool
+}
+
+func (t *turnState) sendQuestionOnce(send func(any)) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if !t.questionSent && t.next != nil {
+		t.questionSent = true
+		send(ivdomain.QuestionMessage{Type: ivdomain.MsgQuestion, Content: t.next.Content, Idx: t.next.Idx})
+	}
+}
+
 type ChatHandler struct {
-	svc    *ivapp.InterviewService
-	llm    llm.Provider
-	tokens application.TokenProvider
-	log    zerolog.Logger
+	svc      *ivapp.InterviewService
+	llm      llm.Provider
+	tokens   application.TokenProvider
+	log      zerolog.Logger
+	sessions *sessionRegistry
 }
 
 func NewChatHandler(svc *ivapp.InterviewService, llmClient llm.Provider, tokens application.TokenProvider, log zerolog.Logger) *ChatHandler {
-	return &ChatHandler{svc: svc, llm: llmClient, tokens: tokens, log: log}
+	return &ChatHandler{svc: svc, llm: llmClient, tokens: tokens, log: log, sessions: newSessionRegistry()}
 }
 
 // Create — POST /interviews (recruiter).
@@ -58,7 +78,7 @@ func (h *ChatHandler) Create(c *fiber.Ctx) error {
 	return httpapi.Created(c, result)
 }
 
-// Ticket — POST /interviews/:id/ticket (candidate, invitation token).
+// Ticket — POST /candidate/interviews/:id/ticket (candidate, invitation token).
 func (h *ChatHandler) Ticket(c *fiber.Ctx) error {
 	id, err := uuid.Parse(c.Params("id"))
 	if err != nil {
@@ -97,10 +117,14 @@ func (h *ChatHandler) RequireTicket(c *fiber.Ctx) error {
 	return c.Next()
 }
 
-// Chat — WS /interviews/:id/chat. Protocol: ping→pong, answer → streamed LLM
-// tokens → response → next question; interrupt stops streaming; resume
-// re-sends start + current question; idle timeout closes.
-func (h *ChatHandler) Chat() fiber.Handler {
+// Chat — WS /candidate/interviews/:id/chat. Single writer goroutine serializes
+// all frames; LLM streaming runs in its own goroutine so interrupt stops it
+// mid-response; per-connection context cancels work on disconnect.
+func (h *ChatHandler) Chat(origins []string) fiber.Handler {
+	// Origin allowlist (CSWSH defense): when ALLOWED_ORIGINS is set, only
+	// listed origins upgrade. Note: the ws library rejects clients WITHOUT an
+	// Origin header under an allowlist — non-browser clients (mobile) must
+	// send Origin or the list stays empty (dev default "*").
 	return fiberws.New(func(conn *fiberws.Conn) {
 		claims, _ := conn.Locals("ws_claims").(*application.Claims)
 		if claims == nil {
@@ -109,16 +133,51 @@ func (h *ChatHandler) Chat() fiber.Handler {
 			return
 		}
 		interviewID := uuid.MustParse(claims.Extra["interview_id"].(string))
+		sessionID, _ := claims.Extra["session_id"].(string)
 		orgID := claims.OrgID.String()
 
-		if err := h.svc.StartInterview(context.Background(), orgID, interviewID); err != nil {
-			_ = conn.WriteJSON(ivdomain.ErrorMessage{Type: ivdomain.MsgError, Message: err.Error()})
+		if !h.sessions.TryAcquire(interviewID.String()) {
+			_ = conn.WriteJSON(ivdomain.ErrorMessage{Type: ivdomain.MsgError, Message: "interview already active on another connection"})
 			_ = conn.Close()
 			return
 		}
-		if err := h.sendStartAndQuestion(conn, orgID, interviewID); err != nil {
+		defer h.sessions.Release(interviewID.String())
+
+		connCtx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		// Single writer: all frames go through this goroutine.
+		writeCh := make(chan any, 64)
+		writerDone := make(chan struct{})
+		go func() {
+			defer close(writerDone)
+			for frame := range writeCh {
+				if err := conn.WriteJSON(frame); err != nil {
+					return
+				}
+			}
+		}()
+		defer func() {
+			close(writeCh)
+			<-writerDone
+		}()
+		send := func(frame any) {
+			select {
+			case writeCh <- frame:
+			case <-connCtx.Done():
+			}
+		}
+
+		if err := h.svc.StartInterview(connCtx, orgID, interviewID); err != nil {
+			send(ivdomain.ErrorMessage{Type: ivdomain.MsgError, Message: err.Error()})
 			return
 		}
+		// Compose the prompt ONCE per connection (version pinned at connect).
+		prompt := h.composePromptOnce(connCtx, orgID)
+		h.sendStartAndQuestion(connCtx, send, sessionID, orgID, interviewID)
+
+		var streamCancel context.CancelFunc
+		var turn *turnState
 
 		for {
 			_ = conn.SetReadDeadline(time.Now().Add(idleTimeout))
@@ -126,77 +185,104 @@ func (h *ChatHandler) Chat() fiber.Handler {
 			if err != nil {
 				var netErr net.Error
 				if errors.As(err, &netErr) && netErr.Timeout() {
-					_ = conn.WriteJSON(ivdomain.ErrorMessage{Type: ivdomain.MsgError, Message: "idle timeout"})
+					send(ivdomain.ErrorMessage{Type: ivdomain.MsgError, Message: "idle timeout"})
 				}
 				return
 			}
 			msg, err := ivdomain.ParseClientMessage(raw)
 			if err != nil {
-				_ = conn.WriteJSON(ivdomain.ErrorMessage{Type: ivdomain.MsgError, Message: "invalid message"})
+				send(ivdomain.ErrorMessage{Type: ivdomain.MsgError, Message: "invalid message"})
 				continue
 			}
 			switch m := msg.(type) {
 			case ivdomain.PingMessage:
-				_ = conn.WriteJSON(map[string]string{"type": ivdomain.MsgPong})
+				send(map[string]string{"type": ivdomain.MsgPong})
 			case ivdomain.ResumeMessage:
-				_ = h.sendStartAndQuestion(conn, orgID, interviewID)
+				if m.SessionID != sessionID {
+					send(ivdomain.ErrorMessage{Type: ivdomain.MsgError, Message: "session mismatch"})
+					continue
+				}
+				h.sendStartAndQuestion(connCtx, send, sessionID, orgID, interviewID)
 			case ivdomain.InterruptMessage:
-				_ = conn.WriteJSON(ivdomain.ResponseMessage{Type: ivdomain.MsgResponse, Content: "Interrupted."})
+				if streamCancel != nil {
+					streamCancel() // stops the LLM stream mid-response
+					streamCancel = nil
+				}
+				send(ivdomain.ResponseMessage{Type: ivdomain.MsgResponse, Content: "Interrupted."})
+				// The stream goroutine suppresses the next question when its
+				// ctx is canceled; send it here exactly once instead. If the
+				// stream already completed normally, questionSent guards the
+				// double-send.
+				if turn != nil {
+					turn.sendQuestionOnce(send)
+				}
+				turn = nil
 			case ivdomain.AnswerMessage:
-				if err := h.handleAnswer(conn, orgID, interviewID, m.Content); err != nil {
-					_ = conn.WriteJSON(ivdomain.ErrorMessage{Type: ivdomain.MsgError, Message: err.Error()})
+				next, err := h.svc.AnswerAndAdvance(connCtx, orgID, interviewID, m.Content)
+				if err != nil {
+					send(ivdomain.ErrorMessage{Type: ivdomain.MsgError, Message: err.Error()})
 					return
 				}
+				turn = &turnState{next: next}
+				streamCtx, cancelStream := context.WithCancel(connCtx)
+				streamCancel = cancelStream
+				go h.streamAndRespond(streamCtx, send, prompt, m.Content, next, turn)
 			}
 		}
-	})
+	}, fiberws.Config{Origins: origins})
 }
 
-func (h *ChatHandler) sendStartAndQuestion(conn *fiberws.Conn, orgID string, interviewID uuid.UUID) error {
-	next, total, status, err := h.svc.CurrentState(context.Background(), orgID, interviewID)
+// composePromptOnce builds the system prompt at connect time; failures fall
+// back to the default + safety rails.
+func (h *ChatHandler) composePromptOnce(ctx context.Context, orgID string) string {
+	prompt, err := h.svc.ComposePrompt(ctx, uuid.MustParse(orgID))
 	if err != nil {
-		return err
+		h.log.Error().Err(err).Msg("compose prompt failed, using default")
+		return gensvc.ComposeSystemPrompt(gensvc.ComposerInput{})
 	}
-	sid := ""
-	if claims, ok := conn.Locals("ws_claims").(*application.Claims); ok {
-		sid, _ = claims.Extra["session_id"].(string)
+	return prompt
+}
+
+func (h *ChatHandler) sendStartAndQuestion(ctx context.Context, send func(any), sessionID, orgID string, interviewID uuid.UUID) {
+	next, total, status, err := h.svc.CurrentState(ctx, orgID, interviewID)
+	if err != nil {
+		return
 	}
-	_ = conn.WriteJSON(ivdomain.InterviewStartMessage{Type: ivdomain.MsgStart, SessionID: sid, TotalQuestions: total})
+	send(ivdomain.InterviewStartMessage{Type: ivdomain.MsgStart, SessionID: sessionID, TotalQuestions: total})
 	if status == ivdomain.StatusInProgress && next != nil {
-		_ = conn.WriteJSON(ivdomain.QuestionMessage{Type: ivdomain.MsgQuestion, Content: next.Content, Idx: next.Idx})
+		send(ivdomain.QuestionMessage{Type: ivdomain.MsgQuestion, Content: next.Content, Idx: next.Idx})
 	}
-	return nil
 }
 
-func (h *ChatHandler) handleAnswer(conn *fiberws.Conn, orgID string, interviewID uuid.UUID, content string) error {
-	next, err := h.svc.AnswerAndAdvance(context.Background(), orgID, interviewID, content)
-	if err != nil {
-		return err
-	}
-	systemPrompt, err := h.svc.ComposePrompt(context.Background(), uuid.MustParse(orgID))
-	if err != nil {
-		systemPrompt = ""
-	}
-	ch, err := h.llm.ChatStream(context.Background(), llm.ChatRequest{
+// streamAndRespond runs the LLM stream in its own goroutine. On normal
+// completion it sends response + next question; a canceled ctx (interrupt /
+// disconnect) suppresses both — the interrupt path dispatches the question.
+func (h *ChatHandler) streamAndRespond(ctx context.Context, send func(any), prompt, answer string, next *ivdomain.Question, turn *turnState) {
+	ch, err := h.llm.ChatStream(ctx, llm.ChatRequest{
 		Messages: []llm.Message{
-			{Role: "system", Content: systemPrompt},
-			{Role: "user", Content: content},
+			{Role: "system", Content: prompt},
+			{Role: "user", Content: answer},
 		},
 	})
 	if err != nil {
-		_ = conn.WriteJSON(ivdomain.ErrorMessage{Type: ivdomain.MsgError, Message: "llm unavailable: " + err.Error()})
-		return nil
+		h.log.Error().Err(err).Msg("chat stream failed")
+		send(ivdomain.ErrorMessage{Type: ivdomain.MsgError, Message: "llm unavailable"})
+		// The answer was recorded — keep the interview moving by dispatching
+		// the next question (same recovery as interrupt).
+		turn.sendQuestionOnce(send)
+		return
 	}
 	var final strings.Builder
 	for token := range ch {
 		final.WriteString(token)
-		_ = conn.WriteJSON(ivdomain.TokenMessage{Type: ivdomain.MsgToken, Content: token})
+		send(ivdomain.TokenMessage{Type: ivdomain.MsgToken, Content: token})
 	}
-	_ = conn.WriteJSON(ivdomain.ResponseMessage{Type: ivdomain.MsgResponse, Content: final.String()})
-	if next != nil {
-		_ = conn.WriteJSON(ivdomain.QuestionMessage{Type: ivdomain.MsgQuestion, Content: next.Content, Idx: next.Idx})
-	} else {
-		_ = conn.WriteJSON(ivdomain.EvaluationMessage{Type: ivdomain.MsgEvaluation, Scores: map[string]float64{}})
+	if ctx.Err() != nil {
+		return // interrupted: response/next question suppressed
 	}
-	return nil
+	send(ivdomain.ResponseMessage{Type: ivdomain.MsgResponse, Content: final.String()})
+	turn.sendQuestionOnce(send)
+	if next == nil {
+		send(ivdomain.EvaluationMessage{Type: ivdomain.MsgEvaluation, Scores: map[string]float64{}})
+	}
 }

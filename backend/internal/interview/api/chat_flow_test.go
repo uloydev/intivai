@@ -124,7 +124,7 @@ func TestChatFlowEndToEnd(t *testing.T) {
 	// 3. Serve the chat route in-process.
 	app := fiber.New()
 	handler := NewChatHandler(svc, streamMockLLM{}, jwt, zerolog.Nop())
-	app.Get("/candidate/interviews/:id", handler.RequireTicket, handler.Chat())
+	app.Get("/candidate/interviews/:id", handler.RequireTicket, handler.Chat(nil))
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
