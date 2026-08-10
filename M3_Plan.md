@@ -3,6 +3,23 @@
 Scope from `AI_Interviewer_Phases.md` §Phase 3 (Week 8-10). Status tracking for
 deliverables and doc testing criteria — mark boxes as executed, not just coded.
 
+## Open items — carryover (from M2 + M3; review at every phase start)
+
+| # | Item | Source | Scheduled | Status |
+|---|------|--------|-----------|--------|
+| 1 | Context management: sliding window (last 10 Q&A) + tiktoken budget | M3 deliverable | 2026-08-12 | [ ] |
+| 2 | 100 concurrent WS connections load check (harness: Go load client) | M3 criterion | 2026-08-13 | [ ] |
+| 3 | Interview duration cap (30 min) + per-question timeout (3 min) | Research §2 config | 2026-08-12 | [ ] |
+| 4 | Dynamic follow-up probing (weakness→probe, strength→next) | Research §2 strategy | 2026-08-14 (post-load) | [ ] |
+| 5 | Smoke extended with interview endpoints | M3 plan | 2026-08-11 | [ ] |
+| 6 | `go test -race` in CI (backend job) | cross-cutting | 2026-08-11 | [ ] |
+| 7 | Local embeddings fastembed bge-small (columns+HNSW ready) | M2 deferral | 2026-08-15 | [ ] |
+| 8 | Embedding-based semantic recall (banks + SemanticMatch) | M2 deferral | 2026-08-15 (after 7) | [ ] |
+| 9 | Scanned-PDF OCR fixture + functional verification | M2 verification | 2026-08-12 | [ ] |
+| 10 | Context version pinned on interview row (audit) | Phases Phase 2 | 2026-08-13 | [ ] |
+| 11 | Server heartbeat (PingInterval/PongWait) | Research §2 config | 2026-08-14 | [ ] |
+| 12 | Multi-instance session registry (Redis) | cross-cutting | deferred — needs multi-instance deployment (DECISION) | [ ] |
+
 ## Deliverables
 
 | Area | Files | Status |
@@ -39,6 +56,7 @@ output) — verify `ChatStream` against the interview flow.
 - [ ] Fresh-DB boot verified (`make dev` from clean volume)
 - [ ] `make smoke` extended with interview endpoints
 - [ ] Schema change = migration + repo + domain in SAME change
+- [ ] Completeness review: full design doc (Research config blocks incl.) walked against spec-coverage checklist before phase is marked done
 
 ## TDD order (M3) — progress
 
@@ -55,18 +73,20 @@ Remaining for M3 done-criteria: sliding-window context management (tiktoken), 10
 
 ## Doc testing criteria (execute, then check)
 
-- [ ] WS connects, handshake completes (candidate uses WS ticket, not JWT)
-- [ ] WS upgrade without a valid ticket is rejected
-- [ ] DeepSeek Flash returns streaming response
-- [ ] Questions generated based on CV gaps
-- [ ] Selected questions persisted to question bank (reuse + audit)
-- [ ] Answers stored in PostgreSQL
-- [ ] Reconnection resumes from last unanswered question
-- [ ] Bias detection catches prohibited questions
-- [ ] Idle timeout disconnects after 5 minutes
-- [ ] 100 concurrent WebSocket connections stable
-- [ ] Prompt composer: tenant prompt + company context + safety rails composed correctly
-- [ ] Safety rails always last (tenant cannot override)
+- [x] WS connects, handshake completes (candidate uses WS ticket, not JWT)
+- [x] WS upgrade without a valid ticket is rejected
+- [x] DeepSeek Flash returns streaming response (live-verified with real key)
+- [x] Questions generated based on CV gaps
+- [x] Selected questions persisted to question bank (reuse + audit)
+- [x] Answers stored in PostgreSQL
+- [x] Reconnection resumes from last unanswered question (resume sends start + current question; session mismatch rejected)
+- [x] Bias detection catches prohibited questions
+- [x] Idle timeout disconnects after 5 minutes (read deadline + injectable clock)
+- [ ] 100 concurrent WebSocket connections stable (load check pending)
+- [x] System prompt composer: tenant prompt + company context + safety rails composed correctly (live)
+- [x] Safety rails always last (tenant cannot override)
+- [x] Interrupt stops the AI mid-response (streaming goroutine + cancel; live-verified)
+- [x] Single active connection per interview (second socket rejected)
 
 ## Design constraints (learned in M1/M2 — apply, don't rediscover)
 
@@ -79,3 +99,7 @@ Remaining for M3 done-criteria: sliding-window context management (tiktoken), 10
 - Idempotency: reconnection must not re-ask answered questions
 - Injection: company context validated by `ContainsInjection` at upload (M2);
   composer pins safety rails last
+- Realtime (landed): single writer goroutine per socket; LLM streaming in its
+  own goroutine with ctx cancel (interrupt); single active connection per
+  interview (`sessionRegistry`); prompt composed once per connection; LLM
+  error / interrupt both dispatch the next question via `turnState`

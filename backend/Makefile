@@ -20,6 +20,7 @@ test:
 coverage:
 	TEST_DATABASE_URL='postgres://intivai_app:intivai_app@localhost:5433/intivai?sslmode=disable' \
 	TEST_REDIS_ADDR='localhost:6380' \
+	TEST_MINIO_ENDPOINT='localhost:9002' TEST_MINIO_ACCESS='minioadmin' TEST_MINIO_SECRET='minioadmin' \
 	bash ../scripts/check-coverage.sh
 
 # Integration tests against a live Postgres+Redis (see CI + docker-compose).
@@ -32,6 +33,7 @@ test-integration:
 test-integration-dev:
 	TEST_DATABASE_URL='postgres://intivai_app:intivai_app@localhost:5433/intivai?sslmode=disable' \
 	TEST_REDIS_ADDR='localhost:6380' \
+	TEST_MINIO_ENDPOINT='localhost:9002' TEST_MINIO_ACCESS='minioadmin' TEST_MINIO_SECRET='minioadmin' \
 	go test ./...
 
 migrate:

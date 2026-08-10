@@ -31,8 +31,8 @@ Plan for the current phase lives in `M3_Plan.md` (acceptance criteria from
 
 ## Workflow per change
 
-1. Small units. One context/worker/endpoint per change — never big-bang
-2. **TDD (red-green-refactor), layer-adapted:**
+0. **Never commit automatically.** Only commit when the user explicitly requests it (e.g. "commit", "create commits"). Leave changes staged/unstaged in the working tree otherwise
+1. Small units. One context/worker/endpoint per change — never big-bang2. **TDD (red-green-refactor), layer-adapted:**
    - Domain/use cases: unit test FIRST (type-driven — compile errors define the interface), then implement
    - Repos/workers: integration spec FIRST (round-trip, NULL columns, constraints, status transitions, idempotency), then implement; batch the slow DB cycles
    - Handlers: `app.Test` assertions on status + DTO shape; OpenAPI (`api/openapi.yaml`) is the contract
@@ -52,16 +52,25 @@ Plan for the current phase lives in `M3_Plan.md` (acceptance criteria from
 | LLM streaming | Mock provider with deterministic token chunks | Instant |
 | Idle timeout | Inject clock; never test real 5-min waits | Instant |
 
+## Phase planning (start of EVERY phase)
+
+1. **Full-spec extraction**: copy ALL design requirements into the plan — deliverable tables AND Research.md config/behavior blocks (timeouts, budgets, heartbeat, probing). Reference blocks are requirements, not decoration
+2. **Carryover review**: read the previous phase's "Open items (carryover)" section; schedule every item with a date or explicitly drop it as an out-of-scope DECISION (written down, not implied)
+3. **Artifact-first verification**: for anything needing verification (OCR, load, concurrency), plan the fixture/harness as a task BEFORE the feature — no "implemented but unverifiable" states
+4. **Deferral rule**: any deferral must record WHERE, WHY, and a DATE in the carryover section. "Deferred" without a date is an accident, not a decision
+5. **Completeness review before marking phase done**: walk the full design doc line-by-line against a spec-coverage checklist (not just testing-criteria checkboxes). Happy path working ≠ spec covered
+
 ## Definition of Done (per phase)
 
-- [ ] Doc deliverables implemented per `AI_Interviewer_Phases.md`
-- [ ] Doc testing criteria executed (not just code review) — mark results in the phase doc
+- [ ] Doc deliverables implemented per `AI_Interviewer_Phases.md` (full design doc, not just the deliverable table)
+- [ ] Doc testing criteria executed with the required artifacts (fixtures/harnesses) — mark results in the phase doc
 - [ ] `make check` green
 - [ ] `make coverage` green (floors: domain ≥70%, others ≥50%)
 - [ ] Integration tests green (`make test-integration-dev`) — env-gated tests run in CI
 - [ ] Schema change = migration 00X + repo + domain in the SAME change; fresh-DB boot verified (`make dev` from clean volume)
 - [ ] Worker pipeline: happy path + failure path verified (status machine states observable via API)
 - [ ] New API surface smoke-tested (`make smoke`); OpenAPI (`api/openapi.yaml`) updated
+- [ ] Carryover section updated: closed items marked, new deferrals recorded with dates
 
 ## Conventions (learned the hard way — follow, don't rediscover)
 
@@ -95,13 +104,21 @@ Plan for the current phase lives in `M3_Plan.md` (acceptance criteria from
 
 ### Security
 - Prompt/context content: `ContainsInjection` rails before persistence
-- JWT: only `type=auth` tokens accepted on API routes
+- JWT: only `type=auth` tokens accepted on API routes; `ws_ticket` only on `/candidate/interviews/:id/chat`
 - Passwords: min 8 chars; bcrypt
+- Role rank: a user may only create roles AT OR BELOW their own rank (admin > recruiter > interviewer/member) — no recruiter→admin escalation (`canCreateRole` in `create_user.go`)
+- WS Origin allowlist: `INTIVAI_ALLOWED_ORIGINS` guards the chat socket (CSWSH); non-browser clients must send a matching Origin when the list is set
+
+### Interviews (M3 realtime)
+- WS framing: single writer goroutine (all frames through one channel); LLM streaming in its own goroutine with ctx cancel → `interrupt` stops the stream mid-response
+- One active connection per interview (`sessionRegistry`); second socket rejected
+- System prompt composed ONCE per connection (tenant prompt + company context version pinned at connect); LLM failure or interrupt still dispatches the next question (`turnState.sendQuestionOnce`)
+- Session pinning: `resume` must echo the ticket's `session_id`, else `error: session mismatch`
 
 ## Tests
 
 - Unit (pure domain): scoring engine, semantic, prompt validation, job/iam/cv domains, CVService compensation, PDF extraction, DTO json-tag contract — always run `make check`
-- Integration (env-gated, skip without `TEST_DATABASE_URL`): RLS isolation, pg memory bank, re-score savepoint, repo round-trips (NULL/jsonb), score + extract worker pipelines. Run with `make test-integration-dev`; executed in CI with real postgres+redis services
+- Integration (env-gated, skip without `TEST_DATABASE_URL`): RLS isolation, pg memory bank, re-score savepoint, repo round-trips (NULL/jsonb), score + extract worker pipelines, chat flow (ticket → start → answer → tokens → next; interrupt; second-connection rejection; session mismatch; LLM-error advance), interview service flow (ticket states, expiry/revoke, compose rails). Run with `make test-integration-dev`; executed in CI with real postgres+redis services
 - New repo/worker logic → integration test (that is where this project's bugs lived)
 
 ## Environment
