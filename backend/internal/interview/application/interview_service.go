@@ -92,6 +92,9 @@ func (s *InterviewService) CreateInterview(ctx context.Context, actor applicatio
 		if err != nil {
 			return err
 		}
+		if job.Status != jobdomain.StatusActive {
+			return errors.NewDomainError("JOB_NOT_ACTIVE", "job is not active")
+		}
 
 		questions := s.generateQuestions(candidate, job, cmd.QuestionCount)
 		domainQuestions := make([]ivdomain.Question, 0, len(questions))
@@ -187,20 +190,31 @@ func (s *InterviewService) IssueTicket(ctx context.Context, cmd IssueTicketComma
 }
 
 // ComposePrompt builds the interview system prompt: default + tenant prompt +
-// company context (latest versions) + safety rails.
+// company context (latest versions) + safety rails. Repo reads run inside a
+// tenant tx (RLS).
 func (s *InterviewService) ComposePrompt(ctx context.Context, orgID uuid.UUID) (string, error) {
 	in := gensvc.ComposerInput{DefaultPrompt: gensvc.DefaultInterviewerPrompt}
-	if p, err := s.contextRepo.GetLatestPrompt(ctx, orgID); err == nil {
-		in.TenantPrompt = p.SystemPrompt
-	}
-	if contexts, err := s.contextRepo.ListContexts(ctx, orgID); err == nil && len(contexts) > 0 {
-		latest := contexts[0]
-		if reader, err := s.store.Download(ctx, latest.StoragePath); err == nil {
-			buf := new(strings.Builder)
-			_, _ = io.Copy(buf, reader)
-			_ = reader.Close()
-			in.CompanyContext = buf.String()
+	err := db.RunInTx(ctx, s.pool, orgID.String(), func(tctx context.Context) error {
+		if p, err := s.contextRepo.GetLatestPrompt(tctx, orgID); err == nil {
+			in.TenantPrompt = p.SystemPrompt
 		}
+		contexts, err := s.contextRepo.ListContexts(tctx, orgID)
+		if err != nil {
+			return err
+		}
+		if len(contexts) > 0 {
+			latest := contexts[0]
+			if reader, err := s.store.Download(ctx, latest.StoragePath); err == nil {
+				buf := new(strings.Builder)
+				_, _ = io.Copy(buf, reader)
+				_ = reader.Close()
+				in.CompanyContext = buf.String()
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return "", err
 	}
 	return gensvc.ComposeSystemPrompt(in), nil
 }
