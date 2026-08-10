@@ -144,7 +144,11 @@ func (w *ExtractWorker) extract(ctx context.Context, candidate *cvdomain.Candida
 	}
 	schema := &ResumeData{}
 	out, err := w.llm.StructuredOutput(ctx, llm.StructuredRequest{
-		System: "Extract structured resume data from the CV text. Return ONLY valid JSON matching the schema. Use empty arrays and zero values when data is missing.",
+		System: "Extract structured resume data as JSON with EXACTLY these keys: " +
+			"\"skills\" (array of strings), \"experience_years\" (number, total years of professional experience), " +
+			"\"education\" (string, highest degree, e.g. \"Bachelor of Science\"), " +
+			"\"certifications\" (array of strings), \"summary\" (string, 1-2 sentences). " +
+			"Use empty arrays, empty strings and 0 when data is missing. Return ONLY valid JSON with no other text.",
 		User:   user,
 		Schema: schema,
 	})

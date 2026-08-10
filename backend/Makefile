@@ -39,7 +39,7 @@ migrate:
 
 dev:
 	DOCKER_BUILDKIT=0 docker build -t intivai-app:latest .
-	cd .. && docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+	cd .. && docker compose --env-file .env -f docker-compose.yml -f docker-compose.dev.yml up -d
 
 CV_PDF ?= /tmp/kilo/cv.pdf
 

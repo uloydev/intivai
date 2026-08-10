@@ -72,6 +72,8 @@ services:
       INTIVAI_ENV: dev
       INTIVAI_DATABASE_URL: postgres://intivai_app:intivai_app@postgres:5432/intivai?sslmode=disable
       INTIVAI_REDIS_ADDR: redis:6379
+      # Local key lives in .env (gitignored); empty in CI/prod until set.
+      INTIVAI_DEEPSEEK_API_KEY: ${INTIVAI_DEEPSEEK_API_KEY:-}
       INTIVAI_MINIO_ENDPOINT: minio:9000
       INTIVAI_MINIO_ACCESS_KEY: intivai
       INTIVAI_MINIO_SECRET_KEY: intivai123
