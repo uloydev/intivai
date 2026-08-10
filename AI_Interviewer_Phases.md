@@ -188,7 +188,7 @@ type ScoreResult struct {
 | **Prompt composer** | Compose interview system prompt: global default + tenant prompt + company context + safety rails (pinned last) | `internal/interview/domain/service/prompt_composer.go` |
 | **WebSocket hub** | Connection management, heartbeat, room/channel per interview | `internal/interview/api/chat_handler.go` |
 | **Context management** | Sliding window, token counting via tiktoken-go | `internal/interview/domain/service/` |
-| **API endpoints** | `POST /interviews`, `WS /interviews/:id/chat` | `internal/interview/api/` |
+| **API endpoints** | `POST /interviews` (recruiter), `POST /candidate/interviews/:id/ticket` (invitation → WS ticket), `WS /candidate/interviews/:id/chat` (ticket auth) | `internal/interview/api/` |
 | **Reconnection** | Store last answered question, allow resume | `internal/interview/application/` |
 
 ### Chat Flow
@@ -226,18 +226,20 @@ type ScoreResult struct {
 **Auth:** candidate upgrade uses a WS ticket (10-min JWT, bound to session_id + interview_id) — see Research §3. Internal JWT is NOT used for candidates.
 
 ### Testing Criteria
-- [ ] WebSocket connects and handshake completes (candidate uses WS ticket, not JWT)
-- [ ] WS upgrade without a valid ticket is rejected
-- [ ] DeepSeek Flash returns streaming response
-- [ ] Questions generated based on CV gaps
-- [ ] Selected questions persisted to the question bank (reuse + audit)
-- [ ] Answers stored in PostgreSQL
-- [ ] Reconnection resumes from last unanswered question
-- [ ] Bias detection catches prohibited questions
-- [ ] Idle timeout disconnects after 5 minutes
-- [ ] 100 concurrent WebSocket connections stable
-- [ ] System prompt composer: tenant prompt + company context + safety rails composed correctly
-- [ ] Safety rails always last (tenant cannot override)
+- [x] WebSocket connects and handshake completes (candidate uses WS ticket, not JWT)
+- [x] WS upgrade without a valid ticket is rejected
+- [x] DeepSeek Flash returns streaming response (live-verified with real key)
+- [x] Questions generated based on CV gaps
+- [x] Selected questions persisted to the question bank (reuse + audit)
+- [x] Answers stored in PostgreSQL
+- [x] Reconnection resumes from last unanswered question (resume re-sends start + current question; session mismatch rejected)
+- [x] Bias detection catches prohibited questions
+- [x] Idle timeout disconnects after 5 minutes (ws read deadline; clock injectable)
+- [ ] 100 concurrent WebSocket connections stable (load check pending)
+- [x] System prompt composer: tenant prompt + company context + safety rails composed correctly (composed once per connection)
+- [x] Safety rails always last (tenant cannot override)
+- [x] Interrupt stops the AI mid-response (streaming goroutine + ctx cancel; live-verified)
+- [x] Single active connection per interview (second socket rejected with error frame)
 
 ---
 

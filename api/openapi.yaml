@@ -36,7 +36,7 @@ paths:
                       user_id: { type: string, format: uuid }
                       slug: { type: string }
                       plan: { type: string }
-        "400": { description: Validation error (code: WEAK_PASSWORD, ORG_SLUG_TAKEN, EMAIL_TAKEN) }
+        "400": { description: "Validation error (code: WEAK_PASSWORD, ORG_SLUG_TAKEN, EMAIL_TAKEN)" }
   /auth/login:
     post:
       summary: Login with org slug + email + password
@@ -170,7 +170,7 @@ paths:
         "400": { description: Validation error }
   /cvs:
     post:
-      summary: Upload CV (multipart: file, name, email)
+      summary: "Upload CV (multipart: file, name, email)"
       security: [bearerAuth]
       requestBody:
         required: true
@@ -345,6 +345,74 @@ paths:
       responses:
         "200": { description: Set }
         "400": { description: PROMPT_INJECTION / PROMPT_TOO_LONG }
+  /interviews:
+    post:
+      summary: Create interview for a passed application (recruiter) — generates CV-gap questions + 7-day invitation token
+      security: [bearerAuth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [application_id]
+              properties:
+                application_id: { type: string, format: uuid }
+                question_count: { type: integer, default: 5 }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      interview_id: { type: string, format: uuid }
+                      invitation_token: { type: string }
+                      expires_at: { type: string, format: date-time }
+        "400": { description: APPLICATION_NOT_PASSED / JOB_NOT_ACTIVE }
+  /candidate/interviews/{id}/ticket:
+    post:
+      summary: Exchange invitation token for a 10-min WS ticket (candidate, public)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [invitation_token]
+              properties:
+                invitation_token: { type: string }
+      responses:
+        "200":
+          description: Ticket
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      ticket: { type: string }
+                      session_id: { type: string, format: uuid }
+                      expires_at: { type: string, format: date-time }
+        "400": { description: TOKEN_INVALID / TOKEN_EXPIRED / TOKEN_REVOKED / TOKEN_MISMATCH }
+  /candidate/interviews/{id}/chat:
+    get:
+      summary: WebSocket chat (candidate, ws_ticket in Authorization header)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: Authorization, in: header, required: true, schema: { type: string } }
+      responses:
+        "101": { description: Switching Protocols }
+        "401": { description: missing/invalid ws ticket or not bound to this interview }
+        "403": { description: origin not allowed }
 components:
   securitySchemes:
     bearerAuth:

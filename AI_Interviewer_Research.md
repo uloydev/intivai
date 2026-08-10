@@ -483,6 +483,15 @@ conn.SetReadDeadline(time.Now().Add(PongWait))
 4. Interview continues from last unanswered question
 5. If session expired (>30min), return `{"type": "expired"}`
 
+> **Implementation notes (M3 landed):**
+> - WS ticket: `POST /candidate/interviews/:id/ticket` (invitation token → 10-min `ws_ticket` JWT with `extra.session_id` + `extra.interview_id`); upgrade on `WS /candidate/interviews/:id/chat` via `Authorization: Bearer <ticket>`.
+> - `resume` echoes the ticket's `session_id` — mismatch → `error: session mismatch`. Resume re-sends `interview.start` + the current (next unanswered) question.
+> - Idle timeout: 5-min read deadline per frame (not a timer) — LLM streaming runs in its own goroutine so pings remain serviced mid-stream.
+> - **Interrupt**: streaming goroutine's ctx is canceled → tokens stop; the next question is dispatched exactly once (`turnState.sendQuestionOnce`). LLM failure uses the same recovery — the interview never strands after a recorded answer.
+> - **Single active connection per interview** (`sessionRegistry`); a second socket gets `error: interview already active on another connection`.
+> - **Origin allowlist** (`INTIVAI_ALLOWED_ORIGINS`, same list as CORS) guards the upgrade; non-browser clients must send a matching Origin when set.
+> - System prompt composed ONCE per connection (tenant prompt + company context version pinned at connect), not per answer.
+
 ### Context Management
 
 ```go
@@ -553,6 +562,10 @@ Rules:
 - LLM response filter: scan for protected-class keywords, reject if found
 - Evaluation criteria focus on job-relevant skills only
 - Store bias audit log for compliance
+
+> **Implementation note:** `internal/interview/domain/service/bias.go` — 7 protected classes (age, marital/family, religion, political, gender, ethnicity, disability) with keyword rules; `DetectBias`/`IsBiased` filter generated questions and feed the composer's safety rails (pinned LAST, tenant cannot override).
+
+> **Security note (IAM):** user creation enforces role rank — a user may only create roles at or below their own rank (`canCreateRole`, `create_user.go`). No recruiter→admin escalation; the rank order is admin > recruiter > interviewer > member.
 
 ### Language Handling
 - Detect language from candidate's first answer
