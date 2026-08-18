@@ -97,33 +97,72 @@ if [ -n "$PASSED_APP" ]; then
     -d "{\"invitation_token\":\"$ITK\"}" | jq_get "['data']['ticket']")
   [ -n "$TICKET" ] && echo "ticket ok"
 
-  say "interview: ws chat (ticket auth, ping/pong, answer)"
+  say "interview: ws chat (ticket auth, ping/pong, full Q&A, evaluation)"
   python3 - "$IV" "$TICKET" "$BASE" <<'PYEOF'
 import json, sys, websocket
 iv, ticket, BASE = sys.argv[1], sys.argv[2], sys.argv[3]
 ws = websocket.create_connection(
     f"{BASE.replace('http', 'ws', 1).replace('/api/v1', '', 1)}/api/v1/candidate/interviews/{iv}/chat",
     header=["Authorization: Bearer " + ticket, "Origin: http://localhost:3000"],
-    suppress_origin=True, timeout=15)
+    suppress_origin=True, timeout=30)
 frames = []
-for _ in range(2):
-    frames.append(json.loads(ws.recv()))  # start + question
+start_frame = json.loads(ws.recv())
+frames.append(start_frame)
+assert start_frame.get("type") == "interview.start", f"expected start, got: {start_frame}"
+total_q = start_frame.get("total_questions", 3)
+
+first_q = json.loads(ws.recv())
+frames.append(first_q)
+assert first_q.get("type") == "question", f"expected question, got: {first_q}"
+
+# Ping/pong check
 ws.send(json.dumps({"type": "ping"}))
-frames.append(json.loads(ws.recv()))
-assert frames[2]["type"] == "pong", frames
-ws.send(json.dumps({"type": "answer", "content": "Smoke answer about Go services.", "idx": 1}))
-while True:
-    m = json.loads(ws.recv())
-    frames.append(m)
-    if m["type"] in ("question", "error"):
-        break
+pong = json.loads(ws.recv())
+frames.append(pong)
+assert pong.get("type") == "pong", f"expected pong, got: {pong}"
+
+cur_q = first_q
+answers_sent = 0
+eval_received = False
+
+while cur_q and not eval_received:
+    idx = cur_q.get("idx", answers_sent + 1)
+    ans_text = f"Smoke answer for question {idx}: Extensive experience in Go backend systems, PostgreSQL, and distributed architectures."
+    ws.send(json.dumps({"type": "answer", "content": ans_text, "idx": idx}))
+    answers_sent += 1
+    cur_q = None
+
+    while True:
+        m = json.loads(ws.recv())
+        frames.append(m)
+        mtype = m.get("type")
+        if mtype == "question":
+            cur_q = m
+            break
+        elif mtype == "evaluation":
+            eval_received = True
+            break
+        elif mtype == "error":
+            print(f"error received: {m.get('message')}")
+            break
+
 ws.close()
-assert frames[0]["type"] == "interview.start", frames
-assert frames[1]["type"] == "question", frames
-last = frames[-1]
-assert last["type"] in ("question", "error"), frames[-1]
-print(f"ws ok: start({frames[0]['total_questions']}) -> question -> ping/pong -> answer -> {last['type']}")
+assert answers_sent >= 1, "no answers sent"
+print(f"ws ok: answered {answers_sent}/{total_q} questions, evaluation frame received={eval_received}")
 PYEOF
+
+  say "interview: recruiter evaluation endpoints"
+  IV_LIST=$(curl -sf "$BASE/interviews" -H "Authorization: Bearer $TOKEN")
+  echo "$IV_LIST" | python3 -c "import sys,json,uuid; data=json.load(sys.stdin)['data']; assert any(item['interview_id'] == '$IV' for item in data), 'interview not in list'"
+  echo "list ok"
+
+  IV_DETAIL=$(curl -sf "$BASE/interviews/$IV" -H "Authorization: Bearer $TOKEN")
+  IV_STATUS=$(echo "$IV_DETAIL" | jq_get "['data']['status']")
+  echo "interview status: $IV_STATUS"
+
+  CAND_REPORT=$(curl -sf "$BASE/candidates/$CV_ID/report" -H "Authorization: Bearer $TOKEN")
+  echo "$CAND_REPORT" | python3 -c "import sys,json; data=json.load(sys.stdin)['data']; assert data['candidate']['id'] == '$CV_ID', 'candidate id mismatch'; assert len(data['interviews']) >= 1, 'no interview summaries'"
+  echo "candidate report ok"
 else
   echo "interview flow skipped (no extracted/passed candidate — DeepSeek key missing in stack?)"
 fi

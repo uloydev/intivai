@@ -13,7 +13,7 @@ FLOOR_ALL=50
 FLOOR_DOMAIN=70
 FAIL=0
 
-go test -cover ./... > /tmp/intivai-coverage.txt 2>&1 || true
+go test -count=1 -cover ./... > /tmp/intivai-coverage.txt 2>&1 || true
 
 while IFS= read -r line; do
   case "$line" in
