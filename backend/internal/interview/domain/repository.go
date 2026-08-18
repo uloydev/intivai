@@ -17,6 +17,15 @@ type InterviewRepository interface {
 	ByApplication(ctx context.Context, applicationID uuid.UUID) ([]*Interview, error)
 	// SetConsent records GDPR consent (consent_given), idempotent.
 	SetConsent(ctx context.Context, id uuid.UUID) error
+	// RecordProctoringEvent persists an integrity telemetry event on the interview.
+	RecordProctoringEvent(ctx context.Context, id uuid.UUID, event ProctoringEvent) error
+	// Touch refreshes the activity marker (updated_at/expires_at) WITHOUT
+	// rewriting the transcript — full-row Update() racing answer commits
+	// would clobber persisted answers with a stale aggregate.
+	Touch(ctx context.Context, id uuid.UUID) error
+	// RecordCodingSession appends a coding snapshot without rewriting the
+	// transcript (same lost-update concern as Touch).
+	RecordCodingSession(ctx context.Context, id uuid.UUID, session CodingSession) error
 	// ListByOrg lists the org's interviews (RLS-scoped via the applications
 	// join), newest first.
 	ListByOrg(ctx context.Context, orgID uuid.UUID) ([]*Interview, error)

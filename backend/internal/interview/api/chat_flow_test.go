@@ -175,9 +175,15 @@ func TestChatFlowEndToEnd(t *testing.T) {
 	if start["type"] != ivdomain.MsgStart || start["total_questions"].(float64) != 3 {
 		t.Fatalf("start frame: %v", start)
 	}
+	if start["session_budget_sec"] == nil || start["session_budget_sec"].(float64) <= 0 {
+		t.Fatalf("expected session_budget_sec in start frame: %v", start)
+	}
 	q1 := read()
 	if q1["type"] != ivdomain.MsgQuestion {
 		t.Fatalf("expected question, got %v", q1)
+	}
+	if q1["time_limit_sec"] == nil || q1["time_limit_sec"].(float64) <= 0 {
+		t.Fatalf("expected time_limit_sec in question frame: %v", q1)
 	}
 
 	// 5. ping → pong.
@@ -239,6 +245,10 @@ nextQuestion:
 			break
 		}
 	}
+	q3 := read()
+	if q3["type"] != ivdomain.MsgQuestion {
+		t.Fatalf("expected next question, got %v", q3)
+	}
 	if len(lastStreamRequest.Messages) != 5 {
 		t.Fatalf("stream request messages = %d, want 5 (system + 2 pairs)", len(lastStreamRequest.Messages))
 	}
@@ -252,9 +262,9 @@ nextQuestion:
 		for {
 			m := read()
 			switch m["type"] {
-			case ivdomain.MsgToken, ivdomain.MsgQuestion:
+			case ivdomain.MsgToken, ivdomain.MsgResponse:
 				continue
-			case ivdomain.MsgResponse:
+			case ivdomain.MsgQuestion:
 				goto answered
 			case ivdomain.MsgEvaluation:
 				if m["status"] != "complete" {

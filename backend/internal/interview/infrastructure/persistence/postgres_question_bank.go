@@ -6,6 +6,7 @@ import (
 	"github.com/google/uuid"
 	ivdomain "github.com/intivai/backend/internal/interview/domain"
 	"github.com/intivai/backend/pkg/db"
+	"github.com/lib/pq"
 	"gorm.io/gorm"
 )
 
@@ -37,7 +38,7 @@ func (r *PostgresQuestionBank) Create(ctx context.Context, orgID uuid.UUID, q iv
 	return qx.WithContext(ctx).Exec(
 		`INSERT INTO questions (id, org_id, category, difficulty, body, skills, created_at)
 		 VALUES ($1, $2, $3, 'medium', $4, $5, NOW())`,
-		uuid.New(), orgID, q.Category, q.Content, skills).Error
+		uuid.New(), orgID, q.Category, q.Content, pq.Array(skills)).Error
 }
 
 func (r *PostgresQuestionBank) ListByOrg(ctx context.Context, orgID uuid.UUID) ([]ivdomain.Question, error) {
@@ -58,7 +59,7 @@ func (r *PostgresQuestionBank) ListByOrg(ctx context.Context, orgID uuid.UUID) (
 			q      ivdomain.Question
 			skills []string
 		)
-		if err := rows.Scan(&q.Category, &q.Content, &skills); err != nil {
+		if err := rows.Scan(&q.Category, &q.Content, pq.Array(&skills)); err != nil {
 			return nil, err
 		}
 		if len(skills) > 0 {

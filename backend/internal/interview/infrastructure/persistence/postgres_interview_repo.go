@@ -34,12 +34,17 @@ func (r *PostgresInterviewRepo) Create(ctx context.Context, iv *ivdomain.Intervi
 		return err
 	}
 	raw, _ := json.Marshal(transcript{Questions: iv.Questions, Answers: iv.Answers})
+	rawEvents, _ := json.Marshal(iv.ProctoringEvents)
+	rawSummary, _ := json.Marshal(iv.ProctoringSummary)
+	rawSessions, _ := json.Marshal(iv.CodingSessions)
 	return q.WithContext(ctx).Exec(
 		`INSERT INTO interviews (id, application_id, type, status, transcript, last_question_idx,
-		 context_version, started_at, completed_at, expires_at, created_at)
-		 VALUES ($1, $2, 'chat', $3, $4, $5, $6, $7, $8, $9, $10)`,
+		 context_version, proctoring_events, proctoring_summary, coding_sessions,
+		 started_at, completed_at, expires_at, created_at)
+		 VALUES ($1, $2, 'chat', $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
 		iv.ID, iv.ApplicationID, string(iv.Status), raw, iv.LastQuestionIdx,
-		iv.ContextVersion, iv.StartedAt, iv.CompletedAt, iv.ExpiresAt, iv.CreatedAt).Error
+		iv.ContextVersion, rawEvents, rawSummary, rawSessions,
+		iv.StartedAt, iv.CompletedAt, iv.ExpiresAt, iv.CreatedAt).Error
 }
 
 func (r *PostgresInterviewRepo) GetByID(ctx context.Context, id uuid.UUID) (*ivdomain.Interview, error) {
@@ -49,7 +54,8 @@ func (r *PostgresInterviewRepo) GetByID(ctx context.Context, id uuid.UUID) (*ivd
 	}
 	row := q.Raw(
 		`SELECT id, application_id, status, transcript, last_question_idx, context_version,
-		 evaluation, consent_given, started_at, completed_at, expires_at, created_at
+		 evaluation, consent_given, proctoring_events, proctoring_summary, coding_sessions,
+		 started_at, completed_at, expires_at, created_at
 		 FROM interviews WHERE id = $1`, id).Row()
 	return scanInterview(row)
 }
@@ -60,10 +66,80 @@ func (r *PostgresInterviewRepo) Update(ctx context.Context, iv *ivdomain.Intervi
 		return err
 	}
 	raw, _ := json.Marshal(transcript{Questions: iv.Questions, Answers: iv.Answers})
+	rawEvents, _ := json.Marshal(iv.ProctoringEvents)
+	rawSummary, _ := json.Marshal(iv.ProctoringSummary)
+	rawSessions, _ := json.Marshal(iv.CodingSessions)
 	return q.WithContext(ctx).Exec(
 		`UPDATE interviews SET status = $1, transcript = $2, last_question_idx = $3,
-		 started_at = $4, completed_at = $5, expires_at = $6, updated_at = NOW() WHERE id = $7`,
-		string(iv.Status), raw, iv.LastQuestionIdx, iv.StartedAt, iv.CompletedAt, iv.ExpiresAt, iv.ID).Error
+		 proctoring_events = $4, proctoring_summary = $5, coding_sessions = $6,
+		 started_at = $7, completed_at = $8, expires_at = $9, updated_at = NOW() WHERE id = $10`,
+		string(iv.Status), raw, iv.LastQuestionIdx, rawEvents, rawSummary, rawSessions,
+		iv.StartedAt, iv.CompletedAt, iv.ExpiresAt, iv.ID).Error
+}
+
+// RecordProctoringEvent appends to the events JSONB and recomputes the
+// summary — column-scoped (reads/writes only proctoring_*), so it never
+// races the transcript the way a full read-modify-write Update() would
+// (keystroke Touch() and answer commits run concurrently).
+func (r *PostgresInterviewRepo) RecordProctoringEvent(ctx context.Context, id uuid.UUID, event ivdomain.ProctoringEvent) error {
+	q, err := r.q(ctx)
+	if err != nil {
+		return err
+	}
+	var rawEvents []byte
+	row := q.Raw(
+		`SELECT COALESCE(proctoring_events, '[]'::jsonb) FROM interviews WHERE id = $1`, id).Row()
+	if err := row.Scan(&rawEvents); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ivdomain.ErrNotFound
+		}
+		return err
+	}
+	var events []ivdomain.ProctoringEvent
+	_ = json.Unmarshal(rawEvents, &events)
+	events = append(events, event)
+	// The summary reflects the FULL event history (dropped raw events must
+	// not silently weaken the integrity score)…
+	summary, _ := json.Marshal(ivdomain.CalculateProctoringSummary(events))
+	// …but raw events are retention-capped (design decision): keep the most
+	// recent 500 so the JSONB column cannot grow unboundedly per interview.
+	const maxStoredEvents = 500
+	if len(events) > maxStoredEvents {
+		events = events[len(events)-maxStoredEvents:]
+	}
+	raw, _ := json.Marshal(events)
+	return q.WithContext(ctx).Exec(
+		`UPDATE interviews SET
+		   proctoring_events = $1,
+		   proctoring_summary = $2,
+		   updated_at = NOW()
+		 WHERE id = $3`,
+		string(raw), string(summary), id).Error
+}
+
+// Touch refreshes updated_at + expires_at only — never rewrites transcript.
+func (r *PostgresInterviewRepo) Touch(ctx context.Context, id uuid.UUID) error {
+	q, err := r.q(ctx)
+	if err != nil {
+		return err
+	}
+	return q.WithContext(ctx).Exec(
+		`UPDATE interviews SET updated_at = NOW() WHERE id = $1`, id).Error
+}
+
+// RecordCodingSession appends one snapshot to coding_sessions JSONB.
+func (r *PostgresInterviewRepo) RecordCodingSession(ctx context.Context, id uuid.UUID, session ivdomain.CodingSession) error {
+	q, err := r.q(ctx)
+	if err != nil {
+		return err
+	}
+	raw, _ := json.Marshal(session)
+	return q.WithContext(ctx).Exec(
+		`UPDATE interviews SET
+		   coding_sessions = COALESCE(coding_sessions, '[]'::jsonb) || $1::jsonb,
+		   updated_at = NOW()
+		 WHERE id = $2`,
+		string(raw), id).Error
 }
 
 // SaveEvaluation persists the report, but NEVER overwrites an existing one —
@@ -102,7 +178,8 @@ func (r *PostgresInterviewRepo) ByApplication(ctx context.Context, applicationID
 	}
 	rows, err := q.Raw(
 		`SELECT id, application_id, status, transcript, last_question_idx, context_version,
-		 evaluation, consent_given, started_at, completed_at, expires_at, created_at
+		 evaluation, consent_given, proctoring_events, proctoring_summary, coding_sessions,
+		 started_at, completed_at, expires_at, created_at
 		 FROM interviews WHERE application_id = $1 ORDER BY created_at DESC`, applicationID).Rows()
 	if err != nil {
 		return nil, err
@@ -128,8 +205,8 @@ func (r *PostgresInterviewRepo) ListByOrg(ctx context.Context, orgID uuid.UUID) 
 	}
 	rows, err := q.Raw(
 		`SELECT iv.id, iv.application_id, iv.status, iv.transcript, iv.last_question_idx,
-		 iv.context_version, iv.evaluation, iv.consent_given, iv.started_at, iv.completed_at,
-		 iv.expires_at, iv.created_at
+		 iv.context_version, iv.evaluation, iv.consent_given, iv.proctoring_events, iv.proctoring_summary,
+		 iv.coding_sessions, iv.started_at, iv.completed_at, iv.expires_at, iv.created_at
 		 FROM interviews iv
 		 JOIN applications a ON a.id = iv.application_id
 		 WHERE a.org_id = $1
@@ -162,9 +239,13 @@ func scanInterview(row rowScanner) (*ivdomain.Interview, error) {
 	var (
 		iv            ivdomain.Interview
 		rawTranscript []byte
+		rawEvents     []byte
+		rawSummary    []byte
+		rawSessions   []byte
 	)
 	err := row.Scan(&iv.ID, &iv.ApplicationID, &iv.Status, &rawTranscript, &iv.LastQuestionIdx,
-		&iv.ContextVersion, &iv.Evaluation, &iv.ConsentGiven, &iv.StartedAt, &iv.CompletedAt, &iv.ExpiresAt, &iv.CreatedAt)
+		&iv.ContextVersion, &iv.Evaluation, &iv.ConsentGiven, &rawEvents, &rawSummary, &rawSessions,
+		&iv.StartedAt, &iv.CompletedAt, &iv.ExpiresAt, &iv.CreatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ivdomain.ErrNotFound
 	}
@@ -177,6 +258,18 @@ func scanInterview(row rowScanner) (*ivdomain.Interview, error) {
 			iv.Questions = t.Questions
 			iv.Answers = t.Answers
 		}
+	}
+	if len(rawEvents) > 0 {
+		_ = json.Unmarshal(rawEvents, &iv.ProctoringEvents)
+	}
+	if len(rawSummary) > 0 {
+		_ = json.Unmarshal(rawSummary, &iv.ProctoringSummary)
+	}
+	if len(rawSessions) > 0 {
+		_ = json.Unmarshal(rawSessions, &iv.CodingSessions)
+	}
+	if iv.ProctoringSummary.IntegrityScore == 0 && len(iv.ProctoringEvents) == 0 {
+		iv.ProctoringSummary = ivdomain.DefaultProctoringSummary()
 	}
 	iv.SetClock(ivdomain.SystemClock())
 	return &iv, nil

@@ -235,10 +235,38 @@ func (s *InterviewService) ComposePrompt(ctx context.Context, orgID uuid.UUID) (
 	return gensvc.ComposeSystemPrompt(in), nil
 }
 
+// VerifyInterviewOrg — nil when the interview belongs to orgID (used to gate
+// recruiter auth tokens on voice rooms: the token's org must own the room).
+// RLS on applications makes a foreign interview resolve as not-found.
+func (s *InterviewService) VerifyInterviewOrg(ctx context.Context, orgID uuid.UUID, interviewID uuid.UUID) error {
+	return db.RunInTx(ctx, s.pool, orgID.String(), func(tctx context.Context) error {
+		iv, err := s.ivRepo.GetByID(tctx, interviewID)
+		if err != nil {
+			if err == ivdomain.ErrNotFound {
+				return errors.NewDomainError("FORBIDDEN", "interview not found in this org")
+			}
+			return err
+		}
+		app, err := s.appRepo.GetByID(tctx, iv.ApplicationID)
+		if err != nil {
+			return err
+		}
+		if app.OrgID != orgID {
+			return errors.NewDomainError("FORBIDDEN", "interview belongs to another org")
+		}
+		return nil
+	})
+}
+
 // AnswerAndAdvance: record answer, persist, return the next question. Shallow
 // answers (weakness, Research §2) produce a deterministic probe follow-up on
 // the same topic; detailed answers move to the next planned question.
 func (s *InterviewService) AnswerAndAdvance(ctx context.Context, orgID string, interviewID uuid.UUID, content string) (*ivdomain.Question, error) {
+	return s.AnswerAndAdvanceWithPacing(ctx, orgID, interviewID, content, nil)
+}
+
+// AnswerAndAdvanceWithPacing: record candidate answer with pacing metrics and advance to next question.
+func (s *InterviewService) AnswerAndAdvanceWithPacing(ctx context.Context, orgID string, interviewID uuid.UUID, content string, pacing *ivdomain.PacingMetrics) (*ivdomain.Question, error) {
 	var next *ivdomain.Question
 	var answered *ivdomain.Question
 	err := db.RunInTx(ctx, s.pool, orgID, func(tctx context.Context) error {
@@ -252,7 +280,7 @@ func (s *InterviewService) AnswerAndAdvance(ctx context.Context, orgID string, i
 			return errors.NewDomainError("INTERVIEW_EXPIRED", "interview expired")
 		}
 		answered = iv.NextQuestion()
-		if err := iv.Answer(content); err != nil {
+		if err := iv.AnswerWithPacing(content, pacing); err != nil {
 			return err
 		}
 		next = iv.NextQuestion()
@@ -274,6 +302,20 @@ func (s *InterviewService) AnswerAndAdvance(ctx context.Context, orgID string, i
 		return s.ivRepo.Update(tctx, iv)
 	})
 	return next, err
+}
+
+// SessionRemaining calculates remaining seconds before the 30-minute global budget expires.
+func (s *InterviewService) SessionRemaining(ctx context.Context, orgID string, interviewID uuid.UUID) int {
+	var remaining = int(ivdomain.MaxInterviewDuration.Seconds())
+	_ = db.RunInTx(ctx, s.pool, orgID, func(tctx context.Context) error {
+		iv, err := s.ivRepo.GetByID(tctx, interviewID)
+		if err == nil && iv != nil {
+			iv.SetClock(s.clock)
+			remaining = iv.SessionRemaining()
+		}
+		return nil
+	})
+	return remaining
 }
 
 // GiveConsent records GDPR consent for the interview (invitation token
@@ -397,6 +439,50 @@ func (s *InterviewService) EvaluateAndPersist(ctx context.Context, orgID string,
 		return nil // lost the race; the other writer's report stands
 	}
 	return err
+}
+
+// RecordTelemetry records an anti-cheating telemetry event for an interview session.
+func (s *InterviewService) RecordTelemetry(ctx context.Context, orgID string, interviewID uuid.UUID, event ivdomain.ProctoringEvent) error {
+	return db.RunInTx(ctx, s.pool, orgID, func(tctx context.Context) error {
+		return s.ivRepo.RecordProctoringEvent(tctx, interviewID, event)
+	})
+}
+
+// RecordCandidateTelemetry records a proctoring telemetry event for candidate using ticket or invitation token.
+func (s *InterviewService) RecordCandidateTelemetry(ctx context.Context, interviewID uuid.UUID, token string, event ivdomain.ProctoringEvent) error {
+	// First check if token is an invitation token
+	invite, status := s.tokenRepo.Validate(ctx, token)
+	if (status == ivdomain.TokenValid || status == ivdomain.TokenUsed) && invite != nil && invite.InterviewID == interviewID {
+		return s.RecordTelemetry(ctx, invite.OrgID.String(), interviewID, event)
+	}
+
+	// Otherwise check if token is a ticket JWT
+	claims, err := s.tokens.Parse(token)
+	if err == nil && claims != nil && claims.Type == application.TokenTypeWSTicket {
+		if iid, ok := claims.Extra["interview_id"].(string); ok && iid == interviewID.String() {
+			return s.RecordTelemetry(ctx, claims.OrgID.String(), interviewID, event)
+		}
+	}
+
+	return errors.NewDomainError("AUTH_UNAUTHORIZED", "valid ticket or invitation token required for telemetry")
+}
+
+// RecordCodingSession records a code sandbox snapshot on the interview.
+// Column-scoped append — never rewrites the transcript (answer commits race
+// keystroke/run traffic).
+func (s *InterviewService) RecordCodingSession(ctx context.Context, orgID string, interviewID uuid.UUID, session ivdomain.CodingSession) error {
+	return db.RunInTx(ctx, s.pool, orgID, func(tctx context.Context) error {
+		return s.ivRepo.RecordCodingSession(tctx, interviewID, session)
+	})
+}
+
+// TouchInterview refreshes the interview activity marker (column-scoped
+// update; the old full-row Update() could overwrite a concurrently persisted
+// answer with a stale aggregate).
+func (s *InterviewService) TouchInterview(ctx context.Context, orgID string, interviewID uuid.UUID) {
+	_ = db.RunInTx(ctx, s.pool, orgID, func(tctx context.Context) error {
+		return s.ivRepo.Touch(tctx, interviewID)
+	})
 }
 
 // EnqueueEvaluation schedules the async retry worker (no-op without enqueuer).

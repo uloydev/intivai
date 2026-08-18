@@ -1,34 +1,152 @@
 package api
 
-import "sync"
+import (
+	"context"
+	"errors"
+	"sync"
+	"time"
 
-// sessionRegistry enforces single-active-connection per interview: a second
-// socket for the same interview is rejected with an error frame. In-memory
-// only (single instance); a distributed lock (Redis) is the multi-instance
-// upgrade path.
-type sessionRegistry struct {
+	"github.com/redis/go-redis/v9"
+)
+
+// SessionRegistry enforces the single-active-connection constraint per interview.
+// When an interview already has an active WebSocket session, a second socket
+// is rejected.
+type SessionRegistry interface {
+	TryAcquire(ctx context.Context, key, sessionID string) (bool, error)
+	Release(ctx context.Context, key, sessionID string) error
+	// Touch extends the lock's lifetime for the CURRENT holder — called from
+	// the connection heartbeat so a long-lived active connection never loses
+	// its lock to TTL expiry.
+	Touch(ctx context.Context, key, sessionID string) error
+}
+
+// MemorySessionRegistry is a thread-safe in-memory session registry.
+type MemorySessionRegistry struct {
 	mu     sync.Mutex
-	active map[string]struct{}
+	active map[string]string
 }
 
-func newSessionRegistry() *sessionRegistry {
-	return &sessionRegistry{active: make(map[string]struct{})}
+func NewMemorySessionRegistry() *MemorySessionRegistry {
+	return &MemorySessionRegistry{active: make(map[string]string)}
 }
 
-// TryAcquire claims the key; false when already held.
-func (r *sessionRegistry) TryAcquire(key string) bool {
+// TryAcquire claims the key; returns false when already held by another session.
+func (r *MemorySessionRegistry) TryAcquire(_ context.Context, key, sessionID string) (bool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if _, ok := r.active[key]; ok {
-		return false
+	if holder, ok := r.active[key]; ok {
+		if sessionID != "" && holder == sessionID {
+			return true, nil
+		}
+		return false, nil
 	}
-	r.active[key] = struct{}{}
-	return true
+	r.active[key] = sessionID
+	return true, nil
 }
 
-// Release frees the key (idempotent).
-func (r *sessionRegistry) Release(key string) {
+// Release frees the key (idempotent; only deletes if matching sessionID or empty).
+func (r *MemorySessionRegistry) Release(_ context.Context, key, sessionID string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	delete(r.active, key)
+	if holder, ok := r.active[key]; ok {
+		if sessionID == "" || holder == sessionID {
+			delete(r.active, key)
+		}
+	}
+	return nil
+}
+
+// Touch is a no-op for the in-memory registry — the lock lives as long as
+// the registry does.
+func (r *MemorySessionRegistry) Touch(_ context.Context, key, sessionID string) error {
+	return nil
+}
+
+const (
+	redisSessionPrefix = "intivai:session:"
+	// acquireLua: claim the key, OR refresh the TTL when the SAME session
+	// re-acquires (reconnect / resume) — a long-lived connection must not
+	// let its lock lapse and admit a second socket mid-interview.
+	acquireLuaScript = `
+local holder = redis.call("get", KEYS[1])
+if holder == false then
+    redis.call("set", KEYS[1], ARGV[1], "PX", ARGV[2])
+    return 1
+elseif holder == ARGV[1] then
+    redis.call("pexpire", KEYS[1], ARGV[2])
+    return 1
+end
+return 0`
+	touchLuaScript = `
+if redis.call("get", KEYS[1]) == ARGV[1] then
+    return redis.call("pexpire", KEYS[1], ARGV[2])
+end
+return 0`
+	releaseLuaScript = `
+if redis.call("get", KEYS[1]) == ARGV[1] then
+    return redis.call("del", KEYS[1])
+else
+    return 0
+end`
+)
+
+// RedisSessionRegistry manages distributed interview session locks in Redis.
+type RedisSessionRegistry struct {
+	client redis.UniversalClient
+	ttl    time.Duration
+}
+
+func NewRedisSessionRegistry(client redis.UniversalClient, ttl time.Duration) *RedisSessionRegistry {
+	if ttl <= 0 {
+		ttl = 30 * time.Minute
+	}
+	return &RedisSessionRegistry{client: client, ttl: ttl}
+}
+
+func (r *RedisSessionRegistry) TryAcquire(ctx context.Context, key, sessionID string) (bool, error) {
+	if r.client == nil {
+		return true, nil
+	}
+	redisKey := redisSessionPrefix + key
+	val := sessionID
+	if val == "" {
+		val = "active"
+	}
+	res, err := r.client.Eval(ctx, acquireLuaScript, []string{redisKey}, val, r.ttl.Milliseconds()).Result()
+	if err != nil {
+		return false, err
+	}
+	ok, _ := res.(int64)
+	return ok == 1, nil
+}
+
+// Touch extends the TTL when sessionID still holds the key.
+func (r *RedisSessionRegistry) Touch(ctx context.Context, key, sessionID string) error {
+	if r.client == nil || sessionID == "" {
+		return nil
+	}
+	redisKey := redisSessionPrefix + key
+	_, err := r.client.Eval(ctx, touchLuaScript, []string{redisKey}, sessionID, r.ttl.Milliseconds()).Result()
+	if errors.Is(err, redis.Nil) {
+		return nil
+	}
+	return err
+}
+
+func (r *RedisSessionRegistry) Release(ctx context.Context, key, sessionID string) error {
+	if r.client == nil {
+		return nil
+	}
+	redisKey := redisSessionPrefix + key
+	val := sessionID
+	if val == "" {
+		_, err := r.client.Del(ctx, redisKey).Result()
+		return err
+	}
+	_, err := r.client.Eval(ctx, releaseLuaScript, []string{redisKey}, val).Result()
+	if errors.Is(err, redis.Nil) {
+		return nil
+	}
+	return err
 }

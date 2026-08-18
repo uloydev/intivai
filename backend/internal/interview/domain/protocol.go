@@ -16,23 +16,31 @@ const (
 	MsgError      = "error"
 	MsgPong       = "pong"
 
-	MsgAnswer    = "answer"
-	MsgInterrupt = "interrupt"
-	MsgPing      = "ping"
-	MsgResume    = "resume"
+	MsgAnswer     = "answer"
+	MsgInterrupt  = "interrupt"
+	MsgPing       = "ping"
+	MsgResume     = "resume"
+	MsgTelemetry  = "telemetry"
+	MsgCodeChange = "code.change"
+	MsgCodeRun    = "code.run"
+	MsgCodeResult = "code.result"
 )
 
 // Server → client messages.
 type InterviewStartMessage struct {
-	Type           string `json:"type"`
-	SessionID      string `json:"session_id"`
-	TotalQuestions int    `json:"total_questions"`
+	Type             string `json:"type"`
+	SessionID        string `json:"session_id"`
+	TotalQuestions   int    `json:"total_questions"`
+	SessionBudgetSec int    `json:"session_budget_sec,omitempty"` // e.g. 1800 (30 mins)
 }
 
 type QuestionMessage struct {
-	Type    string `json:"type"`
-	Content string `json:"content"`
-	Idx     int    `json:"idx"`
+	Type                string `json:"type"`
+	Content             string `json:"content"`
+	Idx                 int    `json:"idx"`
+	Archetype           string `json:"archetype,omitempty"`             // "conversational" | "system_design" | "coding"
+	TimeLimitSec        int    `json:"time_limit_sec,omitempty"`        // allocated seconds for this question
+	SessionRemainingSec int    `json:"session_remaining_sec,omitempty"` // global interview clock remaining
 }
 
 type TokenMessage struct {
@@ -65,11 +73,21 @@ type ErrorMessage struct {
 	Message string `json:"message"`
 }
 
+// PacingMetrics captures candidate latency and typing authenticity telemetry.
+type PacingMetrics struct {
+	TimeToFirstKeystrokeMs int64   `json:"time_to_first_keystroke_ms,omitempty"`
+	DurationMs             int64   `json:"duration_ms,omitempty"`
+	TypedChars             int     `json:"typed_chars,omitempty"`
+	PastedChars            int     `json:"pasted_chars,omitempty"`
+	PastedRatio            float64 `json:"pasted_ratio,omitempty"`
+}
+
 // Client → server messages.
 type AnswerMessage struct {
-	Type    string `json:"type"`
-	Content string `json:"content"`
-	Idx     int    `json:"idx"`
+	Type            string         `json:"type"`
+	Content         string         `json:"content"`
+	Idx             int            `json:"idx"`
+	PacingTelemetry *PacingMetrics `json:"pacing_telemetry,omitempty"`
 }
 
 type InterruptMessage struct {
@@ -83,6 +101,57 @@ type PingMessage struct {
 type ResumeMessage struct {
 	Type      string `json:"type"`
 	SessionID string `json:"session_id"`
+}
+
+type TelemetryMessage struct {
+	Type        string                 `json:"type"`
+	EventType   string                 `json:"event_type"` // tab_switch, paste, focus_lost, focus_regained, window_resize, audio_anomaly
+	Timestamp   string                 `json:"timestamp"`
+	QuestionIdx int                    `json:"question_idx,omitempty"`
+	Details     map[string]interface{} `json:"details,omitempty"`
+}
+
+type CodeChangeMessage struct {
+	Type        string `json:"type"`
+	QuestionIdx int    `json:"question_idx,omitempty"`
+	Language    string `json:"language"`
+	Code        string `json:"code"`
+}
+
+type CodeRunTestCase struct {
+	ID             string `json:"id"`
+	Input          string `json:"input"`
+	ExpectedOutput string `json:"expected_output"`
+	Hidden         bool   `json:"hidden,omitempty"`
+}
+
+type CodeRunMessage struct {
+	Type        string            `json:"type"`
+	QuestionIdx int               `json:"question_idx,omitempty"`
+	Language    string            `json:"language"`
+	Code        string            `json:"code"`
+	Stdin       string            `json:"stdin,omitempty"`
+	TestCases   []CodeRunTestCase `json:"test_cases,omitempty"`
+}
+
+type CodeResultMessage struct {
+	Type        string        `json:"type"`
+	Stdout      string        `json:"stdout"`
+	Stderr      string        `json:"stderr"`
+	ExitCode    int           `json:"exit_code"`
+	DurationMs  int64         `json:"duration_ms"`
+	AllPassed   bool          `json:"all_passed"`
+	TestResults []interface{} `json:"test_results,omitempty"`
+	Error       string        `json:"error,omitempty"`
+}
+
+type CodingSession struct {
+	QuestionIdx  int                    `json:"question_idx"`
+	Language     string                 `json:"language"`
+	Code         string                 `json:"code"`
+	FinalResult  map[string]interface{} `json:"final_result,omitempty"`
+	AICodeReview map[string]interface{} `json:"ai_code_review,omitempty"`
+	SubmittedAt  string                 `json:"submitted_at"`
 }
 
 func NewInterviewStart(sessionID string, total int) InterviewStartMessage {
@@ -123,6 +192,27 @@ func ParseClientMessage(raw []byte) (any, error) {
 		return m, nil
 	case MsgResume:
 		var m ResumeMessage
+		if err := json.Unmarshal(raw, &m); err != nil {
+			return nil, err
+		}
+		return m, nil
+	case MsgTelemetry:
+		var m TelemetryMessage
+		if err := json.Unmarshal(raw, &m); err != nil {
+			return nil, err
+		}
+		if m.EventType == "" {
+			return nil, fmt.Errorf("telemetry without event_type")
+		}
+		return m, nil
+	case MsgCodeChange:
+		var m CodeChangeMessage
+		if err := json.Unmarshal(raw, &m); err != nil {
+			return nil, err
+		}
+		return m, nil
+	case MsgCodeRun:
+		var m CodeRunMessage
 		if err := json.Unmarshal(raw, &m); err != nil {
 			return nil, err
 		}

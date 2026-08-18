@@ -98,3 +98,43 @@ func TestInterviewRoundTrip(t *testing.T) {
 		t.Fatalf("updated mismatch: status=%s idx=%d answers=%d", got.Status, got.LastQuestionIdx, len(got.Answers))
 	}
 }
+
+func TestQuestionBankRoundTrip(t *testing.T) {
+	url := os.Getenv("TEST_DATABASE_URL")
+	if url == "" {
+		t.Skip("TEST_DATABASE_URL not set")
+	}
+	pool, err := db.NewPool(context.Background(), url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	orgID := uuid.New()
+	seedOrg(t, pool, orgID.String(), "qb"+orgID.String()[:8])
+
+	bank := NewPostgresQuestionBank(pool)
+	q := ivdomain.Question{
+		Content:  "How do channels coordinate goroutines?",
+		Category: "technical",
+		Skill:    "Go",
+	}
+
+	if err := db.RunInTx(ctx, pool, orgID.String(), func(tctx context.Context) error {
+		return bank.Create(tctx, orgID, q)
+	}); err != nil {
+		t.Fatalf("bank create: %v", err)
+	}
+
+	var list []ivdomain.Question
+	if err := db.RunInTx(ctx, pool, orgID.String(), func(tctx context.Context) error {
+		var err error
+		list, err = bank.ListByOrg(tctx, orgID)
+		return err
+	}); err != nil {
+		t.Fatalf("bank list: %v", err)
+	}
+
+	if len(list) == 0 || list[0].Content != q.Content || list[0].Skill != q.Skill {
+		t.Fatalf("unexpected question bank results: %+v", list)
+	}
+}

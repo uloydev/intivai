@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -26,6 +27,31 @@ const (
 	PerQuestionTimeout = 3 * time.Minute
 )
 
+// Question Archetypes & Stage Timer Gates.
+const (
+	ArchetypeConversational = "conversational"
+	ArchetypeSystemDesign   = "system_design"
+	ArchetypeCoding         = "coding"
+
+	TimeLimitConversational = 120 // 2 minutes (120s)
+	TimeLimitSystemDesign   = 300 // 5 minutes (300s)
+	TimeLimitCoding         = 600 // 10 minutes (600s)
+	TimeLimitDefault        = 180 // 3 minutes (180s)
+)
+
+// DetermineQuestionArchetype determines the stage timer gate and archetype for a question.
+func DetermineQuestionArchetype(q Question) (string, int) {
+	cat := strings.ToLower(q.Category)
+	content := strings.ToLower(q.Content)
+	if cat == "coding" || strings.Contains(content, "write a function") || strings.Contains(content, "implement a function") || strings.Contains(content, "write code") || strings.Contains(content, "sandbox") || strings.Contains(content, "leetcode") {
+		return ArchetypeCoding, TimeLimitCoding
+	}
+	if cat == "system_design" || cat == "architecture" || strings.Contains(content, "architecture") || strings.Contains(content, "system design") || strings.Contains(content, "distributed system") || strings.Contains(content, "scalability") || strings.Contains(content, "high throughput") {
+		return ArchetypeSystemDesign, TimeLimitSystemDesign
+	}
+	return ArchetypeConversational, TimeLimitConversational
+}
+
 // Question VO — one step of the interview.
 type Question struct {
 	Idx      int    `json:"idx"` // 1-based, stable across resume
@@ -36,29 +62,33 @@ type Question struct {
 
 // Answer VO — candidate response, stored for evaluation.
 type Answer struct {
-	Idx        int       `json:"idx"`
-	Content    string    `json:"content"`
-	AnsweredAt time.Time `json:"answered_at"`
+	Idx             int            `json:"idx"`
+	Content         string         `json:"content"`
+	AnsweredAt      time.Time      `json:"answered_at"`
+	PacingTelemetry *PacingMetrics `json:"pacing_telemetry,omitempty"`
 }
 
 // Interview aggregate — state machine driven by an injectable clock
 // (idle timeout + expiry are time-based; tests use FrozenClock).
 type Interview struct {
 	domain.Entity
-	OrgID           uuid.UUID
-	ApplicationID   uuid.UUID
-	Status          Status
-	Questions       []Question
-	Answers         []Answer
-	LastQuestionIdx int
-	ContextVersion  int    // company-context version pinned at creation (audit)
-	Evaluation      []byte // post-interview report (evaluation JSONB), hydrated by GetByID
-	ConsentGiven    bool   // GDPR consent captured before interview start
-	StartedAt       *time.Time
-	CompletedAt     *time.Time
-	ExpiresAt       *time.Time
-	clock           Clock
-	lastActivity    time.Time
+	OrgID             uuid.UUID
+	ApplicationID     uuid.UUID
+	Status            Status
+	Questions         []Question
+	Answers           []Answer
+	LastQuestionIdx   int
+	ContextVersion    int    // company-context version pinned at creation (audit)
+	Evaluation        []byte // post-interview report (evaluation JSONB), hydrated by GetByID
+	ConsentGiven      bool   // GDPR consent captured before interview start
+	ProctoringEvents  []ProctoringEvent
+	ProctoringSummary ProctoringSummary
+	CodingSessions    []CodingSession
+	StartedAt         *time.Time
+	CompletedAt       *time.Time
+	ExpiresAt         *time.Time
+	clock             Clock
+	lastActivity      time.Time
 }
 
 func NewInterview(orgID, applicationID uuid.UUID, questions []Question, expiresAt time.Time, clock Clock) (*Interview, error) {
@@ -98,8 +128,8 @@ func (iv *Interview) Start() error {
 	}
 }
 
-// Answer records a candidate answer, advances the cursor, touches activity.
-func (iv *Interview) Answer(content string) error {
+// AnswerWithPacing records a candidate answer with pacing metrics, advances the cursor, touches activity.
+func (iv *Interview) AnswerWithPacing(content string, pacing *PacingMetrics) error {
 	if iv.Status != StatusInProgress {
 		return errors.NewDomainError("INTERVIEW_NOT_IN_PROGRESS", "interview is not in progress")
 	}
@@ -110,10 +140,20 @@ func (iv *Interview) Answer(content string) error {
 	if idx > len(iv.Questions) {
 		idx = len(iv.Questions)
 	}
-	iv.Answers = append(iv.Answers, Answer{Idx: idx, Content: content, AnsweredAt: iv.clock.Now()})
+	iv.Answers = append(iv.Answers, Answer{
+		Idx:             idx,
+		Content:         content,
+		AnsweredAt:      iv.clock.Now(),
+		PacingTelemetry: pacing,
+	})
 	iv.LastQuestionIdx = idx
 	iv.lastActivity = iv.clock.Now()
 	return nil
+}
+
+// Answer records a candidate answer, advances the cursor, touches activity.
+func (iv *Interview) Answer(content string) error {
+	return iv.AnswerWithPacing(content, nil)
 }
 
 // NextQuestion returns the next unanswered question, or nil when done.
@@ -203,4 +243,36 @@ func (iv *Interview) SetClock(c Clock) {
 // ResumeIdx — reconnection resumes from the last unanswered question.
 func (iv *Interview) ResumeIdx() int {
 	return iv.LastQuestionIdx + 1
+}
+
+// RecordProctoringEvent appends a telemetry event and recalculates the integrity summary.
+func (iv *Interview) RecordProctoringEvent(ev ProctoringEvent) {
+	if ev.Timestamp.IsZero() {
+		ev.Timestamp = iv.clock.Now()
+	}
+	iv.ProctoringEvents = append(iv.ProctoringEvents, ev)
+	iv.ProctoringSummary = CalculateProctoringSummary(iv.ProctoringEvents)
+	iv.Touch()
+}
+
+// RecordCodingSession appends a coding sandbox snapshot to the interview.
+func (iv *Interview) RecordCodingSession(session CodingSession) {
+	if session.SubmittedAt == "" {
+		session.SubmittedAt = iv.clock.Now().Format(time.RFC3339)
+	}
+	iv.CodingSessions = append(iv.CodingSessions, session)
+	iv.Touch()
+}
+
+// SessionRemaining reports the remaining seconds before the 30-minute global duration cap.
+func (iv *Interview) SessionRemaining() int {
+	if iv.StartedAt == nil {
+		return int(MaxInterviewDuration.Seconds())
+	}
+	elapsed := iv.clock.Now().Sub(*iv.StartedAt)
+	remaining := MaxInterviewDuration - elapsed
+	if remaining <= 0 {
+		return 0
+	}
+	return int(remaining.Seconds())
 }
