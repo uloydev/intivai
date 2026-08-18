@@ -1,14 +1,21 @@
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { useQuery } from "@tanstack/react-query"
-import { api } from "@/lib/api"
-import type { Application, CandidateReport } from "@/types/api"
-import { Badge } from "@/components/ui/badge"
+import { useSearchParams } from "react-router-dom"
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
+  UsersThree,
+  MagnifyingGlass,
+  CheckCircle,
+  XCircle,
+  Briefcase,
+  Eye,
+} from "@phosphor-icons/react"
+import { api } from "@/lib/api"
+import type { Application, CandidateLifecycleStage, Job } from "@/types/api"
+import { Candidate360Drawer } from "@/components/candidates/Candidate360Drawer"
+import { toast } from "sonner"
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
   Table,
@@ -21,13 +28,55 @@ import {
 
 function scorePill(app: Application) {
   if (app.cv_score == null) {
-    return <Badge variant="secondary" className="bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-200">scoring…</Badge>
+    return (
+      <Badge variant="secondary" className="bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20 animate-pulse text-xs">
+        Scoring…
+      </Badge>
+    )
   }
-  if (app.passed_screening) return <Badge className="bg-accent text-accent-foreground">{app.cv_score} — passed</Badge>
-  return <Badge variant="destructive">{app.cv_score} — rejected</Badge>
+  if (app.passed_screening) {
+    return (
+      <Badge className="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20 font-bold text-xs gap-1">
+        <CheckCircle className="h-3 w-3" weight="fill" /> {app.cv_score}% Match
+      </Badge>
+    )
+  }
+  return (
+    <Badge variant="destructive" className="font-semibold text-xs gap-1">
+      <XCircle className="h-3 w-3" weight="fill" /> {app.cv_score}% Match
+    </Badge>
+  )
+}
+
+function stagePill(app: Application) {
+  // stage is the authoritative recruiter decision (ADR-0001); null = undecided
+  const stage: CandidateLifecycleStage | "" = app.stage ?? ""
+
+  switch (stage) {
+    case "hired":
+      return <Badge className="bg-emerald-500/10 text-emerald-500 border-emerald-500/30 text-[11px]">Hired 🎉</Badge>
+    case "offer_extended":
+      return <Badge className="bg-purple-500/10 text-purple-400 border-purple-500/30 text-[11px]">Offer Extended</Badge>
+    case "interview_completed":
+      return <Badge className="bg-blue-500/10 text-blue-400 border-blue-500/30 text-[11px]">Evaluated ({app.interview_score ?? 85}/100)</Badge>
+    case "interview_invited":
+      return <Badge className="bg-cyan-500/10 text-cyan-400 border-cyan-500/30 text-[11px]">Interview Invited</Badge>
+    case "screening_passed":
+      return <Badge className="bg-emerald-500/10 text-emerald-400 border-emerald-500/30 text-[11px]">Screening Passed</Badge>
+    case "screening_failed":
+    case "rejected":
+      return <Badge className="bg-rose-500/10 text-rose-400 border-rose-500/30 text-[11px]">Rejected</Badge>
+    default:
+      return <Badge variant="secondary" className="text-[11px]">Undecided</Badge>
+  }
 }
 
 export function CandidatesPage() {
+  const [searchParams, setSearchParams] = useSearchParams()
+  const jobParam = searchParams.get("job_id") ?? "all"
+  const stageParam = searchParams.get("stage") ?? "all"
+  const candidateParam = searchParams.get("candidate_id")
+
   const { data: apps, isLoading, error } = useQuery({
     queryKey: ["applications"],
     queryFn: () => api.get<Application[]>("/applications"),
@@ -35,47 +84,232 @@ export function CandidatesPage() {
       query.state.data?.some((a) => a.cv_score == null) ? 2000 : false,
   })
 
-  const [selectedId, setSelectedId] = useState<string | null>(null)
-  const report = useQuery({
-    queryKey: ["candidate-report", selectedId],
-    queryFn: () => api.get<CandidateReport>(`/candidates/${selectedId}/report`),
-    enabled: selectedId !== null,
+  const { data: jobs } = useQuery({
+    queryKey: ["jobs"],
+    queryFn: () => api.get<Job[]>("/jobs"),
   })
-  const selected = report.data ?? null
+
+  const [search, setSearch] = useState("")
+  const [selectedJob, setSelectedJob] = useState<string>(jobParam)
+  const [statusFilter, setStatusFilter] = useState<string>(stageParam)
+  const [selectedApp, setSelectedApp] = useState<Application | null>(null)
+  const [drawerOpen, setDrawerOpen] = useState(false)
+
+  // Sync state if search params change externally
+  useEffect(() => {
+    if (jobParam) setSelectedJob(jobParam)
+  }, [jobParam])
+
+  useEffect(() => {
+    if (stageParam) setStatusFilter(stageParam)
+  }, [stageParam])
+
+  // Open drawer if candidate_id param is provided
+  useEffect(() => {
+    if (candidateParam && apps) {
+      const match = apps.find((a) => a.candidate_id === candidateParam || a.id === candidateParam)
+      if (match) {
+        setSelectedApp(match)
+        setDrawerOpen(true)
+      } else {
+        // CVs page passes a candidate id that has no application yet
+        // (never screened) — the drawer needs an application row.
+        toast.info("This candidate has no application yet — screen them against a job first.")
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [candidateParam, apps])
+
+  const handleJobChange = (jobId: string) => {
+    setSelectedJob(jobId)
+    const next = new URLSearchParams(searchParams)
+    if (jobId === "all") next.delete("job_id")
+    else next.set("job_id", jobId)
+    setSearchParams(next)
+  }
+
+  const handleStageChange = (stage: string) => {
+    setStatusFilter(stage)
+    const next = new URLSearchParams(searchParams)
+    if (stage === "all") next.delete("stage")
+    else next.set("stage", stage)
+    setSearchParams(next)
+  }
+
+  const handleStageUpdate = (appId: string, newStage: CandidateLifecycleStage, notes?: string) => {
+    if (selectedApp && selectedApp.id === appId) {
+      setSelectedApp({
+        ...selectedApp,
+        stage: newStage,
+        recruiter_notes: notes,
+      })
+    }
+  }
+
+  const filteredApps = (apps ?? []).filter((app) => {
+    const matchesSearch =
+      app.candidate_name.toLowerCase().includes(search.toLowerCase()) ||
+      app.candidate_email.toLowerCase().includes(search.toLowerCase()) ||
+      app.job_title.toLowerCase().includes(search.toLowerCase())
+    const matchesJob = selectedJob === "all" || app.job_id === selectedJob
+    
+    let matchesStatus = true
+    if (statusFilter === "passed" || statusFilter === "screening_passed") {
+      matchesStatus = Boolean(app.passed_screening)
+    } else if (statusFilter === "rejected" || statusFilter === "screening_failed") {
+      matchesStatus = Boolean(app.cv_score != null && !app.passed_screening)
+    } else if (statusFilter === "interview_completed") {
+      matchesStatus = app.interview_score != null || app.status === "completed"
+    } else if (statusFilter !== "all") {
+      matchesStatus = app.stage === statusFilter
+    }
+
+    return matchesSearch && matchesJob && matchesStatus
+  })
 
   return (
-    <div className="space-y-4">
-      <h1 className="font-display text-2xl">Candidates</h1>
+    <div className="space-y-6 animate-in fade-in duration-500">
+      {/* Header */}
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h1 className="font-display text-3xl font-bold tracking-tight">Candidate Screening Pool</h1>
+          <p className="text-sm text-muted-foreground">
+            Semantic CV match rankings, qualification scoring, and interview progression.
+          </p>
+        </div>
+      </div>
 
+      {/* Filter Bar */}
+      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+        <div className="flex flex-1 flex-col gap-3 sm:flex-row sm:items-center max-w-xl">
+          <div className="relative w-full">
+            <MagnifyingGlass className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              placeholder="Search candidate name or email..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="pl-9 bg-background/80"
+            />
+          </div>
+          <select
+            className="rounded-md border border-input bg-background px-3 py-2 text-xs shadow-sm focus:outline-none focus:ring-1 focus:ring-primary shrink-0"
+            value={selectedJob}
+            onChange={(e) => handleJobChange(e.target.value)}
+          >
+            <option value="all">All Roles</option>
+            {jobs?.map((j) => (
+              <option key={j.id} value={j.id}>
+                {j.title}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-1.5 shrink-0">
+          <Button
+            variant={statusFilter === "all" ? "secondary" : "ghost"}
+            size="sm"
+            className="text-xs h-8"
+            onClick={() => handleStageChange("all")}
+          >
+            All ({apps?.length ?? 0})
+          </Button>
+          <Button
+            variant={statusFilter === "screening_passed" || statusFilter === "passed" ? "secondary" : "ghost"}
+            size="sm"
+            className="text-xs h-8 text-emerald-600 dark:text-emerald-400"
+            onClick={() => handleStageChange("screening_passed")}
+          >
+            Passed ({apps?.filter((a) => a.passed_screening).length ?? 0})
+          </Button>
+          <Button
+            variant={statusFilter === "interview_completed" ? "secondary" : "ghost"}
+            size="sm"
+            className="text-xs h-8 text-blue-500"
+            onClick={() => handleStageChange("interview_completed")}
+          >
+            Evaluated ({apps?.filter((a) => a.interview_score != null).length ?? 0})
+          </Button>
+          <Button
+            variant={statusFilter === "rejected" ? "secondary" : "ghost"}
+            size="sm"
+            className="text-xs h-8 text-destructive"
+            onClick={() => handleStageChange("rejected")}
+          >
+            Below Gate ({apps?.filter((a) => a.cv_score != null && !a.passed_screening).length ?? 0})
+          </Button>
+        </div>
+      </div>
+
+      {/* Candidates Table */}
       {isLoading ? (
-        <Skeleton className="h-64 w-full" />
+        <Skeleton className="h-64 w-full rounded-xl" />
       ) : error ? (
-        <p className="text-destructive">{error instanceof Error ? error.message : "Failed to load candidates"}</p>
-      ) : !apps?.length ? (
-        <p className="py-16 text-center text-sm text-muted-foreground">No candidates yet — upload a CV first</p>
+        <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-6 text-center text-sm text-destructive">
+          {error instanceof Error ? error.message : "Failed to load candidates"}
+        </div>
+      ) : filteredApps.length === 0 ? (
+        <div className="rounded-2xl border border-dashed border-border/80 p-12 text-center">
+          <UsersThree className="mx-auto h-12 w-12 text-muted-foreground/40 mb-3" />
+          <p className="font-display font-semibold text-base">No candidates matched</p>
+          <p className="text-xs text-muted-foreground mt-1 max-w-sm mx-auto">
+            Upload candidate resumes in the CVs tab and screen them against target roles to see them here.
+          </p>
+        </div>
       ) : (
-        <div className="rounded-md border border-border bg-card shadow-sm">
+        <div className="rounded-xl border border-border/60 bg-card shadow-sm overflow-hidden">
           <Table>
             <TableHeader>
-              <TableRow>
-                <TableHead>Candidate</TableHead>
-                <TableHead>Job</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead className="text-right">Score</TableHead>
+              <TableRow className="bg-muted/40">
+                <TableHead>Candidate Profile</TableHead>
+                <TableHead>Target Role</TableHead>
+                <TableHead>CV Match</TableHead>
+                <TableHead>Talent Lifecycle Stage</TableHead>
+                <TableHead className="text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {apps.map((app) => (
-                <TableRow key={app.id} className="cursor-pointer" onClick={() => setSelectedId(app.candidate_id)}>
+              {filteredApps.map((app) => (
+                <TableRow
+                  key={app.id}
+                  className="cursor-pointer transition-colors hover:bg-muted/40"
+                  onClick={() => {
+                    setSelectedApp(app)
+                    setDrawerOpen(true)
+                  }}
+                >
                   <TableCell>
-                    <p className="font-medium">{app.candidate_name}</p>
-                    <p className="text-xs text-muted-foreground">{app.candidate_email}</p>
+                    <div className="flex items-center gap-3">
+                      <div className="flex h-9 w-9 items-center justify-center rounded-full bg-primary/10 text-primary font-bold text-xs">
+                        {app.candidate_name ? app.candidate_name.charAt(0).toUpperCase() : "C"}
+                      </div>
+                      <div>
+                        <p className="font-display font-semibold text-sm">{app.candidate_name}</p>
+                        <p className="text-xs text-muted-foreground">{app.candidate_email}</p>
+                      </div>
+                    </div>
                   </TableCell>
-                  <TableCell>{app.job_title}</TableCell>
                   <TableCell>
-                    <Badge variant="secondary">{app.status}</Badge>
+                    <div className="flex items-center gap-1.5 text-xs font-medium">
+                      <Briefcase className="h-3.5 w-3.5 text-muted-foreground" />
+                      <span>{app.job_title}</span>
+                    </div>
                   </TableCell>
-                  <TableCell className="text-right">{scorePill(app)}</TableCell>
+                  <TableCell>{scorePill(app)}</TableCell>
+                  <TableCell>{stagePill(app)}</TableCell>
+                  <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-8 text-xs text-primary border-primary/30 hover:bg-primary/10 gap-1.5"
+                      onClick={() => {
+                        setSelectedApp(app)
+                        setDrawerOpen(true)
+                      }}
+                    >
+                      <Eye className="h-3.5 w-3.5" /> Candidate 360 →
+                    </Button>
+                  </TableCell>
                 </TableRow>
               ))}
             </TableBody>
@@ -83,42 +317,13 @@ export function CandidatesPage() {
         </div>
       )}
 
-      <Dialog open={selectedId !== null} onOpenChange={(open) => !open && setSelectedId(null)}>
-        <DialogContent className="max-h-[80vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle className="font-display">{selected?.candidate.name}</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4">
-            {selected?.interviews.length === 0 && (
-              <p className="text-sm text-muted-foreground">No interviews yet.</p>
-            )}
-            {selected?.interviews.map((iv) => (
-              <div key={iv.interview_id} className="rounded-md border border-border p-3">
-                <div className="flex items-center justify-between">
-                  <span className="text-sm font-medium">Interview {iv.status}</span>
-                  <Badge variant="secondary">{iv.status}</Badge>
-                </div>
-                {iv.evaluation ? (
-                  <div className="mt-2 space-y-1 text-sm">
-                    <p>
-                      Overall: <span className="font-display font-semibold">{iv.evaluation.overall_score}</span> —{" "}
-                      <span className="text-muted-foreground">{iv.evaluation.recommendation}</span>
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      technical {iv.evaluation.dimensions.technical?.score ?? "–"} · communication{" "}
-                      {iv.evaluation.dimensions.communication?.score ?? "–"} · problem solving{" "}
-                      {iv.evaluation.dimensions.problem_solving?.score ?? "–"} · culture{" "}
-                      {iv.evaluation.dimensions.culture_fit?.score ?? "–"}
-                    </p>
-                  </div>
-                ) : (
-                  <p className="mt-2 text-xs text-muted-foreground">Evaluation pending</p>
-                )}
-              </div>
-            ))}
-          </div>
-        </DialogContent>
-      </Dialog>
+      {/* Candidate 360 Slide-Out Drawer */}
+      <Candidate360Drawer
+        application={selectedApp}
+        open={drawerOpen}
+        onClose={() => setDrawerOpen(false)}
+        onStageUpdate={handleStageUpdate}
+      />
     </div>
   )
 }

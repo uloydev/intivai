@@ -1,12 +1,12 @@
-@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 
-/* Intivai design tokens — MASTER.md rev 2 (design-system/intivai/MASTER.md) */
+/* Intivai design tokens — Pro Max */
 @theme inline {
-  --font-sans: "DM Sans", sans-serif;
-  --font-display: "Space Grotesk", sans-serif;
+  --font-sans: "Inter", sans-serif;
+  --font-display: "Inter", sans-serif;
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -48,29 +48,29 @@
   --card-foreground: #0F172A;
   --popover: #FFFFFF;
   --popover-foreground: #0F172A;
-  --primary: #2563EB;
+  --primary: #1E3A5F;
   --primary-foreground: #FFFFFF;
-  --secondary: #F1F5F9;
-  --secondary-foreground: #0F172A;
-  --muted: #F1F5F9;
+  --secondary: #2563EB;
+  --secondary-foreground: #FFFFFF;
+  --muted: #F1F3F5;
   --muted-foreground: #64748B;
   --accent: #059669;
   --accent-foreground: #FFFFFF;
   --destructive: #DC2626;
   --destructive-foreground: #FFFFFF;
   --warning: #D97706;
-  --border: #E2E8F0;
-  --input: #E2E8F0;
-  --ring: #2563EB;
+  --border: #E4E7EB;
+  --input: #E4E7EB;
+  --ring: #1E3A5F;
   --radius: 0.5rem;
   --sidebar: #FFFFFF;
   --sidebar-foreground: #0F172A;
-  --sidebar-primary: #2563EB;
+  --sidebar-primary: #1E3A5F;
   --sidebar-primary-foreground: #FFFFFF;
   --sidebar-accent: #F1F5F9;
   --sidebar-accent-foreground: #0F172A;
   --sidebar-border: #E2E8F0;
-  --sidebar-ring: #2563EB;
+  --sidebar-ring: #1E3A5F;
 }
 
 .dark {

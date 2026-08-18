@@ -16,7 +16,14 @@ type ApiResponse<T> = { data: T }
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers)
   const token = localStorage.getItem("intivai_token")
-  if (token) headers.set("Authorization", `Bearer ${token}`)
+  const candidateToken = localStorage.getItem("intivai_candidate_token")
+
+  if (path.startsWith("/candidate/portal") && candidateToken) {
+    headers.set("Authorization", `Bearer ${candidateToken}`)
+  } else if (token) {
+    headers.set("Authorization", `Bearer ${token}`)
+  }
+
   if (init?.body && !(init.body instanceof FormData)) {
     headers.set("Content-Type", "application/json")
   }
@@ -26,12 +33,21 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, { ...init, headers, signal })
   const body = await res.json().catch(() => null)
 
-  if (res.status === 401 && !path.startsWith("/auth/")) {
-    // Expired/revoked session: force logout once, redirect to login.
-    // Auth endpoints excluded — a failed login is not a session problem.
-    localStorage.removeItem("intivai_token")
-    if (window.location.pathname !== "/login") {
-      window.location.assign("/login")
+  if (res.status === 401) {
+    if (path.startsWith("/candidate/portal")) {
+      localStorage.removeItem("intivai_candidate_token")
+    } else if (
+      !path.startsWith("/auth/") &&
+      !path.startsWith("/public/") &&
+      !path.startsWith("/candidate/")
+    ) {
+      // Expired/revoked recruiter session: force logout once, redirect to login.
+      // Candidate endpoints are excluded — a candidate token failure must not
+      // destroy a concurrently logged-in recruiter session.
+      localStorage.removeItem("intivai_token")
+      if (window.location.pathname !== "/login") {
+        window.location.assign("/login")
+      }
     }
   }
 
@@ -51,4 +67,13 @@ export const api = {
     request<T>(path, { method: "PATCH", body: JSON.stringify(body) }),
   put: <T>(path: string, body: unknown) =>
     request<T>(path, { method: "PUT", body: JSON.stringify(body) }),
+  delete: <T = void>(path: string) => request<T>(path, { method: "DELETE" }),
+  getBlob: async (path: string) => {
+    const headers = new Headers()
+    const token = localStorage.getItem("intivai_token")
+    if (token) headers.set("Authorization", `Bearer ${token}`)
+    const res = await fetch(`${API_BASE}${path}`, { headers })
+    if (!res.ok) throw new Error(`Download failed (${res.status})`)
+    return await res.blob()
+  },
 }

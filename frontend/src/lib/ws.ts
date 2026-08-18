@@ -2,9 +2,29 @@
 // Frames mirror the backend protocol (OpenAPI /candidate/interviews/{id}/chat).
 // The browser WebSocket auto-answers server pings — no manual pong needed.
 
+export interface PacingTelemetry {
+  time_to_first_keystroke_ms?: number
+  duration_ms?: number
+  typed_chars?: number
+  pasted_chars?: number
+  pasted_ratio?: number
+}
+
 export type ChatFrame =
-  | { type: "interview.start"; session_id: string; total_questions: number }
-  | { type: "question"; content: string; idx: number }
+  | {
+      type: "interview.start"
+      session_id: string
+      total_questions: number
+      session_budget_sec?: number
+    }
+  | {
+      type: "question"
+      content: string
+      idx: number
+      archetype?: "conversational" | "system_design" | "coding"
+      time_limit_sec?: number
+      session_remaining_sec?: number
+    }
   | { type: "token"; content: string }
   | { type: "response"; content: string }
   | {
@@ -21,6 +41,7 @@ export interface ChatClientOptions {
   ticket: string
   onFrame: (frame: ChatFrame) => void
   onClose: (reason: "closed" | "error" | "timeout") => void
+  onOpen?: () => void
   sessionId?: string
 }
 
@@ -51,6 +72,12 @@ export class ChatClient {
     const url = `${WS_BASE}/candidate/interviews/${interviewId}/chat?ticket=${encodeURIComponent(this.opts.ticket)}`
     const ws = new WebSocket(url)
     this.ws = ws
+
+    ws.onopen = () => {
+      // Only fires AFTER readyState is OPEN — the right moment to replay the
+      // resume frame (sending during CONNECTING drops it silently).
+      this.opts.onOpen?.()
+    }
 
     ws.onmessage = (ev) => {
       try {
@@ -87,8 +114,12 @@ export class ChatClient {
     return false
   }
 
-  answer(content: string): boolean {
-    return this.send({ type: "answer", content })
+  answer(content: string, pacing?: PacingTelemetry): boolean {
+    return this.send({
+      type: "answer",
+      content,
+      ...(pacing ? { pacing_telemetry: pacing } : {}),
+    })
   }
 
   interrupt(): void {
@@ -97,6 +128,36 @@ export class ChatClient {
 
   resume(sessionId: string): void {
     this.send({ type: "resume", session_id: sessionId })
+  }
+
+  sendTelemetry(eventType: string, questionIdx?: number, details?: Record<string, unknown>): boolean {
+    return this.send({
+      type: "telemetry",
+      event_type: eventType,
+      timestamp: new Date().toISOString(),
+      question_idx: questionIdx,
+      details,
+    })
+  }
+
+  sendCodeChange(language: string, code: string, questionIdx?: number): boolean {
+    return this.send({
+      type: "code.change",
+      language,
+      code,
+      question_idx: questionIdx,
+    })
+  }
+
+  sendCodeRun(language: string, code: string, testCases?: unknown[], questionIdx?: number, stdin?: string): boolean {
+    return this.send({
+      type: "code.run",
+      language,
+      code,
+      stdin,
+      test_cases: testCases,
+      question_idx: questionIdx,
+    })
   }
 
   close(): void {

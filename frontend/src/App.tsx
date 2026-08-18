@@ -3,6 +3,11 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { Toaster } from "sonner"
 import { AppShell } from "@/components/AppShell"
 import { RequireAuth } from "@/lib/require-auth"
+import { PublicLayout } from "@/components/PublicLayout"
+import { LandingPage } from "@/pages/Landing"
+import { CareersPage } from "@/pages/Careers"
+import { CandidatePortal } from "@/pages/CandidatePortal"
+import { DashboardPage } from "@/pages/Dashboard"
 import { CandidatesPage } from "@/pages/Candidates"
 import { ChatPage } from "@/pages/Chat"
 import { InvitePage } from "@/pages/Invite"
@@ -11,7 +16,9 @@ import { InterviewResultPage } from "@/pages/InterviewResult"
 import { InterviewsPage } from "@/pages/Interviews"
 import { JobsPage } from "@/pages/Jobs"
 import { LoginPage } from "@/pages/Login"
+import { InterviewVoicePage } from "@/pages/InterviewVoice"
 import { RegisterPage } from "@/pages/Register"
+import { CompanyContextPage } from "@/pages/CompanyContext"
 
 function NotFoundPage() {
   return (
@@ -31,19 +38,35 @@ export default function App() {
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
         <Routes>
-          <Route path="/login" element={<LoginPage />} />
+          {/* Public Landing & Careers & Candidate Portal */}
+          <Route element={<PublicLayout />}>
+            <Route path="/" element={<LandingPage />} />
+            <Route path="/careers" element={<CareersPage />} />
+            <Route path="/candidate/portal" element={<CandidatePortal />} />
+          </Route>
+
+          {/* Candidate Direct Flows */}
           <Route path="/invite/:id" element={<InvitePage />} />
           <Route path="/chat/:id" element={<ChatPage />} />
+          <Route path="/voice/:id" element={<InterviewVoicePage />} />
+
+          {/* Auth */}
+          <Route path="/login" element={<LoginPage />} />
           <Route path="/register" element={<RegisterPage />} />
+
+          {/* Recruiter Authed Workspace */}
           <Route element={<RequireAuth />}>
             <Route element={<AppShell />}>
+              <Route path="/dashboard" element={<DashboardPage />} />
               <Route path="/jobs" element={<JobsPage />} />
               <Route path="/cvs" element={<CVsPage />} />
               <Route path="/candidates" element={<CandidatesPage />} />
               <Route path="/interviews" element={<InterviewsPage />} />
               <Route path="/interviews/:id" element={<InterviewResultPage />} />
+              <Route path="/company-context" element={<CompanyContextPage />} />
             </Route>
           </Route>
+
           <Route path="*" element={<NotFoundPage />} />
         </Routes>
       </BrowserRouter>

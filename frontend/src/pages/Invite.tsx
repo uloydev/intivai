@@ -1,15 +1,21 @@
 import { useState } from "react"
 import { useNavigate, useParams, useSearchParams } from "react-router-dom"
+import {
+  Sparkle,
+  ArrowRight,
+  SpinnerGap,
+  Clock,
+  CheckCircle,
+} from "@phosphor-icons/react"
 import { api } from "@/lib/api"
 import type { ConsentResult } from "@/types/api"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Label } from "@/components/ui/label"
+import { Badge } from "@/components/ui/badge"
 import { toast } from "sonner"
 
-// /invite/:interviewID?t=<invitation_token> — consent gate, then ticket
-// exchange, then straight into the chat.
 export function InvitePage() {
   const { id } = useParams<{ id: string }>()
   const [params] = useSearchParams()
@@ -24,8 +30,6 @@ export function InvitePage() {
     setBusy(true)
     try {
       await api.post<ConsentResult>(`/candidate/interviews/${id}/consent`, { invitation_token: token })
-      // Exchange the invitation token for a short-lived WS ticket — the chat
-      // authenticates with the ticket, not the invitation token.
       const ticket = await api.post<{ ticket: string }>(`/candidate/interviews/${id}/ticket`, {
         invitation_token: token,
       })
@@ -37,41 +41,86 @@ export function InvitePage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background p-4">
-      <Card className="w-full max-w-md">
-        <CardHeader>
-          <CardTitle className="font-display text-xl">Interview invitation</CardTitle>
-          <CardDescription>
-            Your interview is ready. It takes about 30 minutes and is conducted by an AI interviewer.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <ul className="list-disc space-y-1 pl-5 text-sm text-muted-foreground">
-            <li>Answer questions one at a time — type or use the mic-free chat</li>
-            <li>You can interrupt an answer and resume later from the same question</li>
-            <li>Your answers are used only to evaluate your fit for this role</li>
-          </ul>
-          <div className="flex items-start gap-3 rounded-md border border-border p-3">
-            <Checkbox
-              id="consent"
-              checked={consented}
-              onCheckedChange={(v) => setConsented(v === true)}
-              aria-label="I consent"
-            />
-            <Label htmlFor="consent" className="text-sm leading-relaxed">
-              I consent to my answers being recorded and used for this interview's evaluation.
-            </Label>
-          </div>
-          <p className="text-xs text-muted-foreground">
-            By starting you agree to the interview privacy notice — your answers are used only for this
-            role's evaluation and are accessible to you on request.
-          </p>
-          <Button className="w-full" onClick={start} disabled={!consented || busy || !token}>
-            {busy ? "Starting…" : "Start interview"}
-          </Button>
-          {!token && <p className="text-sm text-destructive">This invite link is missing its token — ask the recruiter for a fresh link.</p>}
-        </CardContent>
-      </Card>
+    <div className="flex min-h-screen items-center justify-center bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-primary/10 via-background to-background p-4 animate-in fade-in duration-500">
+      <div className="w-full max-w-lg space-y-4">
+        <Card className="glass border-primary/20 shadow-2xl shadow-primary/10 overflow-hidden relative">
+          <CardHeader className="text-center pb-2">
+            <div className="mx-auto mb-2 flex h-12 w-12 items-center justify-center rounded-2xl bg-primary text-primary-foreground font-bold font-display text-xl shadow-lg shadow-primary/25">
+              I
+            </div>
+            <div className="flex items-center justify-center gap-1.5 mb-1">
+              <Badge variant="outline" className="gap-1 border-primary/30 bg-primary/5 text-primary text-xs py-0.5">
+                <Sparkle className="h-3 w-3" weight="fill" /> Candidate Portal
+              </Badge>
+            </div>
+            <CardTitle className="font-display text-2xl font-bold tracking-tight">Interview Invitation</CardTitle>
+            <CardDescription className="text-xs">
+              Welcome! You've been invited to complete an interactive AI screening interview.
+            </CardDescription>
+          </CardHeader>
+
+          <CardContent className="space-y-5 pt-2">
+            {/* Guide box */}
+            <div className="rounded-xl border border-border/60 bg-muted/30 p-4 space-y-2.5 text-xs text-muted-foreground">
+              <p className="font-semibold text-foreground flex items-center gap-1.5 text-xs">
+                <Clock className="h-4 w-4 text-primary" /> What to expect:
+              </p>
+              <ul className="space-y-1.5 pl-1">
+                <li className="flex items-start gap-2">
+                  <CheckCircle className="h-4 w-4 text-primary shrink-0 mt-0.5" weight="fill" />
+                  <span>Answer dynamic technical questions one at a time via keyboard or dictation.</span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <CheckCircle className="h-4 w-4 text-primary shrink-0 mt-0.5" weight="fill" />
+                  <span>Session takes approximately 15-20 minutes with automatic save & resume support.</span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <CheckCircle className="h-4 w-4 text-primary shrink-0 mt-0.5" weight="fill" />
+                  <span>Your responses are evaluated against core competencies and delivered directly to the hiring team.</span>
+                </li>
+              </ul>
+            </div>
+
+            {/* GDPR Consent Box */}
+            <div className="flex items-start gap-3 rounded-xl border border-primary/20 bg-primary/5 p-3.5">
+              <Checkbox
+                id="consent"
+                checked={consented}
+                onCheckedChange={(v) => setConsented(v === true)}
+                className="mt-0.5"
+                aria-label="I consent"
+              />
+              <Label htmlFor="consent" className="text-xs leading-relaxed text-foreground cursor-pointer font-medium">
+                I consent to my answers being analyzed and structured for this position's hiring evaluation.
+              </Label>
+            </div>
+
+            <Button
+              className="w-full font-semibold shadow-md shadow-primary/20"
+              variant="gradient"
+              size="lg"
+              onClick={start}
+              disabled={!consented || busy || !token}
+            >
+              {busy ? (
+                <>
+                  <SpinnerGap className="mr-2 h-4 w-4 animate-spin" /> Preparing AI Rails…
+                </>
+              ) : (
+                <>
+                  Begin Interview Session <ArrowRight className="ml-2 h-4 w-4" weight="bold" />
+                </>
+              )}
+            </Button>
+
+            {!token && (
+              <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-center text-xs text-destructive">
+                This invitation link is missing its authorization token. Please request a fresh invite from the recruiter.
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
     </div>
   )
 }
