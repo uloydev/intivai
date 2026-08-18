@@ -50,7 +50,7 @@ func (r *PostgresApplicationRepo) GetByID(ctx context.Context, id uuid.UUID) (*s
 		return nil, err
 	}
 	row := q.Raw(
-		`SELECT id, org_id, candidate_id, job_id, cv_score, score_breakdown, passed_screening, status, created_at
+		`SELECT id, org_id, candidate_id, job_id, cv_score, score_breakdown, passed_screening, status, stage, recruiter_notes, created_at
 		 FROM applications WHERE id = $1`, id).Row()
 	return scanApplication(row)
 }
@@ -61,7 +61,7 @@ func (r *PostgresApplicationRepo) GetByCandidateJob(ctx context.Context, orgID, 
 		return nil, err
 	}
 	row := q.Raw(
-		`SELECT id, org_id, candidate_id, job_id, cv_score, score_breakdown, passed_screening, status, created_at
+		`SELECT id, org_id, candidate_id, job_id, cv_score, score_breakdown, passed_screening, status, stage, recruiter_notes, created_at
 		 FROM applications WHERE org_id = $1 AND candidate_id = $2 AND job_id = $3`,
 		orgID, candidateID, jobID).Row()
 	return scanApplication(row)
@@ -72,7 +72,7 @@ func (r *PostgresApplicationRepo) List(ctx context.Context, orgID, jobID uuid.UU
 	if err != nil {
 		return nil, err
 	}
-	sql := `SELECT id, org_id, candidate_id, job_id, cv_score, score_breakdown, passed_screening, status, created_at
+	sql := `SELECT id, org_id, candidate_id, job_id, cv_score, score_breakdown, passed_screening, status, stage, recruiter_notes, created_at
 		FROM applications WHERE org_id = $1`
 	args := []any{orgID}
 	if jobID != uuid.Nil {
@@ -103,7 +103,7 @@ func (r *PostgresApplicationRepo) ByCandidate(ctx context.Context, orgID, candid
 		return nil, err
 	}
 	rows, err := q.Raw(
-		`SELECT id, org_id, candidate_id, job_id, cv_score, score_breakdown, passed_screening, status, created_at
+		`SELECT id, org_id, candidate_id, job_id, cv_score, score_breakdown, passed_screening, status, stage, recruiter_notes, created_at
 		 FROM applications WHERE org_id = $1 AND candidate_id = $2 ORDER BY created_at DESC`,
 		orgID, candidateID).Rows()
 	if err != nil {
@@ -132,6 +132,34 @@ func (r *PostgresApplicationRepo) Update(ctx context.Context, app *scrdomain.App
 		app.CVScore, app.ScoreBreakdown, app.PassedScreening, app.Status, app.ID).Error
 }
 
+// UpdateDecision persists stage + recruiter_notes only (PATCH semantics —
+// nil = keep). org_id is belt-and-braces on top of RLS.
+func (r *PostgresApplicationRepo) UpdateDecision(ctx context.Context, orgID, id uuid.UUID, stage *scrdomain.Stage, notes *string) error {
+	q, err := r.q(ctx)
+	if err != nil {
+		return err
+	}
+	var stageVal *string
+	if stage != nil {
+		v := string(*stage)
+		stageVal = &v
+	}
+	res := q.WithContext(ctx).Exec(
+		`UPDATE applications SET
+		   stage = COALESCE($1, stage),
+		   recruiter_notes = COALESCE($2, recruiter_notes),
+		   updated_at = NOW()
+		 WHERE id = $3 AND org_id = $4`,
+		stageVal, notes, id, orgID)
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return scrdomain.ErrNotFound
+	}
+	return nil
+}
+
 type rowScanner interface {
 	Scan(dest ...any) error
 }
@@ -143,7 +171,7 @@ func scanApplication(row rowScanner) (*scrdomain.Application, error) {
 		breakdown []byte
 		passed    *bool
 	)
-	err := row.Scan(&a.ID, &a.OrgID, &a.CandidateID, &a.JobID, &score, &breakdown, &passed, &a.Status, &a.CreatedAt)
+	err := row.Scan(&a.ID, &a.OrgID, &a.CandidateID, &a.JobID, &score, &breakdown, &passed, &a.Status, &a.Stage, &a.RecruiterNotes, &a.CreatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, scrdomain.ErrNotFound
 	}

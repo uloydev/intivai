@@ -165,6 +165,13 @@ func TestReExtractGuards(t *testing.T) {
 	if _, err := svc.ReExtract(context.Background(), act, failed.ID); err != nil {
 		t.Fatalf("failed candidate not retryable: %v", err)
 	}
+
+	// failed_ocr → retryable, enqueues parse task.
+	failedOcr := &domain.Candidate{Entity: entity(uuid.New()), OrgID: orgID, Status: domain.StatusFailedOCR}
+	repo.created = append(repo.created, failedOcr)
+	if res, err := svc.ReExtract(context.Background(), act, failedOcr.ID); err != nil || res.Status != domain.StatusParsing {
+		t.Fatalf("failed_ocr candidate not retryable to parsing: %v", err)
+	}
 }
 
 func TestGetAndListSummary(t *testing.T) {
@@ -209,6 +216,99 @@ func TestGetAndListSummary(t *testing.T) {
 	other := actor()
 	if _, err := svc.Get(context.Background(), other, c.ID); err == nil {
 		t.Fatal("cross-org read allowed")
+	}
+}
+
+func TestDeleteCandidate(t *testing.T) {
+	repo := &stubRepo{}
+	store := &stubStore{}
+	svc := NewCVService(repo, store, &stubEnqueuer{})
+	act := actor()
+
+	c := &domain.Candidate{
+		Entity: entity(uuid.New()),
+		OrgID:  act.OrgID,
+		Name:   "Jane",
+		Email:  "j@x.io",
+		CVPath: "cvs/org/c1.pdf",
+	}
+	repo.created = append(repo.created, c)
+
+	// Role check
+	member := application.AuthContext{OrgID: act.OrgID, Role: "member"}
+	if err := svc.DeleteCandidate(context.Background(), member, c.ID); err == nil {
+		t.Fatal("expected error for member role")
+	}
+
+	// Not found
+	if err := svc.DeleteCandidate(context.Background(), act, uuid.New()); err == nil {
+		t.Fatal("expected not found error")
+	}
+
+	// Cross org
+	other := actor()
+	if err := svc.DeleteCandidate(context.Background(), other, c.ID); err == nil {
+		t.Fatal("expected forbidden error for cross org")
+	}
+
+	// Happy path
+	if err := svc.DeleteCandidate(context.Background(), act, c.ID); err != nil {
+		t.Fatalf("delete candidate failed: %v", err)
+	}
+	if len(store.deletes) != 1 {
+		t.Fatalf("expected file delete, got %d", len(store.deletes))
+	}
+}
+
+func TestPayloadUUIDHelper(t *testing.T) {
+	valid := uuid.New().String()
+	u, err := payloadUUID(valid)
+	if err != nil || u.String() != valid {
+		t.Fatalf("expected valid uuid, got %v, %v", u, err)
+	}
+	if _, err := payloadUUID("invalid"); err == nil {
+		t.Fatal("expected error on invalid uuid")
+	}
+}
+
+func TestReExtract(t *testing.T) {
+	repo := &stubRepo{}
+	store := &stubStore{}
+	enq := &stubEnqueuer{}
+	svc := NewCVService(repo, store, enq)
+	act := actor()
+
+	c := &domain.Candidate{
+		Entity: entity(uuid.New()),
+		OrgID:  act.OrgID,
+		Name:   "Jane",
+		Email:  "j@x.io",
+		Status: domain.StatusFailedExtract,
+	}
+	repo.created = append(repo.created, c)
+
+	// Unauthorized role
+	member := application.AuthContext{OrgID: act.OrgID, Role: "member"}
+	if _, err := svc.ReExtract(context.Background(), member, c.ID); err == nil {
+		t.Fatal("expected error for member role")
+	}
+
+	// Not found
+	if _, err := svc.ReExtract(context.Background(), act, uuid.New()); err == nil {
+		t.Fatal("expected not found error")
+	}
+
+	// Success for FailedExtract
+	res, err := svc.ReExtract(context.Background(), act, c.ID)
+	if err != nil || res.Status != domain.StatusExtracting {
+		t.Fatalf("expected extracting status, got %v, %v", res, err)
+	}
+
+	// Success for FailedOCR
+	c.Status = domain.StatusFailedOCR
+	res2, err := svc.ReExtract(context.Background(), act, c.ID)
+	if err != nil || res2.Status != domain.StatusParsing {
+		t.Fatalf("expected parsing status, got %v, %v", res2, err)
 	}
 }
 

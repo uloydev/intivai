@@ -23,6 +23,8 @@ type Application struct {
 	ScoreBreakdown  json.RawMessage
 	PassedScreening *bool
 	Status          string
+	Stage           *string
+	RecruiterNotes  *string
 }
 
 func NewApplication(orgID, candidateID, jobID uuid.UUID) *Application {

@@ -98,7 +98,7 @@ func seedEvalScenario(t *testing.T) (*EvaluationService, string, uuid.UUID, uuid
 
 	svc := NewEvaluationService(pool,
 		ivrepo.NewPostgresInterviewRepo(pool), scrrepo.NewPostgresApplicationRepo(pool),
-		cvrepo.NewPostgresCandidateRepo(pool), jobrepo.NewPostgresJobRepo(pool))
+		cvrepo.NewPostgresCandidateRepo(pool), jobrepo.NewPostgresJobRepo(pool), nil)
 	return svc, orgID, ivID, candID, appID
 }
 

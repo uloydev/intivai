@@ -63,3 +63,23 @@ func (h *EvaluationHandler) ListInterviews(c *fiber.Ctx) error {
 	}
 	return c.Status(200).JSON(fiber.Map{"data": list})
 }
+
+// GetInterviewPDF — GET /interviews/:id/report/pdf (download PDF report).
+func (h *EvaluationHandler) GetInterviewPDF(c *fiber.Ctx) error {
+	actor, ok := api.Actor(c)
+	if !ok {
+		return c.Status(401).JSON(fiber.Map{"error": "unauthorized"})
+	}
+	id, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "invalid interview id"})
+	}
+	pdfReader, err := h.svc.InterviewPDF(c.UserContext(), actor, id)
+	if err != nil {
+		return httpapi.Error(c, err)
+	}
+
+	c.Set("Content-Type", "application/pdf")
+	c.Set("Content-Disposition", `attachment; filename="interview_report.pdf"`)
+	return c.SendStream(pdfReader)
+}

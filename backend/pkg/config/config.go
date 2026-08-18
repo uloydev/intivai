@@ -12,6 +12,16 @@ type Config struct {
 		Port           string
 		Env            string // dev | prod
 		AllowedOrigins []string
+		PublicURL      string // candidate-facing base URL (magic links, invites)
+	}
+
+	// Sandbox — the code-execution sidecar (ADR-0002). Empty SidecarAddr
+	// disables sandbox execution (fail closed).
+	Sandbox struct {
+		SidecarAddr string // e.g. sandbox-sidecar:8443
+		CACert      string
+		ClientCert  string
+		ClientKey   string
 	}
 	Database struct {
 		URL        string
@@ -60,6 +70,13 @@ type Config struct {
 		UserPerMin   int
 		AuthPerMin   int
 	}
+	SMTP struct {
+		Host     string
+		Port     int
+		Username string
+		Password string
+		From     string
+	}
 }
 
 func Load() (*Config, error) {
@@ -79,6 +96,14 @@ func Load() (*Config, error) {
 		cfg.App.Env = "dev"
 	}
 	cfg.App.AllowedOrigins = splitCSV(v.GetString("ALLOWED_ORIGINS"))
+	cfg.App.PublicURL = strings.TrimSuffix(v.GetString("APP_PUBLIC_URL"), "/")
+	if cfg.App.PublicURL == "" {
+		cfg.App.PublicURL = "http://localhost:5173"
+	}
+	cfg.Sandbox.SidecarAddr = v.GetString("SANDBOX_SIDECAR_ADDR")
+	cfg.Sandbox.CACert = v.GetString("SANDBOX_CA_CERT")
+	cfg.Sandbox.ClientCert = v.GetString("SANDBOX_CLIENT_CERT")
+	cfg.Sandbox.ClientKey = v.GetString("SANDBOX_CLIENT_KEY")
 
 	cfg.Database.URL = v.GetString("DATABASE_URL")
 	cfg.Database.MigrateURL = v.GetString("MIGRATE_URL")
@@ -167,6 +192,21 @@ func Load() (*Config, error) {
 	cfg.RateLimit.AuthPerMin = v.GetInt("RATE_LIMIT_AUTH_PER_MIN")
 	if cfg.RateLimit.AuthPerMin == 0 {
 		cfg.RateLimit.AuthPerMin = 10
+	}
+
+	cfg.SMTP.Host = v.GetString("SMTP_HOST")
+	if cfg.SMTP.Host == "" {
+		cfg.SMTP.Host = "localhost"
+	}
+	cfg.SMTP.Port = v.GetInt("SMTP_PORT")
+	if cfg.SMTP.Port == 0 {
+		cfg.SMTP.Port = 1025
+	}
+	cfg.SMTP.Username = v.GetString("SMTP_USER")
+	cfg.SMTP.Password = v.GetString("SMTP_PASS")
+	cfg.SMTP.From = v.GetString("SMTP_FROM")
+	if cfg.SMTP.From == "" {
+		cfg.SMTP.From = "Intivai Talent <no-reply@intivai.com>"
 	}
 
 	return cfg, nil

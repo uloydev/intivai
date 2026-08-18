@@ -88,17 +88,23 @@ func (s *CVService) ReExtract(ctx context.Context, actor application.AuthContext
 		return nil, errors.NewDomainError("FORBIDDEN", "candidate belongs to another org")
 	}
 	switch candidate.Status {
+	case domain.StatusFailedOCR:
+		if _, err := s.queue.Enqueue(ctx, TaskParseCV, ParseCVPayload{
+			OrgID: actor.OrgID.String(), CandidateID: candidate.ID.String(),
+		}); err != nil {
+			return nil, errors.NewDomainError("CV_QUEUE_FAILED", "failed to enqueue cv parsing")
+		}
+		return &CVResult{ID: candidate.ID, Status: domain.StatusParsing}, nil
 	case domain.StatusFailedExtract, domain.StatusParsed:
-		// retryable
+		if _, err := s.queue.Enqueue(ctx, TaskExtractCV, ExtractCVPayload{
+			OrgID: actor.OrgID.String(), CandidateID: candidate.ID.String(),
+		}); err != nil {
+			return nil, errors.NewDomainError("CV_QUEUE_FAILED", "failed to enqueue extraction")
+		}
+		return &CVResult{ID: candidate.ID, Status: domain.StatusExtracting}, nil
 	default:
 		return nil, errors.NewDomainError("CANDIDATE_NOT_RETRYABLE", "candidate is not in a retryable state")
 	}
-	if _, err := s.queue.Enqueue(ctx, TaskExtractCV, ExtractCVPayload{
-		OrgID: actor.OrgID.String(), CandidateID: candidate.ID.String(),
-	}); err != nil {
-		return nil, errors.NewDomainError("CV_QUEUE_FAILED", "failed to enqueue extraction")
-	}
-	return &CVResult{ID: candidate.ID, Status: domain.StatusExtracting}, nil
 }
 
 type CVResult struct {
@@ -166,4 +172,28 @@ func toDetail(c *domain.Candidate) *CVDetail {
 		CVRawText: c.CVRawText, CVStructured: c.CVStructured, CVOCRMethod: c.CVOCRMethod,
 		ErrorMessage: c.ErrorMessage, CreatedAt: c.CreatedAt.String(),
 	}
+}
+
+func (s *CVService) DeleteCandidate(ctx context.Context, actor application.AuthContext, id uuid.UUID) error {
+	if err := application.Authorize(actor, iamdomain.RoleAdmin, iamdomain.RoleRecruiter); err != nil {
+		return err
+	}
+	candidate, err := s.repo.GetByID(ctx, id)
+	if err == domain.ErrNotFound {
+		return errors.NewNotFoundError("candidate", id.String())
+	}
+	if err != nil {
+		return err
+	}
+	if candidate.OrgID != actor.OrgID {
+		return errors.NewDomainError("FORBIDDEN", "candidate belongs to another org")
+	}
+
+	if err := s.repo.Delete(ctx, id); err != nil {
+		return err
+	}
+	if candidate.CVPath != "" {
+		_ = s.store.Delete(ctx, candidate.CVPath)
+	}
+	return nil
 }

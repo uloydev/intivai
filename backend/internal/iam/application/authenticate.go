@@ -9,10 +9,11 @@ import (
 	"github.com/intivai/backend/internal/shared/errors"
 )
 
-// Token types — auth tokens and short-lived WS tickets are distinguishable.
+// Token types — auth tokens, candidate tokens and short-lived WS tickets are distinguishable.
 const (
-	TokenTypeAuth     = "auth"
-	TokenTypeWSTicket = "ws_ticket"
+	TokenTypeAuth      = "auth"
+	TokenTypeCandidate = "candidate"
+	TokenTypeWSTicket  = "ws_ticket"
 )
 
 // Authenticate validates credentials via the pre-auth security-definer lookup

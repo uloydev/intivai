@@ -1,8 +1,11 @@
 package application
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
+	"io"
 	"time"
 
 	"github.com/google/uuid"
@@ -14,6 +17,7 @@ import (
 	scrdomain "github.com/intivai/backend/internal/screening/domain"
 	"github.com/intivai/backend/internal/shared/errors"
 	"github.com/intivai/backend/pkg/db"
+	"github.com/intivai/backend/pkg/storage"
 	"gorm.io/gorm"
 )
 
@@ -24,11 +28,12 @@ type EvaluationService struct {
 	appRepo  scrdomain.ApplicationRepository
 	candRepo cvdomain.CandidateRepository
 	jobRepo  jobdomain.JobRepository
+	store    storage.FileStorage
 }
 
 func NewEvaluationService(pool *gorm.DB, ivRepo ivdomain.InterviewRepository, appRepo scrdomain.ApplicationRepository,
-	candRepo cvdomain.CandidateRepository, jobRepo jobdomain.JobRepository) *EvaluationService {
-	return &EvaluationService{pool: pool, ivRepo: ivRepo, appRepo: appRepo, candRepo: candRepo, jobRepo: jobRepo}
+	candRepo cvdomain.CandidateRepository, jobRepo jobdomain.JobRepository, store storage.FileStorage) *EvaluationService {
+	return &EvaluationService{pool: pool, ivRepo: ivRepo, appRepo: appRepo, candRepo: candRepo, jobRepo: jobRepo, store: store}
 }
 
 // --- DTOs ---
@@ -58,17 +63,21 @@ type JobDTO struct {
 }
 
 type InterviewDetail struct {
-	InterviewID    uuid.UUID       `json:"interview_id"`
-	Status         ivdomain.Status `json:"status"`
-	ContextVersion int             `json:"context_version"`
-	TotalQuestions int             `json:"total_questions"`
-	Questions      []QuestionDTO   `json:"questions"`
-	Answers        []AnswerDTO     `json:"answers"`
-	Evaluation     json.RawMessage `json:"evaluation"`
-	Candidate      *CandidateDTO   `json:"candidate"`
-	Job            *JobDTO         `json:"job"`
-	CreatedAt      time.Time       `json:"created_at"`
-	CompletedAt    *time.Time      `json:"completed_at"`
+	InterviewID       uuid.UUID                  `json:"interview_id"`
+	ApplicationID     uuid.UUID                  `json:"application_id"`
+	Status            ivdomain.Status            `json:"status"`
+	ContextVersion    int                        `json:"context_version"`
+	TotalQuestions    int                        `json:"total_questions"`
+	Questions         []QuestionDTO              `json:"questions"`
+	Answers           []AnswerDTO                `json:"answers"`
+	Evaluation        json.RawMessage            `json:"evaluation"`
+	Candidate         *CandidateDTO              `json:"candidate"`
+	Job               *JobDTO                    `json:"job"`
+	ProctoringEvents  []ivdomain.ProctoringEvent `json:"proctoring_events"`
+	ProctoringSummary ivdomain.ProctoringSummary `json:"proctoring_summary"`
+	CodingSessions    []ivdomain.CodingSession   `json:"coding_sessions,omitempty"`
+	CreatedAt         time.Time                  `json:"created_at"`
+	CompletedAt       *time.Time                 `json:"completed_at"`
 }
 
 type InterviewSummary struct {
@@ -85,13 +94,13 @@ type CandidateReport struct {
 
 // InterviewListItem — recruiter list row (no full transcript, keeps the list light).
 type InterviewListItem struct {
-	InterviewID    uuid.UUID       `json:"interview_id"`
-	Status         ivdomain.Status `json:"status"`
-	CandidateID    uuid.UUID       `json:"candidate_id"`
-	CandidateName  string          `json:"candidate_name"`
-	JobTitle       string          `json:"job_title"`
-	Evaluation     json.RawMessage `json:"evaluation"`
-	CreatedAt      time.Time       `json:"created_at"`
+	InterviewID   uuid.UUID       `json:"interview_id"`
+	Status        ivdomain.Status `json:"status"`
+	CandidateID   uuid.UUID       `json:"candidate_id"`
+	CandidateName string          `json:"candidate_name"`
+	JobTitle      string          `json:"job_title"`
+	Evaluation    json.RawMessage `json:"evaluation"`
+	CreatedAt     time.Time       `json:"created_at"`
 }
 
 // ListInterviews returns the org's interviews, newest first, with candidate
@@ -151,6 +160,7 @@ func (s *EvaluationService) InterviewDetail(ctx context.Context, actor applicati
 			// stands; surface it without candidate/job context.
 			detail = &InterviewDetail{
 				InterviewID:    iv.ID,
+				ApplicationID:  iv.ApplicationID,
 				Status:         iv.Status,
 				ContextVersion: iv.ContextVersion,
 				TotalQuestions: len(iv.Questions),
@@ -176,15 +186,19 @@ func (s *EvaluationService) InterviewDetail(ctx context.Context, actor applicati
 		}
 
 		d := &InterviewDetail{
-			InterviewID:    iv.ID,
-			Status:         iv.Status,
-			ContextVersion: iv.ContextVersion,
-			TotalQuestions: len(iv.Questions),
-			Evaluation:     json.RawMessage(iv.Evaluation),
-			Candidate:      &CandidateDTO{ID: candidate.ID, Name: candidate.Name, Email: candidate.Email},
-			Job:            &JobDTO{ID: job.ID, Title: job.Title},
-			CreatedAt:      iv.CreatedAt,
-			CompletedAt:    iv.CompletedAt,
+			InterviewID:       iv.ID,
+			ApplicationID:     app.ID,
+			Status:            iv.Status,
+			ContextVersion:    iv.ContextVersion,
+			TotalQuestions:    len(iv.Questions),
+			Evaluation:        json.RawMessage(iv.Evaluation),
+			Candidate:         &CandidateDTO{ID: candidate.ID, Name: candidate.Name, Email: candidate.Email},
+			Job:               &JobDTO{ID: job.ID, Title: job.Title},
+			ProctoringEvents:  iv.ProctoringEvents,
+			ProctoringSummary: iv.ProctoringSummary,
+			CodingSessions:    iv.CodingSessions,
+			CreatedAt:         iv.CreatedAt,
+			CompletedAt:       iv.CompletedAt,
 		}
 		for _, q := range iv.Questions {
 			d.Questions = append(d.Questions, QuestionDTO{Idx: q.Idx, Content: q.Content, Category: q.Category, Skill: q.Skill})
@@ -238,4 +252,41 @@ func (s *EvaluationService) CandidateReport(ctx context.Context, actor applicati
 		return nil
 	})
 	return report, err
+}
+
+// InterviewPDF returns the generated PDF report as an io.Reader. It caches the PDF in MinIO.
+func (s *EvaluationService) InterviewPDF(ctx context.Context, actor application.AuthContext, interviewID uuid.UUID) (io.Reader, error) {
+	if err := application.Authorize(actor, iamdomain.RoleAdmin, iamdomain.RoleRecruiter, iamdomain.RoleInterviewer); err != nil {
+		return nil, err
+	}
+
+	pdfPath := fmt.Sprintf("interviews/%s/report.pdf", interviewID.String())
+
+	// Check cache (Stat — GetObject's error only surfaces on first Read)
+	exists, err := s.store.Exists(ctx, pdfPath)
+	if err != nil {
+		return nil, fmt.Errorf("check pdf cache: %w", err)
+	}
+	if exists {
+		rc, err := s.store.Download(ctx, pdfPath)
+		if err != nil {
+			return nil, fmt.Errorf("download cached pdf: %w", err)
+		}
+		return rc, nil
+	}
+	// Not in cache, generate
+	detail, err := s.InterviewDetail(ctx, actor, interviewID)
+	if err != nil {
+		return nil, err
+	}
+
+	pdfBytes, err := generatePDFReport(detail)
+	if err != nil {
+		return nil, err
+	}
+
+	// Cache upload (sync)
+	_ = s.store.Upload(ctx, pdfPath, bytes.NewReader(pdfBytes), int64(len(pdfBytes)), "application/pdf")
+
+	return bytes.NewReader(pdfBytes), nil
 }

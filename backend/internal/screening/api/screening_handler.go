@@ -63,3 +63,31 @@ func (h *ScreeningHandler) List(c *fiber.Ctx) error {
 	}
 	return httpapi.OK(c, result)
 }
+
+// UpdateDecision — PATCH /applications/:id (recruiter lifecycle stage +
+// notes). PATCH semantics: pointer fields; nil = keep current.
+func (h *ScreeningHandler) UpdateDecision(c *fiber.Ctx) error {
+	actor, err := api.RequireActor(c)
+	if err != nil {
+		return err
+	}
+	appID, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "invalid application id"})
+	}
+	var req struct {
+		Stage *string `json:"stage"`
+		Notes *string `json:"recruiter_notes"`
+	}
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "invalid body"})
+	}
+	if req.Stage == nil && req.Notes == nil {
+		return c.Status(400).JSON(fiber.Map{"error": "nothing to update"})
+	}
+	result, err := h.svc.UpdateDecision(c.UserContext(), actor, appID, req.Stage, req.Notes)
+	if err != nil {
+		return httpapi.Error(c, err)
+	}
+	return httpapi.OK(c, result)
+}

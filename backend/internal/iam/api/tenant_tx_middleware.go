@@ -31,6 +31,15 @@ func TenantTxMiddleware(pool *gorm.DB) fiber.Handler {
 			return err
 		}
 
+		// Verify that the organization exists in the database
+		var orgExists bool
+		if err := tx.Raw(`SELECT EXISTS(SELECT 1 FROM orgs WHERE id = ?)`, actor.OrgID).Scan(&orgExists).Error; err != nil || !orgExists {
+			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+				"error": "organization not found or session expired",
+				"code":  "UNAUTHORIZED",
+			})
+		}
+
 		c.SetUserContext(db.WithTx(ctx, tx))
 
 		if err := c.Next(); err != nil {

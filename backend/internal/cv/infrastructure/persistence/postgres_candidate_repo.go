@@ -7,7 +7,9 @@ import (
 
 	"github.com/google/uuid"
 	cvdomain "github.com/intivai/backend/internal/cv/domain"
+	sharederr "github.com/intivai/backend/internal/shared/errors"
 	"github.com/intivai/backend/pkg/db"
+	"github.com/jackc/pgx/v5/pgconn"
 	"gorm.io/gorm"
 )
 
@@ -32,10 +34,15 @@ func (r *PostgresCandidateRepo) Create(ctx context.Context, c *cvdomain.Candidat
 	if err != nil {
 		return err
 	}
-	return q.WithContext(ctx).Exec(
+	err = q.WithContext(ctx).Exec(
 		`INSERT INTO candidates (id, org_id, name, email, cv_path, status, created_at)
 		 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
 		c.ID, c.OrgID, c.Name, c.Email, c.CVPath, c.Status, c.CreatedAt).Error
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "23503" {
+		return sharederr.NewDomainError("NOT_FOUND", "organization not found")
+	}
+	return err
 }
 
 func (r *PostgresCandidateRepo) GetByID(ctx context.Context, id uuid.UUID) (*cvdomain.Candidate, error) {

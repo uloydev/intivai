@@ -37,7 +37,9 @@ func (failingLLM) Embed(ctx context.Context, text string) ([]float32, error) {
 func (failingLLM) CountTokens(text string) int { return 0 }
 
 // Integration test — live Postgres + Redis. Guards the failure path:
-// LLM failure → candidate failed_extract with error_message, task SkipRetry.
+// transient LLM failure → task returns ErrExtractTransient so asynq RETRIES
+// (SkipRetry would permanently strand candidates on a blip); the candidate
+// stays extracting until a retry succeeds or max retries are exhausted.
 func TestExtractWorkerFailurePath(t *testing.T) {
 	url := os.Getenv("TEST_DATABASE_URL")
 	if url == "" {
@@ -76,8 +78,8 @@ func TestExtractWorkerFailurePath(t *testing.T) {
 	worker := NewExtractWorker(pool, cvrepo.NewPostgresCandidateRepo(pool), scrrepo.NewPostgresApplicationRepo(pool), nil, failingLLM{}, queue.NewClient(redisAddr), zerolog.Nop())
 	payload, _ := json.Marshal(ExtractCVPayload{OrgID: orgID, CandidateID: candID.String()})
 	err = worker.handle(ctx, asynq.NewTask(TaskExtractCV, payload))
-	if err == nil || !errors.Is(err, asynq.SkipRetry) {
-		t.Fatalf("expected SkipRetry on LLM failure, got %v", err)
+	if !errors.Is(err, ErrExtractTransient) {
+		t.Fatalf("expected ErrExtractTransient (asynq retry), got %v", err)
 	}
 
 	var cand *cvdomain.Candidate
@@ -88,10 +90,12 @@ func TestExtractWorkerFailurePath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cand.Status != cvdomain.StatusFailedExtract {
-		t.Fatalf("status = %s, want failed_extract", cand.Status)
+	// Transient failure must NOT mark the candidate failed — a retry will
+	// re-run extraction and reach the terminal state.
+	if cand.Status == cvdomain.StatusFailedExtract {
+		t.Fatalf("status = failed_extract, want extracting (transient failure retries)")
 	}
-	if cand.ErrorMessage == "" {
-		t.Fatal("error_message not persisted")
+	if cand.ErrorMessage != "" {
+		t.Fatalf("error_message set on transient failure: %q", cand.ErrorMessage)
 	}
 }

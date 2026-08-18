@@ -21,8 +21,17 @@ type Job struct {
 	OrgID             uuid.UUID
 	Title             string
 	Description       string
+	Location          string
+	EmploymentType    string
+	SalaryMin         *int
+	SalaryMax         *int
+	Currency          string
 	RequiredSkills    []string
 	MinExperience     int
+	Responsibilities  []string
+	Requirements      []string
+	NiceToHaves       []string
+	Benefits          []string
 	ScoringWeights    map[string]float64
 	MinScoreToProceed *float64
 	Status            string
@@ -33,13 +42,20 @@ func NewJob(orgID uuid.UUID, title, description string, requiredSkills []string,
 		return nil, err
 	}
 	return &Job{
-		Entity:         domain.Entity{ID: domain.NewID(), CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()},
-		OrgID:          orgID,
-		Title:          title,
-		Description:    description,
-		RequiredSkills: requiredSkills,
-		MinExperience:  minExperience,
-		Status:         StatusActive,
+		Entity:           domain.Entity{ID: domain.NewID(), CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()},
+		OrgID:            orgID,
+		Title:            title,
+		Description:      description,
+		Location:         "Remote",
+		EmploymentType:   "Full-time",
+		Currency:         "USD",
+		RequiredSkills:   requiredSkills,
+		MinExperience:    minExperience,
+		Responsibilities: []string{},
+		Requirements:     []string{},
+		NiceToHaves:      []string{},
+		Benefits:         []string{},
+		Status:           StatusActive,
 	}, nil
 }
 

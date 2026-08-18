@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 
@@ -69,6 +70,20 @@ func (s *Storage) Delete(ctx context.Context, path string) error {
 	return s.client.RemoveObject(ctx, s.bucket, path, minio.RemoveObjectOptions{})
 }
 
+// Exists reports whether an object exists — GetObject returns a lazy reader
+// that only errors on first Read, so callers must Stat before trusting it.
+func (s *Storage) Exists(ctx context.Context, path string) (bool, error) {
+	_, err := s.client.StatObject(ctx, s.bucket, path, minio.StatObjectOptions{})
+	if err == nil {
+		return true, nil
+	}
+	var resp minio.ErrorResponse
+	if errors.As(err, &resp) && resp.Code == "NoSuchKey" {
+		return false, nil
+	}
+	return false, err
+}
+
 func (s *Storage) Ping(ctx context.Context) error {
 	_, err := s.client.ListBuckets(ctx)
 	return err
@@ -79,6 +94,7 @@ type FileStorage interface {
 	Upload(ctx context.Context, path string, r io.Reader, size int64, contentType string) error
 	Download(ctx context.Context, path string) (io.ReadCloser, error)
 	Delete(ctx context.Context, path string) error
+	Exists(ctx context.Context, path string) (bool, error)
 }
 
 var _ FileStorage = (*Storage)(nil)

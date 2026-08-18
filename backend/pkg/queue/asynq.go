@@ -51,7 +51,19 @@ func NewServer(redisAddr string, concurrency int, log zerolog.Logger) *Server {
 	}
 	srv := asynq.NewServer(
 		asynq.RedisClientOpt{Addr: redisAddr},
-		asynq.Config{Concurrency: concurrency, Logger: asynqLogger{log: log}},
+		asynq.Config{
+			Concurrency: concurrency,
+			Logger:      asynqLogger{log: log},
+			ErrorHandler: asynq.ErrorHandlerFunc(func(ctx context.Context, task *asynq.Task, err error) {
+				retried, _ := asynq.GetRetryCount(ctx)
+				maxRetry, _ := asynq.GetMaxRetry(ctx)
+				if retried >= maxRetry {
+					log.Error().Err(err).Str("type", task.Type()).Msg("dead letter: task exhausted all retries")
+				} else {
+					log.Warn().Err(err).Str("type", task.Type()).Int("retry", retried).Msg("task failed, will retry")
+				}
+			}),
+		},
 	)
 	return &Server{server: srv}
 }

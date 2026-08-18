@@ -78,7 +78,7 @@ func seedHandlerScenario(t *testing.T) (*fiber.App, string, uuid.UUID, uuid.UUID
 
 	svc := evalapp.NewEvaluationService(pool,
 		ivrepo.NewPostgresInterviewRepo(pool), scrrepo.NewPostgresApplicationRepo(pool),
-		cvrepo.NewPostgresCandidateRepo(pool), jobrepo.NewPostgresJobRepo(pool))
+		cvrepo.NewPostgresCandidateRepo(pool), jobrepo.NewPostgresJobRepo(pool), nil)
 	handler := NewEvaluationHandler(svc)
 	jwt := auth.NewJWTProvider("test-secret-eval-handler")
 

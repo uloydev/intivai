@@ -85,4 +85,7 @@ func isRetryable(err error) bool {
 var (
 	ErrRateLimited = errors.New("llm rate limited")
 	ErrUpstream    = errors.New("llm upstream error")
+	// ErrStructuredParse — the provider responded but the payload was not
+	// valid JSON for the requested schema. Permanent: retrying cannot fix it.
+	ErrStructuredParse = errors.New("llm structured output parse failed")
 )

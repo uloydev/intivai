@@ -16,6 +16,8 @@ func TestPublicRoutesNotAffectedByLaterAuthGroup(t *testing.T) {
 	v1 := app.Group("/api/v1")
 
 	// Public routes registered BEFORE the middleware group.
+	v1.Post("/public/candidate/auth/otp", func(c *fiber.Ctx) error { return c.SendStatus(200) })
+	v1.Post("/public/candidate/auth/verify", func(c *fiber.Ctx) error { return c.SendStatus(200) })
 	v1.Post("/candidate/interviews/:id/ticket", func(c *fiber.Ctx) error { return c.SendStatus(200) })
 	v1.Get("/candidate/interviews/:id/chat", func(c *fiber.Ctx) error { return c.SendStatus(200) })
 
@@ -27,6 +29,8 @@ func TestPublicRoutesNotAffectedByLaterAuthGroup(t *testing.T) {
 	cases := []struct {
 		method, path string
 	}{
+		{"POST", "/api/v1/public/candidate/auth/otp"},
+		{"POST", "/api/v1/public/candidate/auth/verify"},
 		{"POST", "/api/v1/candidate/interviews/abc/ticket"},
 		{"GET", "/api/v1/candidate/interviews/abc/chat"},
 	}

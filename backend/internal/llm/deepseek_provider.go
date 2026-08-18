@@ -12,7 +12,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/intivai/backend/pkg/metrics"
 	"github.com/pkoukk/tiktoken-go"
+	"github.com/sony/gobreaker"
 )
 
 // DeepSeekProvider — OpenAI-compatible API (api.deepseek.com/v1), model deepseek-chat.
@@ -21,6 +23,7 @@ type DeepSeekProvider struct {
 	baseURL string
 	model   string
 	http    *http.Client
+	cb      *gobreaker.CircuitBreaker
 }
 
 func NewDeepSeekProvider(apiKey, baseURL, model string) *DeepSeekProvider {
@@ -30,11 +33,21 @@ func NewDeepSeekProvider(apiKey, baseURL, model string) *DeepSeekProvider {
 	if model == "" {
 		model = "deepseek-chat"
 	}
+	cb := gobreaker.NewCircuitBreaker(gobreaker.Settings{
+		Name:        "DeepSeekAPI",
+		MaxRequests: 5,
+		Interval:    60 * time.Second,
+		Timeout:     30 * time.Second,
+		ReadyToTrip: func(counts gobreaker.Counts) bool {
+			return counts.Requests >= 10 && float64(counts.TotalFailures)/float64(counts.Requests) >= 0.5
+		},
+	})
 	return &DeepSeekProvider{
 		apiKey:  apiKey,
 		baseURL: strings.TrimSuffix(baseURL, "/"),
 		model:   model,
 		http:    &http.Client{Timeout: 60 * time.Second},
+		cb:      cb,
 	}
 }
 
@@ -91,14 +104,19 @@ func (p *DeepSeekProvider) Chat(ctx context.Context, req ChatRequest) (*ChatResp
 	if len(out.Choices) == 0 {
 		return nil, errors.New("empty choices in chat response")
 	}
-	return &ChatResponse{
+	respObj := &ChatResponse{
 		Content:      out.Choices[0].Message.Content,
 		FinishReason: out.Choices[0].FinishReason,
 		Usage: Usage{
 			PromptTokens:     out.Usage.PromptTokens,
 			CompletionTokens: out.Usage.CompletionTokens,
 		},
-	}, nil
+	}
+
+	metrics.LLMTokensTotal.WithLabelValues(p.model, "prompt").Add(float64(respObj.Usage.PromptTokens))
+	metrics.LLMTokensTotal.WithLabelValues(p.model, "completion").Add(float64(respObj.Usage.CompletionTokens))
+
+	return respObj, nil
 }
 
 // ChatStream streams SSE tokens. The channel is closed on completion/error.
@@ -116,10 +134,26 @@ func (p *DeepSeekProvider) ChatStream(ctx context.Context, req ChatRequest) (<-c
 	}
 	p.setHeaders(hreq)
 
-	resp, err := p.http.Do(hreq)
+	res, err := p.cb.Execute(func() (any, error) {
+		r, err := p.http.Do(hreq)
+		if err != nil {
+			if errors.Is(err, context.Canceled) {
+				return nil, nil // success for the breaker; caller maps nil → Canceled
+			}
+			return nil, err
+		}
+		return r, nil
+	})
+	if res == nil {
+		return nil, context.Canceled
+	}
 	if err != nil {
+		if errors.Is(err, gobreaker.ErrOpenState) || errors.Is(err, gobreaker.ErrTooManyRequests) {
+			return nil, fmt.Errorf("%w: circuit breaker open", ErrUpstream)
+		}
 		return nil, err
 	}
+	resp := res.(*http.Response)
 	if resp.StatusCode != http.StatusOK {
 		defer resp.Body.Close()
 		return nil, statusError(resp)
@@ -173,13 +207,13 @@ func (p *DeepSeekProvider) StructuredOutput(ctx context.Context, req StructuredR
 	}
 	if req.Schema != nil {
 		if err := json.Unmarshal([]byte(resp.Content), req.Schema); err != nil {
-			return nil, fmt.Errorf("structured output parse failed: %w", err)
+			return nil, fmt.Errorf("%w: %v", ErrStructuredParse, err)
 		}
 		return req.Schema, nil
 	}
 	var out any
 	if err := json.Unmarshal([]byte(resp.Content), &out); err != nil {
-		return nil, fmt.Errorf("structured output parse failed: %w", err)
+		return nil, fmt.Errorf("%w: %v", ErrStructuredParse, err)
 	}
 	return out, nil
 }
@@ -199,6 +233,10 @@ func (p *DeepSeekProvider) CountTokens(text string) int {
 	return len(tke.Encode(text, nil, nil))
 }
 
+// The wrapped fn returns (nil, nil) on client cancellation so gobreaker
+// records a SUCCESS; the caller turns the nil result back into
+// context.Canceled — repeated chat disconnects must not trip the breaker.
+
 func (p *DeepSeekProvider) do(ctx context.Context, body chatRequest) (*http.Response, error) {
 	raw, _ := json.Marshal(body)
 	hreq, err := http.NewRequestWithContext(ctx, http.MethodPost, p.baseURL+"/chat/completions", bytes.NewReader(raw))
@@ -206,7 +244,26 @@ func (p *DeepSeekProvider) do(ctx context.Context, body chatRequest) (*http.Resp
 		return nil, err
 	}
 	p.setHeaders(hreq)
-	return p.http.Do(hreq)
+	res, err := p.cb.Execute(func() (any, error) {
+		r, err := p.http.Do(hreq)
+		if err != nil {
+			if errors.Is(err, context.Canceled) {
+				return nil, nil // success for the breaker; caller maps nil → Canceled
+			}
+			return nil, err
+		}
+		return r, nil
+	})
+	if res == nil {
+		return nil, context.Canceled
+	}
+	if err != nil {
+		if errors.Is(err, gobreaker.ErrOpenState) || errors.Is(err, gobreaker.ErrTooManyRequests) {
+			return nil, fmt.Errorf("%w: circuit breaker open", ErrUpstream)
+		}
+		return nil, err
+	}
+	return res.(*http.Response), nil
 }
 
 func (p *DeepSeekProvider) setHeaders(req *http.Request) {

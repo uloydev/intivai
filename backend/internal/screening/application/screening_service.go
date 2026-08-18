@@ -2,6 +2,8 @@ package application
 
 import (
 	"context"
+	"fmt"
+	"strings"
 
 	"github.com/google/uuid"
 	cvdomain "github.com/intivai/backend/internal/cv/domain"
@@ -44,6 +46,8 @@ type ApplicationResult struct {
 	Status          string    `json:"status"`
 	CVScore         *float64  `json:"cv_score,omitempty"`
 	PassedScreening *bool     `json:"passed_screening,omitempty"`
+	Stage           *string   `json:"stage,omitempty"`
+	RecruiterNotes  *string   `json:"recruiter_notes,omitempty"`
 }
 
 func (s *ScreeningService) Create(ctx context.Context, actor application.AuthContext, cmd CreateScreeningCommand) (*ApplicationResult, error) {
@@ -117,6 +121,63 @@ func (s *ScreeningService) Create(ctx context.Context, actor application.AuthCon
 	return &ApplicationResult{ID: app.ID, CandidateID: app.CandidateID, JobID: app.JobID, Status: app.Status}, nil
 }
 
+// UpdateDecision persists the recruiter lifecycle stage + hiring notes
+// (PATCH semantics: nil field = keep current value). Stage transitions follow
+// the ladder (ADR-0001): forward moves + terminal states from anywhere; a
+// backward/correction move requires an admin.
+func (s *ScreeningService) UpdateDecision(ctx context.Context, actor application.AuthContext, appID uuid.UUID, stage, notes *string) (*ApplicationResult, error) {
+	if err := application.Authorize(actor, iamdomain.RoleAdmin, iamdomain.RoleRecruiter); err != nil {
+		return nil, err
+	}
+	var next *scrdomain.Stage
+	if stage != nil {
+		trimmed := strings.TrimSpace(*stage)
+		st := scrdomain.Stage(trimmed)
+		if !st.IsValid() {
+			return nil, errors.NewDomainError("INVALID_STAGE", "unknown lifecycle stage")
+		}
+		next = &st
+	}
+	var out *ApplicationResult
+	err := db.RunInTx(ctx, s.pool, actor.OrgID.String(), func(tctx context.Context) error {
+		app, err := s.appRepo.GetByID(tctx, appID)
+		if err != nil {
+			if err == scrdomain.ErrNotFound {
+				return errors.NewNotFoundError("application", appID.String())
+			}
+			return err
+		}
+		if next != nil {
+			fromNil := app.Stage == nil
+			var current scrdomain.Stage
+			if app.Stage != nil {
+				current = scrdomain.Stage(*app.Stage)
+			}
+			if !current.CanTransitionTo(*next, fromNil) {
+				// Backward/correction moves are allowed only for admins.
+				if !current.RequiresAdmin(*next) || actor.Role != string(iamdomain.RoleAdmin) {
+					return errors.NewDomainError("INVALID_STAGE_TRANSITION",
+						fmt.Sprintf("transition from %q to %q is not allowed", current, *next))
+				}
+			}
+		}
+		if err := s.appRepo.UpdateDecision(tctx, actor.OrgID, appID, next, notes); err != nil {
+			return err
+		}
+		app, err = s.appRepo.GetByID(tctx, appID)
+		if err != nil {
+			return err
+		}
+		out = &ApplicationResult{
+			ID: app.ID, CandidateID: app.CandidateID, JobID: app.JobID, Status: app.Status,
+			CVScore: app.CVScore, PassedScreening: app.PassedScreening,
+			Stage: app.Stage, RecruiterNotes: app.RecruiterNotes,
+		}
+		return nil
+	})
+	return out, err
+}
+
 func (s *ScreeningService) List(ctx context.Context, actor application.AuthContext, jobID uuid.UUID) ([]*ApplicationResult, error) {
 	var out []*ApplicationResult
 	err := db.RunInTx(ctx, s.pool, actor.OrgID.String(), func(tctx context.Context) error {
@@ -129,6 +190,7 @@ func (s *ScreeningService) List(ctx context.Context, actor application.AuthConte
 			r := &ApplicationResult{
 				ID: a.ID, CandidateID: a.CandidateID, JobID: a.JobID, Status: a.Status,
 				CVScore: a.CVScore, PassedScreening: a.PassedScreening,
+				Stage: a.Stage, RecruiterNotes: a.RecruiterNotes,
 			}
 			// Candidate/job lookups are RLS-scoped to the tenant tx. NotFound
 			// → empty display field; real errors surface loudly instead of
