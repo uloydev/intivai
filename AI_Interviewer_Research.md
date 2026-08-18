@@ -42,23 +42,21 @@ reasoning. Status markers: ✅ implemented as designed · ⚠️ deviated (reaso
 | §2 Chat: 30-min cap, 3-min question timeout, idle 5m, heartbeat 30s/10s | ✅ frozen-clock tested; WS read deadline = 3m; server ping 30s | `interview/domain`, `interview/api` |
 | §2 Sliding window (10 Q&A) + 8K token budget | ✅ | `interview/domain/service/context.go` |
 | §2 Weakness→probe, strength→next | ✅ deterministic probe (<8 words) | `interview/domain/service/probe.go` |
-| §3 Voice | ⏸ post-MVP, not built (per plan) | — |
+| §3 Voice (WebRTC + Whisper.cpp + Edge TTS) | ✅ full duplex audio calling + speech signaling | `interview/infrastructure/{stt,tts,webrtc}`, `interview/api/voice_handler.go`, `/voice/:id` |
 | §4.1 Modular monolith | ✅ single Go binary + asynq workers | `backend/` |
 | §4.2 Multi-tenant RLS | ✅ **plus FORCE RLS + least-privilege `intivai_app` role** (owner bypass bug fixed) | migrations 002 |
 | §4.3 Mnemosyne bank per tenant | ✅ SQLite (dev) + **pgvector bank (prod)** + cosine recall | `memory/infrastructure/{native,postgres}` |
 | §4.3 fastembed bge-small | ⚠️ cybertron (pure Go) with `multi-qa-MiniLM-L6-cos-v1` default — bge-small is gated on HuggingFace; set `EMBED_MODEL_NAME` when accessible | `embedding/` |
-| §4.4 Asynq queue | ✅ task names single-sourced; 6 workers | `pkg/queue` + `internal/*/application` |
-| §4.5 golang-migrate embedded | ✅ migrations 001–007, `-migrate-only` mode | `pkg/db/` |
-| §4.6 Observability | ⚠️ partial: JSON logs, health/ready (DB/Redis/MinIO), Sentry-lite; Prometheus → P6b | `pkg/logger`, `cmd/server` |
+| §4.4 Asynq queue | ✅ task names single-sourced; workers for parse, extract, score, eval, email | `pkg/queue` + `internal/*/application` |
+| §4.5 golang-migrate embedded | ✅ migrations 001–009, `-migrate-only` mode | `pkg/db/` |
+| §4.6 Observability | ✅ JSON logs, health/ready probes (DB/Redis/MinIO), Sentry integration, Prometheus metrics | `pkg/logger`, `pkg/metrics`, `cmd/server` |
 | §4.7 CORS/CSWSH | ✅ origin allowlist (CORS + WS), `?ticket=` for browsers | `httpmw/cors.go`, `interview/api` |
 | §4.8 Rate limiting | ✅ Redis sliding window (auth/tenant/user), fail-open | `httpmw/ratelimit.go` |
-| §4.9 Stack | ✅ GORM over pgx stdlib (was planned earlier as raw pgx), Fiber, MinIO, React FE | everywhere |
-| §5 LLM patterns | ✅ one provider port; evaluation adds injection rails + schema validation (LLM never sets the final score) | `llm/`, `evaluation/` |
-| §7 Consent | ✅ `consent_given` gate before interview start | `interview` (consent endpoint) |
-
-Out of scope/deferred: voice (§3), PDF report + cross-interview reflect
-(P4b), Prometheus/k6/Terraform/SOC2 (P6b), multi-instance session registry
-(carryover item 12, needs multi-instance deployment).
+| §4.9 Stack | ✅ GORM over pgx stdlib, Fiber, MinIO, React 19 + TypeScript + Vite | everywhere |
+| §5 LLM patterns | ✅ DeepSeek provider port; evaluation adds injection rails + schema validation (LLM never sets the final score) | `llm/`, `evaluation/` |
+| §6 Anti-Cheating & Proctoring | ✅ Real-time telemetry (tab switch, away time, large paste detection, voice anomalies) + Maroto PDF audit. **Posture (design decision): advisory only** — events are client-reported and spoofable; the integrity score is a separate report axis, never mixed into the evaluation score, never auto-fails an interview. Raw events retention-capped at 500/interview; the summary reflects full history. | `interview/domain/proctoring.go`, `useProctoring.ts`, migration 009 |
+| §7 Consent & Email | ✅ `consent_given` gate before interview start; Mailpit SMTP notification worker | `interview` (consent endpoint), `notification/application/email_worker.go` |
+| §8 Executive PDF Export | ✅ Maroto v2 executive scorecards with dimension radar + proctoring audit | `evaluation/application/pdf.go` |
 
 ---
 

@@ -283,6 +283,40 @@ paths:
                         status: { type: string, enum: [screening, passed, rejected] }
                         cv_score: { type: number }
                         passed_screening: { type: boolean }
+                        stage: { type: string }
+                        recruiter_notes: { type: string }
+  /applications/{id}:
+    patch:
+      summary: Update recruiter lifecycle stage + hiring notes (PATCH semantics — omitted fields keep their value)
+      security: [bearerAuth]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              minProperties: 1
+              properties:
+                stage: { type: string, enum: [applied, screening_passed, interview_invited, interview_completed, offer_extended, hired, rejected] }
+                recruiter_notes: { type: string }
+      responses:
+        "200":
+          description: Updated application row
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      id: { type: string, format: uuid }
+                      stage: { type: string }
+                      recruiter_notes: { type: string }
+        "400": { description: nothing to update / invalid body }
+        "404": { description: application not found }
   /orgs/{orgId}/contexts:
     post:
       summary: Upload company context (json text OR multipart file); sha256 dedup + versioning
@@ -448,6 +482,162 @@ paths:
                       interviews: { type: array, items: { type: object } }
         "403": { description: FORBIDDEN — candidate belongs to another org }
         "404": { description: Not found }
+  /public/jobs:
+    get:
+      summary: Public job board listings (no auth required)
+      responses:
+        "200":
+          description: Active job openings
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Job'
+  /public/jobs/{id}:
+    get:
+      summary: Public job detail (no auth required)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: Active job detail
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Job'
+        "404": { description: Job not found or inactive }
+  /public/jobs/{id}/apply:
+    post:
+      summary: Direct public job application submission (multipart form)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [name, email, file]
+              properties:
+                name: { type: string }
+                email: { type: string, format: email }
+                file: { type: string, format: binary }
+      responses:
+        "201":
+          description: Application received and queued for AI screening
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      candidate_id: { type: string, format: uuid }
+  /public/candidate/auth/otp:
+    post:
+      summary: Request passwordless 6-digit OTP code and magic link for candidate portal
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email: { type: string, format: email }
+      responses:
+        "200":
+          description: Verification code sent to candidate email
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      message: { type: string }
+                      email: { type: string, format: email }
+                      expires_in: { type: integer }
+        "429": { description: Too many requests — wait before requesting another code }
+  /public/candidate/auth/verify:
+    post:
+      summary: Verify candidate OTP code (or magic-link token) and receive 7-day candidate JWT token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              minProperties: 1
+              properties:
+                email: { type: string, format: email }
+                code: { type: string, minLength: 6, maxLength: 6 }
+                token: { type: string, description: magic-link token (alternative to email+code) }
+      responses:
+        "200":
+          description: Candidate authenticated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      token: { type: string }
+                      email: { type: string, format: email }
+                      expires_at: { type: string, format: date-time }
+        "400": { description: Provide either (email + code) or magic token }
+        "401": { description: Invalid or expired verification code }
+        "429": { description: Too many attempts — request a new code }
+  /candidate/portal/applications:
+    get:
+      summary: List all applications and live screening/interview progress for authenticated candidate
+      security: [candidateBearerAuth]
+      responses:
+        "200":
+          description: List of candidate applications across organizations
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        application_id: { type: string, format: uuid }
+                        org_id: { type: string, format: uuid }
+                        org_name: { type: string }
+                        org_slug: { type: string }
+                        job_id: { type: string, format: uuid }
+                        job_title: { type: string }
+                        job_location: { type: string }
+                        job_employment_type: { type: string }
+                        candidate_id: { type: string, format: uuid }
+                        candidate_name: { type: string }
+                        candidate_email: { type: string, format: email }
+                        cv_score: { type: number, nullable: true }
+                        passed_screening: { type: boolean, nullable: true }
+                        application_status: { type: string }
+                        applied_at: { type: string, format: date-time }
+                        interview_id: { type: string, format: uuid, nullable: true }
+                        interview_status: { type: string, nullable: true }
+                        interview_type: { type: string, nullable: true }
+                        invitation_token: { type: string, nullable: true }
+                        overall_score: { type: number, nullable: true }
+                        recommendation: { type: string, nullable: true }
+        "401": { description: Missing or invalid candidate authorization token }
   /candidate/interviews/{id}/consent:
     post:
       summary: Record candidate GDPR consent (invitation token) — chat refuses to start without it
@@ -494,6 +684,29 @@ paths:
                       session_id: { type: string, format: uuid }
                       expires_at: { type: string, format: date-time }
         "400": { description: TOKEN_INVALID / TOKEN_EXPIRED / TOKEN_REVOKED / TOKEN_MISMATCH }
+  /candidate/interviews/{id}/telemetry:
+    post:
+      summary: Ingest anti-cheating & proctoring telemetry events (HTTP/beacon fallback)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [event_type]
+              properties:
+                ticket: { type: string }
+                invitation_token: { type: string }
+                event_type: { type: string }
+                timestamp: { type: string, format: date-time }
+                question_idx: { type: integer }
+                details: { type: object }
+      responses:
+        "200": { description: Telemetry recorded }
+        "400": { description: Invalid payload }
+        "401": { description: Unauthorized }
   /candidate/interviews/{id}/chat:
     get:
       summary: WebSocket chat (candidate, ws_ticket in Authorization header)
@@ -502,14 +715,131 @@ paths:
         - { name: Authorization, in: header, required: true, schema: { type: string } }
       responses:
         "101":
-          description: Switching Protocols — frames: interview.start, question,
-            token, response, evaluation {scores, overall, recommendation, status:
-            complete|pending}, error {code, message}
+          description: Switching Protocols — frames: interview.start {session_id, total_questions, session_budget_sec}, question {idx, content, archetype, time_limit_sec, session_remaining_sec}, token, response, answer {idx, content, pacing_telemetry: {time_to_first_keystroke_ms, duration_ms, typed_chars, pasted_chars, pasted_ratio}}, evaluation {scores, overall, recommendation, status: complete|pending}, error {code, message}
         "401": { description: missing/invalid ws ticket or not bound to this interview }
         "403": { description: origin not allowed }
+  /interviews/{id}/voice:
+    get:
+      summary: WebSocket WebRTC audio signaling (SDP offer/answer, ICE candidates)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "101":
+          description: Switching Protocols — frames offer, answer, candidate
+        "400": { description: invalid interview id }
+  /sandbox/execute:
+    post:
+      summary: Execute candidate code against test suites in isolated sandbox (Go, Python, TypeScript, JS)
+      security: [bearerAuth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [language, code]
+              properties:
+                language: { type: string, enum: [go, python, typescript, javascript] }
+                code: { type: string }
+                stdin: { type: string }
+                test_cases:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      id: { type: string }
+                      input: { type: string }
+                      expected_output: { type: string }
+                      hidden: { type: boolean }
+                timeout_sec: { type: integer, default: 5 }
+      responses:
+        "200":
+          description: Execution result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      stdout: { type: string }
+                      stderr: { type: string }
+                      exit_code: { type: integer }
+                      duration_ms: { type: integer }
+                      memory_kb: { type: integer }
+                      all_passed: { type: boolean }
+                      test_results:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            test_case: { type: object }
+                            actual_output: { type: string }
+                            passed: { type: boolean }
+                            duration_ms: { type: integer }
+        "400": { description: Invalid code or language }
+  /sandbox/evaluate:
+    post:
+      summary: AI-powered code quality and algorithmic complexity analysis (time/space complexity, clean code score)
+      security: [bearerAuth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [language, code, problem]
+              properties:
+                language: { type: string, enum: [go, python, typescript, javascript] }
+                code: { type: string }
+                problem: { type: string }
+      responses:
+        "200":
+          description: AI Code Review synthesis
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      time_complexity: { type: string }
+                      space_complexity: { type: string }
+                      quality_score: { type: integer }
+                      summary: { type: string }
+                      strengths: { type: array, items: { type: string } }
+                      improvements: { type: array, items: { type: string } }
+        "400": { description: Invalid payload }
+  /health:
+    get:
+      summary: Basic liveness check (200 OK)
+      responses:
+        "200": { description: OK }
+  /ready:
+    get:
+      summary: Deep readiness probe (checks PostgreSQL, Redis, MinIO)
+      responses:
+        "200": { description: All dependencies healthy }
+        "503": { description: Service Unavailable (dependency degraded) }
+  /live:
+    get:
+      summary: Liveness probe
+      responses:
+        "200": { description: Process alive }
+  /metrics:
+    get:
+      summary: Prometheus metrics endpoint
+      responses:
+        "200": { description: Prometheus plain text metrics }
 components:
   securitySchemes:
     bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    candidateBearerAuth:
       type: http
       scheme: bearer
       bearerFormat: JWT
@@ -518,12 +848,32 @@ components:
       type: object
       properties:
         id: { type: string, format: uuid }
+        org_id: { type: string, format: uuid }
+        org_name: { type: string }
+        org_slug: { type: string }
         title: { type: string }
         description: { type: string }
+        location: { type: string }
+        employment_type: { type: string }
+        salary_min: { type: integer, nullable: true }
+        salary_max: { type: integer, nullable: true }
+        currency: { type: string }
         required_skills:
           type: array
           items: { type: string }
         min_experience: { type: integer }
+        responsibilities:
+          type: array
+          items: { type: string }
+        requirements:
+          type: array
+          items: { type: string }
+        nice_to_haves:
+          type: array
+          items: { type: string }
+        benefits:
+          type: array
+          items: { type: string }
         scoring_weights:
           type: object
           additionalProperties: { type: number }
@@ -536,10 +886,27 @@ components:
       properties:
         title: { type: string }
         description: { type: string }
+        location: { type: string }
+        employment_type: { type: string }
+        salary_min: { type: integer }
+        salary_max: { type: integer }
+        currency: { type: string }
         required_skills:
           type: array
           items: { type: string }
         min_experience: { type: integer, minimum: 0 }
+        responsibilities:
+          type: array
+          items: { type: string }
+        requirements:
+          type: array
+          items: { type: string }
+        nice_to_haves:
+          type: array
+          items: { type: string }
+        benefits:
+          type: array
+          items: { type: string }
         scoring_weights:
           type: object
           additionalProperties: { type: number }
@@ -550,10 +917,27 @@ components:
       properties:
         title: { type: string }
         description: { type: string }
+        location: { type: string }
+        employment_type: { type: string }
+        salary_min: { type: integer }
+        salary_max: { type: integer }
+        currency: { type: string }
         required_skills:
           type: array
           items: { type: string }
         min_experience: { type: integer, minimum: 0 }
+        responsibilities:
+          type: array
+          items: { type: string }
+        requirements:
+          type: array
+          items: { type: string }
+        nice_to_haves:
+          type: array
+          items: { type: string }
+        benefits:
+          type: array
+          items: { type: string }
         scoring_weights:
           type: object
           additionalProperties: { type: number }

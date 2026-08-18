@@ -202,6 +202,15 @@ recorded: add `rclone sync` → Backblaze B2 (or S3) no later than first paying
 customer / 2026-09-30, whichever comes first (carryover item — tracked in
 M3_Plan).
 
+**CARRYOVER D6 (2026-08-18, grilling session): Voice Interview (Phase 5)
+formally deferred.** Gated demo stays in the tree (WS route + signaling +
+TTS-as-audio-frames demo, FE page at `/voice/:id`); the real pipeline (Opus
+mic decode, STT loop, Opus-over-RTP, TURN, recording) is out of beta scope.
+WHY: no paying customer (phase gate per AI_Interviewer_Phases.md); resume
+WHEN: first paying customer requires voice. Sandbox code execution moved to a
+gRPC sidecar + per-language containers (ADR-0002) — `make sandbox-images` +
+`make dev` build/run it; sandbox fails closed without the sidecar.
+
 ---
 
 ## 4. Execution order + estimates (solo)

@@ -12,5 +12,8 @@ services:
     ports: !override ["6380:6379"]
   minio:
     ports: !override ["9002:9000", "9003:9001"]
+  mailpit:
+    ports: !override ["1026:1025", "8026:8025"]
   app:
     ports: !override ["8081:8080"]
+

@@ -27,6 +27,7 @@ rationale lives in `AI_Interviewer_Research.md`.
 │   │   ├── db/                         # GORM pool (pgx stdlib), tenant/tx ctx,
 │   │   │   └── migrations/             #   golang-migrate embedded (001–007)
 │   │   ├── logger/                     # zerolog
+│   │   ├── metrics/                    # Prometheus custom metrics (LLM tokens, active WS)
 │   │   ├── queue/                      # asynq client/server, task-name consts
 │   │   ├── storage/                    # MinIO (S3) client + FileStorage port
 │   │   └── (removed)                   # no separate shared/kernel pkg — see internal/shared
@@ -60,21 +61,26 @@ rationale lives in `AI_Interviewer_Research.md`.
 │   │   │   ├── application/            # ContextService, IndexWorker
 │   │   │   ├── infrastructure/persistence/
 │   │   │   └── api/
-│   │   ├── interview/                  # chat interview (WS)
+│   │   ├── interview/                  # chat + voice interview (WS / WebRTC)
 │   │   │   ├── domain/                 # Interview aggregate (state machine,
 │   │   │   │                           #   frozen clock), protocol frames, repos
 │   │   │   ├── domain/service/         # question generator, bias, prompt composer,
 │   │   │   │                           #   context window/budget, probe strategy
-│   │   │   ├── application/            # InterviewService (create/ticket/consent/
-│   │   │   │                           #   transcript/evaluation), evaluation enqueuer
+│   │   │   ├── application/            # InterviewService, VoiceSession, evaluation enqueuer
 │   │   │   ├── infrastructure/persistence/  # interview/token/question-bank repos
-│   │   │   └── api/                    # chat handler (WS), session registry, heartbeat
+│   │   │   ├── infrastructure/stt/     # Whisper STT adapter (whisper.cpp)
+│   │   │   ├── infrastructure/tts/     # Edge TTS adapter (synthesized voice)
+│   │   │   ├── infrastructure/webrtc/  # Pion signaling & VAD adapter
+│   │   │   └── api/                    # chat handler (WS), voice handler (WS/WebRTC), session registry
 │   │   ├── evaluation/                 # post-interview reports (P4a)
 │   │   │   ├── domain/                 # Report schema + weighted aggregation
 │   │   │   ├── application/            # EvaluationService (detail/list/report),
 │   │   │   │                           #   EvaluationWorker (async retry)
 │   │   │   ├── infrastructure/llm/     # evaluator (structured output, rails)
 │   │   │   └── api/                    # GET /interviews, /interviews/:id, /candidates/:id/report
+│   │   ├── notification/               # email notification subsystem
+│   │   │   ├── application/            # EmailWorker (Mailpit SMTP dispatch)
+│   │   │   └──                         #   interview invitation templates
 │   │   ├── llm/                        # DeepSeek provider (chat/stream/structured),
 │   │   │                               #   Client with retry + fallback
 │   │   ├── embedding/                  # local 384-dim embeddings (cybertron,
@@ -85,25 +91,27 @@ rationale lives in `AI_Interviewer_Research.md`.
 │   │       └── infrastructure/
 │   │           ├── native/             # SQLite bank per tenant (dev default)
 │   │           └── postgres/           # pgvector bank + cosine recall (prod)
-│   └── Makefile                        # check/lint/coverage/dev/smoke/load-ws/migrate
+│   └── Makefile                        # check/lint/coverage/dev/smoke/seed/backup/restore/load-ws/load-k6
 │
 ├── frontend/                           # React SPA (Vite + TS + Tailwind v4 + shadcn)
 │   ├── src/
 │   │   ├── lib/                        # api (typed errors), auth (JWT session),
-│   │   │   │                           #   ws (chat frames), theme (dark mode), utils
+│   │   │   │                           #   ws (chat frames), useProctoring (anti-cheat telemetry),
+│   │   │   │                           #   theme (dark mode), utils
 │   │   ├── components/                 # AppShell + shadcn ui primitives
-│   │   ├── pages/                      # Login, Register, Jobs, CVs, Candidates,
-│   │   │                               #   Interviews, InterviewResult, Invite, Chat
+│   │   ├── pages/                      # Landing, Careers, Login, Register, Dashboard, Jobs,
+│   │   │                               #   CVs, Candidates, Interviews, InterviewResult,
+│   │   │                               #   Invite, Chat, InterviewVoice
 │   │   ├── types/api.ts                # DTO types (OpenAPI mirror)
 │   │   └── index.css                   # design tokens (MASTER.md mapping, light+dark)
-│   ├── e2e/                            # Playwright (happy path + smoke, step-logged)
+│   ├── e2e/                            # Playwright (happy path, auth, step-logged)
 │   └── playwright.config.ts / vitest.config.ts
 │
-├── scripts/                            # smoke.sh (E2E API scenario), backup.sh,
-│                                       #   restore.sh, check-coverage.sh
-├── docker-compose.yml                  # dev stack (migrate/app/postgres/redis/minio)
+├── scripts/                            # smoke.sh, seed.sh, backup.sh, restore.sh,
+│                                       #   check-coverage.sh, k6_load.js
+├── docker-compose.yml                  # dev stack (migrate/app/postgres/redis/minio/whisper)
 ├── docker-compose.dev.yml              # dev port overlay (!override)
-├── docker-compose.prod.yml             # prod overlay (Caddy-only ports, secrets)
+├── docker-compose.prod.yml             # prod overlay (Caddy-only ports, whisper, secrets)
 ├── Caddyfile                           # static FE + /api + WS proxy, auto-TLS
 ├── .env.prod.example                   # prod secrets checklist
 └── .github/workflows/ci.yml            # backend, frontend, integration, smoke, deploy

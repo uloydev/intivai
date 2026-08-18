@@ -90,10 +90,51 @@ services:
       INTIVAI_RATE_LIMIT_AUTH_PER_MIN: 2000
       INTIVAI_MEMORY_DATA_DIR: /data
       INTIVAI_ALLOWED_ORIGINS: http://localhost:3000,http://localhost:5173
+      INTIVAI_APP_PUBLIC_URL: ${INTIVAI_APP_PUBLIC_URL:-http://localhost:5173}
+      INTIVAI_SMTP_HOST: mailpit
+      INTIVAI_SMTP_PORT: 1025
+      INTIVAI_SMTP_FROM: "Intivai Talent <no-reply@intivai.com>"
+      # Sandbox sidecar (ADR-0002) — the app reaches it over mTLS gRPC.
+      INTIVAI_SANDBOX_SIDECAR_ADDR: sandbox-sidecar:8443
+      INTIVAI_SANDBOX_CA_CERT: /sandbox-certs/ca.pem
+      INTIVAI_SANDBOX_CLIENT_CERT: /sandbox-certs/client.pem
+      INTIVAI_SANDBOX_CLIENT_KEY: /sandbox-certs/client-key.pem
     ports:
       - "8080:8080"
     volumes:
       - appdata:/data
+      - ./backend/.sandbox-certs:/sandbox-certs:ro
+
+  sandbox-sidecar:
+    build:
+      context: ./backend
+      dockerfile: ./docker/sandboxd/Dockerfile
+    environment:
+      SANDBOXD_ADDR: :8443
+      SANDBOXD_CA: /certs/ca.pem
+      SANDBOXD_CERT: /certs/server.pem
+      SANDBOXD_KEY: /certs/server-key.pem
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./backend/.sandbox-certs:/certs:ro
+    restart: unless-stopped
+
+  mailpit:
+    image: axllent/mailpit:latest
+    ports:
+      - "1025:1025"
+      - "8025:8025"
+
+  whisper:
+    build:
+      context: ./backend/docker/whisper
+    ports:
+      - "8082:8080"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
 volumes:
   pgdata:

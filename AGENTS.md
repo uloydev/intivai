@@ -6,29 +6,50 @@
 - Architecture reference: `AI_Interviewer_Phases.md` (phases + testing criteria), `AI_Interviewer_Research.md` (design + impl-sync table), `AI_Interviewer_Project_Structure.md` (current structure)
 - Phases: M1–M3 complete; **P4a (evaluation + FE + P6a ops) complete — beta gate** in `M3_Plan.md`; next phase plan in `P4_Plan.md`
 
-## Commands (run from `backend/`)
+## Commands (run from repo root — the root `Makefile` forwards to `backend/`; everything also works directly from `backend/`)
 
 | Command | Purpose | When |
 |---|---|---|
-| `make check` | gofmt + golangci-lint + vet + build + unit tests | Before EVERY commit. Must be green |
+| `make check` | FULL gate: backend gofmt + golangci-lint + vet + build + unit tests, then FE `npm run build` + vitest | Before EVERY commit. Must be green |
 | `make lint` | golangci-lint (config: `.golangci.yml`) | Before commit |
 | `make coverage` | per-package coverage floors (domain ≥70%, others ≥50%; needs stack up) | Before commit |
 | `make test-integration-dev` | integration tests against local compose (needs stack up) | After any schema/repo/worker change |
 | `make test` | unit tests | Before commit |
-| `make dev` | boot full stack on FRESH redis (stale asynq tasks wiped; postgres/minio volumes persist; classic builder) | Start of a session |
+| `make proto` | regenerate sandbox gRPC stubs from `proto/sandbox.proto` (needs protoc + plugins) | After editing the proto |
+| `make sandbox-images` | build the 4 per-language sandbox execution images (ADR-0002) | After Dockerfile changes / fresh machine |
+| `make dev` | boot full stack on FRESH redis (stale asynq tasks wiped; postgres/minio volumes persist; classic builder; builds sandbox images + mTLS certs) | Start of a session |
 | `make redis-clear` | `FLUSHALL` queue while stack stays up | Mid-session queue cleanup |
 | `make smoke` | end-to-end API scenario against running stack (`CV_PDF` env or `/tmp/kilo/cv.pdf`) | After any API change |
+| `make seed` | seed local DB with demo org, jobs, prompt rails, context | For local testing & demo |
+| `make seed-fresh` | wipe volumes, start fresh containers, run migrations & seed | For starting from a completely clean slate |
+| `make backup` | trigger manual DB + MinIO backup archive | Backup ops |
+| `make restore DUMP=...` | disaster recovery restore from dump | DR verification |
 | `make migrate` | apply migrations (admin URL) | After fresh DB or new migration |
 | `go run ./cmd/server -migrate-only` | same as `make migrate` | — |
 | `make load-ws` | 100-concurrent WS load check (`CONNS` overrides) | After WS handler changes |
+| `make load-k6` | k6 REST load test (100 concurrent users) | Load testing |
 
-## Frontend commands (run from `frontend/`)
+## Frontend commands (run from `frontend/`; root aliases: `make fe-build`, `make fe-test`, `make fe-e2e`)
 
 | Command | Purpose | When |
 |---|---|---|
 | `npm run build` | tsc + vite build | Before EVERY FE commit |
 | `npx vitest run` | unit tests (api/ws libs) | Before commit |
 | `npx playwright test` | E2E happy path (needs stack + DeepSeek key) | After FE flow changes |
+
+## Compose commands (run from repo root — compose files live at the root)
+
+| Command | Purpose |
+|---|---|
+| `make up` / `make down` | start / stop the dev stack (base + dev overlay, `--env-file .env`) |
+| `make logs` / `make ps` | follow logs / list stack status |
+| `make restart` | `docker compose restart` |
+| `make compose-build` | pre-up steps for a fresh machine: app image + sandbox images + mTLS certs |
+| `make up-prod` / `make down-prod` | deploy / stop prod (base + prod overlay, `--env-file .env.prod`) |
+| `make logs-prod` / `make ps-prod` | prod logs / status |
+
+> `make dev` (backend) is the full fresh-session flow: down → build app image →
+> sandbox images → certs → up. `make up` skips the rebuild steps.
 
 ## Production commands (VPS, `docker compose --env-file .env.prod`)
 
@@ -39,13 +60,17 @@
 | `docker compose ... -f docker-compose.prod.yml up -d` | deploy (CI does this on main) |
 
 > NEVER run prod compose without `--env-file .env.prod` — base compose
-> `environment:` would win and boot with dev secrets.
+> `environment:` would win and boot with dev secrets. (`make up-prod` already
+> enforces this via the `COMPOSE_PROD` invocation.)
 
-Full check before commit:
+Full check before commit (run from repo root):
 
 ```bash
 make check && make coverage && make test-integration-dev
 ```
+
+> The root `Makefile` is a thin delegation layer — never add logic to it;
+> put logic in `backend/Makefile` or the owning script.
 
 Plan for the current phase lives in `M3_Plan.md` (acceptance criteria from
 `AI_Interviewer_Phases.md` — mark executed, not just coded). Beta-gate status

@@ -7,11 +7,17 @@ intivai.example.com {
 		reverse_proxy app:8080
 	}
 
-	# Static SPA; hashed assets are immutable — cache them hard.
+	# Static SPA; hashed assets are immutable — cache them hard. The HTML
+	# shell is never cached (its asset references change every deploy), and
+	# client-side routes (invite links, /candidates, /interviews/:id) fall
+	# back to index.html so deep links and refreshes don't 404.
 	handle {
 		root * /srv/frontend
+		try_files {path} /index.html
 		file_server
 		@hashed path *.js *.css *.png *.svg *.woff2 *.ico
 		header @hashed Cache-Control "public, max-age=31536000, immutable"
+		@index path /index.html
+		header @index Cache-Control "no-cache"
 	}
 }

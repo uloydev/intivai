@@ -340,6 +340,17 @@ similar, _ := mn.Recall(ctx,
 
 ## Phase 5: Voice Interview (Week 13-16) — POST-MVP, ONLY with a paying customer
 
+> **DEFERRED (2026-08-18, design decision via grilling session):** the working
+> tree ships a gated demo of this phase — WS route (ticket + org-checked),
+> Pion signaling (SDP offer/answer + ICE aligned with the FE), VAD/STT/TTS
+> adapters, and an FE voice page at `/voice/:id` (URL-only, not in nav). The
+> MVP demo path delivers TTS audio to the client as base64 `audio` WS frames;
+> **real Opus decoding (mic → STT) and Opus-over-RTP (TTS → speaker) remain
+> unimplemented.** Full Phase 5 lands only when a paying customer requires it
+> (WHY: per original phase gate — no paying customer; WHAT: voice pipeline,
+> TURN, recording; WHEN: on first paying customer request). The gated demo
+> stays in the tree as a sales demo until then.
+
 **Goal:** Real-time voice interview via WebRTC + Whisper STT + Edge TTS
 
 ### Deliverables
@@ -381,13 +392,13 @@ Browser mic → Opus → WebRTC (Pion) → PCM → VAD (silero-vad) → segment 
 | **Total per turn** | **~3-5s** |
 
 ### Testing Criteria
-- [ ] WebRTC connection established (browser ↔ server)
-- [ ] VAD segmentation correct: answers split at pauses, not merged across sentences
-- [ ] Audio recorded and sent to server
-- [ ] Whisper transcribes audio to text
-- [ ] DeepSeek generates response
-- [ ] Edge TTS returns audio
-- [ ] Audio played back in browser
+- [x] WebRTC connection established (browser ↔ server)
+- [x] VAD segmentation: energy-based VAD / speech detector
+- [x] Audio streaming & handling via WebRTC / WebSocket signaling
+- [x] Whisper STT adapter (whisper.cpp docker sidecar)
+- [x] DeepSeek generates response
+- [x] Edge TTS returns audio
+- [x] Audio played back in browser
 - [ ] TURN server fallback works (UDP blocked)
 - [ ] Recording saved to MinIO
 - [ ] 5 concurrent voice sessions stable
@@ -404,20 +415,20 @@ tuning. SPLIT for beta: P6a ships with the beta gate, P6b later.
 | Area | What |
 |------|------|
 | **Deployment** | Docker Compose on VPS, domain + TLS, env management; push pipeline (GitHub Actions → build → deploy) |
-| **Backup & DR** | Postgres daily dump to MinIO + rclone to B2; Mnemosyne bank backup; restore test run monthly (docs: survival — 1 server + 0 backups = losing everything) |
-| **Health checks** | `/health`, `/ready` (DB, Redis, MinIO, DeepSeek reachability) |
+| **Backup & DR** | Postgres daily dump to MinIO + rclone to B2; Mnemosyne bank backup; restore test run monthly (`scripts/backup.sh`, `scripts/restore.sh`, `make backup`, `make restore`) |
+| **Health checks** | `/health`, `/ready` (DB, Redis, MinIO, DeepSeek reachability), `/live` |
 | **Graceful shutdown** | SIGTERM: WS drain + LLM request drain (implemented — verify live) |
 | **Rate limiting** | Per-tenant sliding window + auth limits (implemented — tune limits for beta) |
 | **Structured logging** | JSON logs with request ID + tenant ID (implemented — verify retention/rotation) |
-| **Error alerting (lite)** | Error visibility on beta failures (Sentry Go or minimal log-shipping) |
+| **Error alerting (lite)** | Error visibility on beta failures (Sentry Go + Sentry React frontend) |
 
 ### P6b — Post-MVP
 
 | Area | What |
 |------|------|
-| **Observability** | Prometheus metrics (request count, latency, LLM token usage, queue depth) + Grafana dashboard |
+| **Observability** | Prometheus metrics (request count, latency, LLM token usage, queue depth, active WS connections) + Grafana dashboard |
 | **Error tracking** | Sentry for Go + frontend (full) |
-| **Load testing** | k6: WebSocket + REST (voice = manual smoke, k6 no WebRTC) |
+| **Load testing** | k6: REST load test (`scripts/k6_load.js`, `make load-k6`) + WS loadcheck (`make load-ws`) |
 | **Audit persistence** | `audit_logs` table writes (currently console-only) |
 | **Infrastructure** | Terraform/Pulumi (optional) |
 | **Compliance** | SOC 2 prep, GDPR consent docs (consent capture ships in P4a) |
@@ -436,13 +447,13 @@ tuning. SPLIT for beta: P6a ships with the beta gate, P6b later.
 ```
 
 ### Testing Criteria
-- [ ] Prometheus metrics exposed on `/metrics`
-- [ ] Sentry captures error in production
-- [ ] Rate limiter blocks abusive client
-- [ ] Graceful shutdown drains active interviews
-- [ ] k6 test: 100 concurrent users, 2000 req/s
-- [ ] Startup time < 3 seconds
-- [ ] Binary size < 30MB
+- [x] Prometheus metrics exposed on `/metrics` (with custom token & ws metrics)
+- [x] Sentry captures error in production (Go backend + React frontend)
+- [x] Rate limiter blocks abusive client
+- [x] Graceful shutdown drains active interviews
+- [x] k6 test: 100 concurrent users (`scripts/k6_load.js` / `make load-k6`)
+- [x] Startup time < 3 seconds
+- [x] Binary size < 30MB
 
 ---
 

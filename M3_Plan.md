@@ -11,14 +11,14 @@ deliverables and doc testing criteria — mark boxes as executed, not just coded
 | 2 | 100 concurrent WS connections load check (harness: Go load client) | M3 criterion | 2026-08-13 | [x] done 2026-08-10 (cmd/loadcheck + make load-ws; 100/100 in ~140ms; found+fixed tenant-tx pool deadlock) |
 | 3 | Interview duration cap (30 min) + per-question timeout (3 min) | Research §2 config | 2026-08-12 | [x] done 2026-08-10 (MaxInterviewDuration in domain ExpireIfNeeded; PerQuestionTimeout as WS read deadline) |
 | 4 | Dynamic follow-up probing (weakness→probe, strength→next) | Research §2 strategy | 2026-08-14 (post-load) | [x] done 2026-08-10 (deterministic probe on <8-word answers, inserted with renumbering, banked) |
-| 5 | Smoke extended with interview endpoints | M3 plan | 2026-08-11 | [ ] |
-| 6 | `go test -race` in CI (backend job) | cross-cutting | 2026-08-11 | [ ] |
+| 5 | Smoke extended with interview endpoints | M3 plan | 2026-08-11 | [x] done 2026-08-18 (full Q&A loop + evaluation frame + GET /interviews, GET /interviews/:id, GET /candidates/:id/report asserted in scripts/smoke.sh) |
+| 6 | `go test -race` in CI (backend job) | cross-cutting | 2026-08-11 | [x] done 2026-08-18 (backend job in .github/workflows/ci.yml runs go test -race ./...) |
 | 7 | Local embeddings fastembed bge-small (columns+HNSW ready) | M2 deferral | 2026-08-15 | [x] done 2026-08-10 (pure-Go cybertron, 384-dim verified; bge-small gated on HF → multi-qa default, EMBED_MODEL_NAME to switch) |
 | 8 | Embedding-based semantic recall (banks + SemanticMatch) | M2 deferral | 2026-08-15 (after 7) | [x] done 2026-08-10 (pg bank cosine Recall + cosine SemanticScoreWithEmbedder; keyword stays default) |
 | 9 | Scanned-PDF OCR fixture + functional verification | M2 verification | 2026-08-12 | [x] done 2026-08-10 (in-process scanned PDF → pdftoppm → tesseract, verified in app container) |
 | 10 | Context version pinned on interview row (audit) | Phases Phase 2 | 2026-08-13 | [x] done 2026-08-10 (migration 007 + pinned at CreateInterview, integration-tested) |
 | 11 | Server heartbeat (PingInterval/PongWait) | Research §2 config | 2026-08-14 | [x] done 2026-08-10 (ping 30s / pong wait 10s, silent client dropped, unit-tested) |
-| 12 | Multi-instance session registry (Redis) | cross-cutting | deferred — needs multi-instance deployment (DECISION) | [ ] |
+| 12 | Multi-instance session registry (Redis) | cross-cutting | 2026-08-18 | [x] done 2026-08-18 (SessionRegistry interface, Redis SET NX/Lua + MemorySessionRegistry fallback in internal/interview/api/session_registry.go) |
 
 ## Deliverables
 
@@ -49,14 +49,14 @@ output) — verify `ChatStream` against the interview flow.
 
 ## Workflow gates (from AGENTS.md)
 
-- [ ] `make check` green
-- [ ] `make test-integration-dev` green (new repo/worker logic → integration test)
-- [ ] `make coverage` green (floors: domain ≥70, others ≥50)
-- [ ] Worker/WS happy path + failure path verified (status machine observable via API)
-- [ ] Fresh-DB boot verified (`make dev` from clean volume)
-- [ ] `make smoke` extended with interview endpoints
-- [ ] Schema change = migration + repo + domain in SAME change
-- [ ] Completeness review: full design doc (Research config blocks incl.) walked against spec-coverage checklist before phase is marked done
+- [x] `make check` green
+- [x] `make test-integration-dev` green (new repo/worker logic → integration test)
+- [x] `make coverage` green (floors: domain ≥70, others ≥50)
+- [x] Worker/WS happy path + failure path verified (status machine observable via API)
+- [x] Fresh-DB boot verified (`make dev` from clean volume)
+- [x] `make smoke` extended with interview endpoints
+- [x] Schema change = migration + repo + domain in SAME change
+- [x] Completeness review: full design doc (Research config blocks incl.) walked against spec-coverage checklist before phase is marked done
 
 ## TDD order (M3) — progress
 

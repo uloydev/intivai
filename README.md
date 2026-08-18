@@ -21,14 +21,18 @@ cd backend && make dev
 # 2. Seed a DeepSeek key for the full pipeline (extract/evaluation)
 #    (make dev already loads it from .env if present)
 
-# 3. Backend gates
+# 3. Quick Demo Seeder (optional)
+make seed           # seeds demo org (admin@demo.io / password123) + jobs + contexts
+
+# 4. Backend gates
 make check          # gofmt + golangci-lint + vet + build + unit tests
 make test-integration-dev   # integration tests vs the running stack
 make coverage       # per-package coverage floors
 make smoke          # full E2E API scenario (real DeepSeek; CV_PDF=/tmp/kilo/cv.pdf)
 make load-ws        # 100-concurrent WS load check
+make load-k6        # k6 REST load test (100 concurrent users)
 
-# 4. Frontend (separate terminal)
+# 5. Frontend (separate terminal)
 cd frontend
 npm ci
 npm run dev         # http://localhost:5173 (proxies /api + WS to :8081)
@@ -38,7 +42,7 @@ npx playwright test # E2E happy path (needs stack + DeepSeek key)
 
 Registration is self-serve: `/register` creates an org + admin, then the
 recruiter loop is jobs → CV upload → candidates → interview → invite link →
-candidate chat → evaluation.
+candidate chat / voice interview (`/voice/:id`) → evaluation.
 
 ## Architecture
 
