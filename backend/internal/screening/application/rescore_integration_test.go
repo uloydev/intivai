@@ -70,7 +70,7 @@ func TestScreeningReScoreAfterDuplicate(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	svc := NewScreeningService(pool, scrrepo.NewPostgresApplicationRepo(pool), cvrepo.NewPostgresCandidateRepo(pool), jobrepo.NewPostgresJobRepo(pool), queue.NewClient(redisAddr))
+	svc := NewScreeningService(pool, scrrepo.NewPostgresApplicationRepo(pool), cvrepo.NewPostgresCandidateRepo(pool), jobrepo.NewPostgresJobRepo(pool), queue.NewClient(redisAddr), "http://localhost:5173")
 	actor := application.AuthContext{OrgID: uuid.MustParse(orgID), Role: string(iamdomain.RoleAdmin)}
 
 	if _, err := svc.Create(ctx, actor, CreateScreeningCommand{CandidateID: candID, JobID: jobID}); err != nil {

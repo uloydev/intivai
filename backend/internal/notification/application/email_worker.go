@@ -13,11 +13,12 @@ const TaskSendEmail = "send_email"
 
 // Email types — typed constants, never string literals (asynq convention).
 const (
-	EmailTypeConfirmation    = "confirmation"
-	EmailTypeInvitation      = "invitation"
-	EmailTypeScorecard       = "scorecard"
-	EmailTypeCandidateOTP    = "candidate_otp"
-	EmailTypeCandidateReview = "candidate_review"
+	EmailTypeConfirmation      = "confirmation"
+	EmailTypeInvitation        = "invitation"
+	EmailTypeScorecard         = "scorecard"
+	EmailTypeCandidateOTP      = "candidate_otp"
+	EmailTypeCandidateReview   = "candidate_review"
+	EmailTypeCandidateDecision = "candidate_decision"
 )
 
 type SendEmailPayload struct {
@@ -31,6 +32,8 @@ type SendEmailPayload struct {
 	ReportURL      string  `json:"report_url,omitempty"`
 	OTPCode        string  `json:"otp_code,omitempty"`
 	MagicLink      string  `json:"magic_link,omitempty"`
+	Decision       string  `json:"decision,omitempty"`
+	PortalURL      string  `json:"portal_url,omitempty"`
 }
 
 type EmailWorker struct {
@@ -66,6 +69,8 @@ func (w *EmailWorker) handle(ctx context.Context, task *asynq.Task) error {
 		return w.mailer.SendCandidateLoginOTP(ctx, p.To, p.OTPCode, p.MagicLink)
 	case EmailTypeCandidateReview:
 		return w.mailer.SendCandidateReview(ctx, p.To, p.CandidateName, p.InviteURL)
+	case EmailTypeCandidateDecision:
+		return w.mailer.SendCandidateDecision(ctx, p.To, p.CandidateName, p.JobTitle, p.Decision, p.PortalURL)
 	default:
 		// Unknown type is permanent — log and drop, never retry.
 		w.logger.Warn().Str("type", p.Type).Msg("unknown email task type, skipping")

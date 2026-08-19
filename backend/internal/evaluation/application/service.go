@@ -116,6 +116,29 @@ func (s *EvaluationService) ListInterviews(ctx context.Context, actor applicatio
 			return err
 		}
 		out = make([]*InterviewListItem, 0, len(ivs))
+		// Batch the application/candidate/job lookups (3 queries + maps
+		// instead of 3×N GetByID round-trips).
+		appIDs := make([]uuid.UUID, 0, len(ivs))
+		for _, iv := range ivs {
+			appIDs = append(appIDs, iv.ApplicationID)
+		}
+		apps, err := s.appRepo.ListByIDs(tctx, actor.OrgID, appIDs)
+		if err != nil {
+			return err
+		}
+		candIDs, jobIDs := make([]uuid.UUID, 0, len(apps)), make([]uuid.UUID, 0, len(apps))
+		for _, a := range apps {
+			candIDs = append(candIDs, a.CandidateID)
+			jobIDs = append(jobIDs, a.JobID)
+		}
+		cands, err := s.candRepo.ListByIDs(tctx, actor.OrgID, candIDs)
+		if err != nil {
+			return err
+		}
+		jobs, err := s.jobRepo.ListByIDs(tctx, actor.OrgID, jobIDs)
+		if err != nil {
+			return err
+		}
 		for _, iv := range ivs {
 			item := &InterviewListItem{
 				InterviewID: iv.ID,
@@ -123,12 +146,12 @@ func (s *EvaluationService) ListInterviews(ctx context.Context, actor applicatio
 				Evaluation:  json.RawMessage(iv.Evaluation),
 				CreatedAt:   iv.CreatedAt,
 			}
-			if app, err := s.appRepo.GetByID(tctx, iv.ApplicationID); err == nil {
+			if app, ok := apps[iv.ApplicationID]; ok {
 				item.CandidateID = app.CandidateID
-				if c, err := s.candRepo.GetByID(tctx, app.CandidateID); err == nil {
+				if c, ok := cands[app.CandidateID]; ok {
 					item.CandidateName = c.Name
 				}
-				if j, err := s.jobRepo.GetByID(tctx, app.JobID); err == nil {
+				if j, ok := jobs[app.JobID]; ok {
 					item.JobTitle = j.Title
 				}
 			}

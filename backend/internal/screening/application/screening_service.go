@@ -3,6 +3,7 @@ package application
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -12,25 +13,28 @@ import (
 	"github.com/intivai/backend/internal/iam/application"
 	iamdomain "github.com/intivai/backend/internal/iam/domain"
 	jobdomain "github.com/intivai/backend/internal/job/domain"
+	notifapp "github.com/intivai/backend/internal/notification/application"
 	scrdomain "github.com/intivai/backend/internal/screening/domain"
-	"github.com/intivai/backend/internal/shared/errors"
+	sharederr "github.com/intivai/backend/internal/shared/errors"
 	"github.com/intivai/backend/pkg/db"
 	"github.com/intivai/backend/pkg/queue"
+	"github.com/rs/zerolog/log"
 	"gorm.io/gorm"
 )
 
 // ScreeningService creates applications (candidate × job) and triggers
 // async scoring. Used by POST /screenings and the extract pipeline.
 type ScreeningService struct {
-	pool     *gorm.DB
-	appRepo  scrdomain.ApplicationRepository
-	candRepo cvdomain.CandidateRepository
-	jobRepo  jobdomain.JobRepository
-	queue    *queue.Client
+	pool      *gorm.DB
+	appRepo   scrdomain.ApplicationRepository
+	candRepo  cvdomain.CandidateRepository
+	jobRepo   jobdomain.JobRepository
+	queue     *queue.Client
+	portalURL string
 }
 
-func NewScreeningService(pool *gorm.DB, appRepo scrdomain.ApplicationRepository, candRepo cvdomain.CandidateRepository, jobRepo jobdomain.JobRepository, q *queue.Client) *ScreeningService {
-	return &ScreeningService{pool: pool, appRepo: appRepo, candRepo: candRepo, jobRepo: jobRepo, queue: q}
+func NewScreeningService(pool *gorm.DB, appRepo scrdomain.ApplicationRepository, candRepo cvdomain.CandidateRepository, jobRepo jobdomain.JobRepository, queueClient *queue.Client, portalURL string) *ScreeningService {
+	return &ScreeningService{pool: pool, appRepo: appRepo, candRepo: candRepo, jobRepo: jobRepo, queue: queueClient, portalURL: strings.TrimSuffix(portalURL, "/")}
 }
 
 type CreateScreeningCommand struct {
@@ -61,30 +65,30 @@ func (s *ScreeningService) Create(ctx context.Context, actor application.AuthCon
 	var app *scrdomain.Application
 	err := db.RunInTx(ctx, s.pool, actor.OrgID.String(), func(tctx context.Context) error {
 		candidate, err := s.candRepo.GetByID(tctx, cmd.CandidateID)
-		if err == cvdomain.ErrNotFound {
-			return errors.NewNotFoundError("candidate", cmd.CandidateID.String())
+		if errors.Is(err, cvdomain.ErrNotFound) {
+			return sharederr.NewNotFoundError("candidate", cmd.CandidateID.String())
 		}
 		if err != nil {
 			return err
 		}
 		if candidate.OrgID != actor.OrgID {
-			return errors.NewDomainError("FORBIDDEN", "candidate belongs to another org")
+			return sharederr.NewDomainError("FORBIDDEN", "candidate belongs to another org")
 		}
 		if len(candidate.CVStructured) == 0 {
-			return errors.NewDomainError("CANDIDATE_NOT_READY", "candidate has no structured data yet")
+			return sharederr.NewDomainError("CANDIDATE_NOT_READY", "candidate has no structured data yet")
 		}
 		job, err := s.jobRepo.GetByID(tctx, cmd.JobID)
-		if err == jobdomain.ErrNotFound {
-			return errors.NewNotFoundError("job", cmd.JobID.String())
+		if errors.Is(err, jobdomain.ErrNotFound) {
+			return sharederr.NewNotFoundError("job", cmd.JobID.String())
 		}
 		if err != nil {
 			return err
 		}
 		if job.OrgID != actor.OrgID {
-			return errors.NewDomainError("FORBIDDEN", "job belongs to another org")
+			return sharederr.NewDomainError("FORBIDDEN", "job belongs to another org")
 		}
 		if job.Status != jobdomain.StatusActive {
-			return errors.NewDomainError("JOB_NOT_ACTIVE", "job is not active")
+			return sharederr.NewDomainError("JOB_NOT_ACTIVE", "job is not active")
 		}
 
 		app, err = s.appRepo.GetByCandidateJob(tctx, actor.OrgID, cmd.CandidateID, cmd.JobID)
@@ -95,23 +99,16 @@ func (s *ScreeningService) Create(ctx context.Context, actor application.AuthCon
 			return err
 		}
 
-		tx, _ := db.TxFrom(tctx)
-		app = scrdomain.NewApplication(actor.OrgID, cmd.CandidateID, cmd.JobID)
-		if err := tx.SavePoint("create_app").Error; err != nil {
+		tx, ok := db.TxFrom(tctx)
+		if !ok {
+			return db.ErrNoTx
+		}
+		newApp := scrdomain.NewApplication(actor.OrgID, cmd.CandidateID, cmd.JobID)
+		winning, _, err := CreateApplicationWithRecovery(tctx, tx, s.appRepo, newApp)
+		if err != nil {
 			return err
 		}
-		if err := s.appRepo.Create(tctx, app); err != nil {
-			if scrdomain.IsExists(err) {
-				// Concurrent create — 23505 aborts the tx; roll back to the
-				// savepoint and reload the winning row.
-				if rerr := tx.RollbackTo("create_app").Error; rerr != nil {
-					return rerr
-				}
-				app, err = s.appRepo.GetByCandidateJob(tctx, actor.OrgID, cmd.CandidateID, cmd.JobID)
-				return err
-			}
-			return err
-		}
+		app = winning
 		return nil
 	})
 	if err != nil {
@@ -138,7 +135,7 @@ func (s *ScreeningService) UpdateDecision(ctx context.Context, actor application
 		trimmed := strings.TrimSpace(*stage)
 		st := scrdomain.Stage(trimmed)
 		if !st.IsValid() {
-			return nil, errors.NewDomainError("INVALID_STAGE", "unknown lifecycle stage")
+			return nil, sharederr.NewDomainError("INVALID_STAGE", "unknown lifecycle stage")
 		}
 		next = &st
 	}
@@ -146,8 +143,8 @@ func (s *ScreeningService) UpdateDecision(ctx context.Context, actor application
 	err := db.RunInTx(ctx, s.pool, actor.OrgID.String(), func(tctx context.Context) error {
 		app, err := s.appRepo.GetByID(tctx, appID)
 		if err != nil {
-			if err == scrdomain.ErrNotFound {
-				return errors.NewNotFoundError("application", appID.String())
+			if errors.Is(err, scrdomain.ErrNotFound) {
+				return sharederr.NewNotFoundError("application", appID.String())
 			}
 			return err
 		}
@@ -158,8 +155,11 @@ func (s *ScreeningService) UpdateDecision(ctx context.Context, actor application
 				current = scrdomain.Stage(*app.Stage)
 			}
 			if !current.CanTransitionTo(*next, fromNil) {
-				return errors.NewDomainError("INVALID_STAGE_TRANSITION",
-					fmt.Sprintf("transition from %q to %q is not allowed", current, *next))
+				// Backward/correction moves are allowed only for admins (ADR-0001).
+				if !current.RequiresAdmin(*next) || actor.Role != string(iamdomain.RoleAdmin) {
+					return sharederr.NewDomainError("INVALID_STAGE_TRANSITION",
+						fmt.Sprintf("transition from %q to %q is not allowed", current, *next))
+				}
 			}
 		}
 		if err := s.appRepo.UpdateDecision(tctx, actor.OrgID, appID, next, notes); err != nil {
@@ -179,7 +179,67 @@ func (s *ScreeningService) UpdateDecision(ctx context.Context, actor application
 		}
 		return nil
 	})
-	return out, err
+	if err != nil {
+		return out, err
+	}
+
+	// Candidate-facing decision emails (ADR-0001 terminal stages). A failed
+	// enqueue must not roll back the persisted decision — log and continue.
+	if next != nil && (*next == scrdomain.StageOfferExtended || *next == scrdomain.StageRejected) {
+		s.notifyDecision(ctx, actor.OrgID, appID, *next)
+	}
+
+	return out, nil
+}
+
+// notifyDecision — best-effort candidate decision email (offer extended /
+// rejected). Looks up candidate + job details for the message.
+func (s *ScreeningService) notifyDecision(ctx context.Context, orgID uuid.UUID, appID uuid.UUID, stage scrdomain.Stage) {
+	if s.queue == nil {
+		return
+	}
+	email, name, jobTitle, err := s.decisionDetails(ctx, orgID, appID)
+	if err != nil || email == "" {
+		return
+	}
+	label := "Offer extended"
+	if stage == scrdomain.StageRejected {
+		label = "Application not proceeding"
+	}
+	if _, err := s.queue.Enqueue(ctx, notifapp.TaskSendEmail, notifapp.SendEmailPayload{
+		Type:          notifapp.EmailTypeCandidateDecision,
+		To:            email,
+		CandidateName: name,
+		JobTitle:      jobTitle,
+		Decision:      label,
+		PortalURL:     s.portalURL + "/candidate/portal",
+	}, asynq.MaxRetry(5)); err != nil {
+		s.logError("enqueue decision email failed", err)
+	}
+}
+
+func (s *ScreeningService) decisionDetails(ctx context.Context, orgID uuid.UUID, appID uuid.UUID) (email, name, jobTitle string, err error) {
+	err = db.RunInTx(ctx, s.pool, orgID.String(), func(tctx context.Context) error {
+		app, err := s.appRepo.GetByID(tctx, appID)
+		if err != nil {
+			return err
+		}
+		cand, err := s.candRepo.GetByID(tctx, app.CandidateID)
+		if err != nil {
+			return err
+		}
+		job, err := s.jobRepo.GetByID(tctx, app.JobID)
+		if err != nil {
+			return err
+		}
+		email, name, jobTitle = cand.Email, cand.Name, job.Title
+		return nil
+	})
+	return email, name, jobTitle, err
+}
+
+func (s *ScreeningService) logError(msg string, err error) {
+	log.Warn().Err(err).Msg(msg)
 }
 
 func (s *ScreeningService) List(ctx context.Context, actor application.AuthContext, jobID uuid.UUID) ([]*ApplicationResult, error) {
@@ -190,30 +250,49 @@ func (s *ScreeningService) List(ctx context.Context, actor application.AuthConte
 			return err
 		}
 		out = make([]*ApplicationResult, 0, len(apps))
+		// Batch lookups (2 queries + maps) instead of 2×N GetByID round-trips.
+		cands, err := s.candRepo.ListByIDs(tctx, actor.OrgID, appCandidateIDs(apps))
+		if err != nil {
+			return err
+		}
+		jobs, err := s.jobRepo.ListByIDs(tctx, actor.OrgID, appJobIDs(apps))
+		if err != nil {
+			return err
+		}
 		for _, a := range apps {
 			r := &ApplicationResult{
 				ID: a.ID, CandidateID: a.CandidateID, JobID: a.JobID, Status: a.Status,
 				CVScore: a.CVScore, PassedScreening: a.PassedScreening,
 				Stage: a.Stage, RecruiterNotes: a.RecruiterNotes,
 				ScoreBreakdown: a.ScoreBreakdown,
+				InterviewScore: a.InterviewScore,
 			}
-			// Candidate/job lookups are RLS-scoped to the tenant tx. NotFound
-			// → empty display field; real errors surface loudly instead of
-			// silently blanking FE rows.
-			if c, err := s.candRepo.GetByID(tctx, a.CandidateID); err == nil {
+			if c, ok := cands[a.CandidateID]; ok {
 				r.CandidateName = c.Name
 				r.CandidateEmail = c.Email
-			} else if err != cvdomain.ErrNotFound {
-				return err
 			}
-			if j, err := s.jobRepo.GetByID(tctx, a.JobID); err == nil {
+			if j, ok := jobs[a.JobID]; ok {
 				r.JobTitle = j.Title
-			} else if err != jobdomain.ErrNotFound {
-				return err
 			}
 			out = append(out, r)
 		}
 		return nil
 	})
 	return out, err
+}
+
+func appCandidateIDs(apps []*scrdomain.Application) []uuid.UUID {
+	ids := make([]uuid.UUID, 0, len(apps))
+	for _, a := range apps {
+		ids = append(ids, a.CandidateID)
+	}
+	return ids
+}
+
+func appJobIDs(apps []*scrdomain.Application) []uuid.UUID {
+	ids := make([]uuid.UUID, 0, len(apps))
+	for _, a := range apps {
+		ids = append(ids, a.JobID)
+	}
+	return ids
 }

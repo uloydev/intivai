@@ -50,7 +50,7 @@ func TestListEnrichesCandidateAndJob(t *testing.T) {
 	}
 
 	svc := NewScreeningService(pool,
-		scrrepo.NewPostgresApplicationRepo(pool), cvrepo.NewPostgresCandidateRepo(pool), jobrepo.NewPostgresJobRepo(pool), nil)
+		scrrepo.NewPostgresApplicationRepo(pool), cvrepo.NewPostgresCandidateRepo(pool), jobrepo.NewPostgresJobRepo(pool), nil, "http://localhost:5173")
 	actor := application.AuthContext{OrgID: uuid.MustParse(orgID), Role: "admin"}
 
 	rows, err := svc.List(ctx, actor, uuid.Nil)

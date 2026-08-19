@@ -14,7 +14,10 @@ import (
 	jobdomain "github.com/intivai/backend/internal/job/domain"
 	"github.com/intivai/backend/internal/llm"
 	memapp "github.com/intivai/backend/internal/memory/application"
+	notifapp "github.com/intivai/backend/internal/notification/application"
+	scrapp "github.com/intivai/backend/internal/screening/application"
 	scrdomain "github.com/intivai/backend/internal/screening/domain"
+	"github.com/intivai/backend/internal/shared/uuidx"
 	"github.com/intivai/backend/pkg/db"
 	"github.com/intivai/backend/pkg/queue"
 	"github.com/rs/zerolog"
@@ -46,8 +49,8 @@ type ExtractWorker struct {
 	publicURL string
 }
 
-func NewExtractWorker(pool *gorm.DB, candRepo cvdomain.CandidateRepository, appRepo scrdomain.ApplicationRepository, jobRepo jobdomain.JobRepository, llmClient llm.Provider, q *queue.Client, publicURL string, log zerolog.Logger) *ExtractWorker {
-	return &ExtractWorker{pool: pool, candRepo: candRepo, appRepo: appRepo, jobRepo: jobRepo, llm: llmClient, queue: q, publicURL: publicURL, log: log}
+func NewExtractWorker(pool *gorm.DB, candRepo cvdomain.CandidateRepository, appRepo scrdomain.ApplicationRepository, jobRepo jobdomain.JobRepository, llmClient llm.Provider, queueClient *queue.Client, publicURL string, log zerolog.Logger) *ExtractWorker {
+	return &ExtractWorker{pool: pool, candRepo: candRepo, appRepo: appRepo, jobRepo: jobRepo, llm: llmClient, queue: queueClient, publicURL: publicURL, log: log}
 }
 
 func (w *ExtractWorker) Register(mux *asynq.ServeMux) {
@@ -116,24 +119,11 @@ func (w *ExtractWorker) handle(ctx context.Context, t *asynq.Task) error {
 			}
 
 			app := scrdomain.NewApplication(candidate.OrgID, candidate.ID, job.ID)
-			if err := tx.SavePoint("create_app").Error; err != nil {
+			winning, _, err := scrapp.CreateApplicationWithRecovery(tctx, tx, w.appRepo, app)
+			if err != nil {
 				return err
 			}
-			if err := w.appRepo.Create(tctx, app); err != nil {
-				if scrdomain.IsExists(err) {
-					if rerr := tx.RollbackTo("create_app").Error; rerr != nil {
-						return rerr
-					}
-					existing, err := w.appRepo.GetByCandidateJob(tctx, candidate.OrgID, candidate.ID, job.ID)
-					if err != nil {
-						return err
-					}
-					appIDs = append(appIDs, existing.ID.String())
-					continue
-				}
-				return err
-			}
-			appIDs = append(appIDs, app.ID.String())
+			appIDs = append(appIDs, winning.ID.String())
 		}
 		return nil
 	})
@@ -148,20 +138,13 @@ func (w *ExtractWorker) handle(ctx context.Context, t *asynq.Task) error {
 	// Enqueue email for candidate review (magic link)
 	c, _ := w.candRepo.GetByID(ctx, candID)
 	if c != nil && c.Email != "" && c.ReviewToken != nil {
-		type sendEmailPayload struct {
-			Type          string `json:"type"`
-			To            string `json:"to"`
-			CandidateName string `json:"candidate_name,omitempty"`
-			JobTitle      string `json:"job_title,omitempty"`
-			InviteURL     string `json:"invite_url,omitempty"`
-		}
 		inviteURL := fmt.Sprintf("%s/candidate-review/%s", strings.TrimSuffix(w.publicURL, "/"), *c.ReviewToken)
-		if _, err := w.queue.Enqueue(ctx, "send_email", sendEmailPayload{
-			Type:          "candidate_review",
+		if _, err := w.queue.Enqueue(ctx, notifapp.TaskSendEmail, notifapp.SendEmailPayload{
+			Type:          notifapp.EmailTypeCandidateReview,
 			To:            c.Email,
 			CandidateName: c.Name,
 			InviteURL:     inviteURL,
-		}); err != nil {
+		}, asynq.MaxRetry(5)); err != nil {
 			w.log.Error().Err(err).Msg("failed to enqueue candidate review email")
 		}
 	}
@@ -173,7 +156,7 @@ func (w *ExtractWorker) handle(ctx context.Context, t *asynq.Task) error {
 		EntityType: "candidate_profile",
 		Summary:    summary,
 		Importance: 0.9,
-	}, asynq.TaskID("sync_mnemosyne:"+p.OrgID+":"+p.CandidateID)); err != nil && !errors.Is(err, asynq.ErrTaskIDConflict) {
+	}, asynq.TaskID("sync_mnemosyne:"+p.OrgID+":"+p.CandidateID), asynq.MaxRetry(5)); err != nil && !errors.Is(err, asynq.ErrTaskIDConflict) {
 		return fmt.Errorf("enqueue sync_mnemosyne: %w", err)
 	}
 
@@ -250,7 +233,7 @@ func (w *ExtractWorker) extract(ctx context.Context, candidate *cvdomain.Candida
 
 func (w *ExtractWorker) fail(ctx context.Context, p ExtractCVPayload, cause error) error {
 	uer := db.RunInTx(ctx, w.pool, p.OrgID, func(tctx context.Context) error {
-		c, err := w.candRepo.GetByID(tctx, mustUUID(p.CandidateID))
+		c, err := w.candRepo.GetByID(tctx, uuidx.MustParse(p.CandidateID))
 		if err != nil {
 			return err
 		}

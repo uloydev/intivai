@@ -9,6 +9,26 @@ import (
 
 // Report — canonical evaluation schema (Phases doc §Phase 4, single source
 // of truth for Research §2/§5). Persisted on interviews.evaluation JSONB.
+// Recommendation verdicts — the only values the evaluator may emit; the LLM's
+// free-text verdict is constrained to these at the adapter boundary so one
+// hallucinated run cannot become a hire/reject decision.
+type Recommendation string
+
+const (
+	RecommendationProceed    Recommendation = "proceed"
+	RecommendationReconsider Recommendation = "reconsider"
+	RecommendationReject     Recommendation = "reject"
+)
+
+// ValidRecommendation reports whether v is a known verdict.
+func ValidRecommendation(v string) bool {
+	switch Recommendation(v) {
+	case RecommendationProceed, RecommendationReconsider, RecommendationReject:
+		return true
+	}
+	return false
+}
+
 type Report struct {
 	OverallScore   float64              `json:"overall_score"`
 	Dimensions     map[string]Dimension `json:"dimensions"`
