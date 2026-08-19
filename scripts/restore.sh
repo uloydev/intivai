@@ -25,7 +25,21 @@ fi
 echo "restoring $DUMP — this OVERWRITES the intivai database"
 docker exec -i intivai-postgres-1 dropdb -U intivai --if-exists intivai_restore
 docker exec -i intivai-postgres-1 createdb -U intivai intivai_restore
-gzip -dc "$WORK/restore.sql.gz" | docker exec -i intivai-postgres-1 psql -U intivai -d intivai_restore >/dev/null
+
+echo "bootstrapping roles..."
+docker exec -i intivai-postgres-1 psql -U intivai -d postgres -v ON_ERROR_STOP=1 -c "
+DO \$\$
+BEGIN
+  IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'intivai_app') THEN
+    CREATE ROLE intivai_app LOGIN PASSWORD 'intivai_app';
+  END IF;
+  IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'intivai_rls_bypass') THEN
+    CREATE ROLE intivai_rls_bypass LOGIN PASSWORD 'intivai_rls_bypass' BYPASSRLS;
+  END IF;
+END \$\$;
+"
+
+gzip -dc "$WORK/restore.sql.gz" | docker exec -i intivai-postgres-1 psql -U intivai -d intivai_restore -v ON_ERROR_STOP=1 >/dev/null
 
 echo "restore complete into database 'intivai_restore'"
 
