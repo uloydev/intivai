@@ -91,7 +91,7 @@ export function InvitePage() {
                 aria-label="I consent"
               />
               <Label htmlFor="consent" className="text-xs leading-relaxed text-foreground cursor-pointer font-medium">
-                I consent to my answers being analyzed and structured for this position's hiring evaluation.
+                I consent to my answers being evaluated by AI, and I acknowledge that telemetry (including clipboard activity, window focus, and audio) will be tracked to ensure fairness.
               </Label>
             </div>
 

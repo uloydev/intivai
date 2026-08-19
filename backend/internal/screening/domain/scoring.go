@@ -136,7 +136,7 @@ func scoreEducation(education string) float64 {
 	case strings.Contains(e, "diploma"), strings.Contains(e, "associate"):
 		return 0.4
 	default:
-		return 0
+		return 0.5
 	}
 }
 

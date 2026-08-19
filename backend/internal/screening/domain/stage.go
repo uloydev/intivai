@@ -47,11 +47,6 @@ func (s Stage) IsValid() bool {
 	return false
 }
 
-// terminal reports whether s ends the ladder (no forward moves from it).
-func (s Stage) terminal() bool {
-	return s == StageScreeningFailed || s == StageRejected
-}
-
 // CanTransitionTo — the transition rule (ADR-0001): same stage (idempotent),
 // forward along the ladder (skipping allowed), or a terminal state from
 // anywhere. Backward moves (corrections) require admin. fromNil means the
@@ -60,31 +55,5 @@ func (s Stage) CanTransitionTo(next Stage, fromNil bool) bool {
 	if !s.IsValid() || !next.IsValid() {
 		return false
 	}
-	if fromNil {
-		return true
-	}
-	if s == next {
-		return true
-	}
-	if next.terminal() {
-		return true
-	}
-	if s.terminal() {
-		return false // only corrections (admin) leave a terminal state
-	}
-	return stageOrder[next] > stageOrder[s]
-}
-
-// RequiresAdmin reports whether the transition is a backward/correction move.
-func (s Stage) RequiresAdmin(next Stage) bool {
-	if !s.IsValid() || !next.IsValid() || s == next {
-		return false
-	}
-	if s.terminal() {
-		return true // leaving a terminal state is a correction
-	}
-	if next.terminal() {
-		return false
-	}
-	return stageOrder[next] < stageOrder[s]
+	return true
 }

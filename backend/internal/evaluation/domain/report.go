@@ -29,6 +29,7 @@ type QuestionScore struct {
 	QuestionIdx int      `json:"question_idx"`
 	Score       float64  `json:"score"`
 	Rationale   string   `json:"rationale"`
+	Quotes      []string `json:"quotes"`
 	Strengths   []string `json:"strengths"`
 	Weaknesses  []string `json:"weaknesses"`
 	Category    string   `json:"category"`
@@ -76,10 +77,31 @@ func Evaluate(perQuestion []QuestionScore, weights map[string]float64) (Report, 
 	}
 
 	total := 0.0
-	for _, d := range r.Dimensions {
-		total += clamp(d.Score, 0, 100) * d.Weight
+	weightSum := 0.0
+	for name, d := range r.Dimensions {
+		if counts[name] > 0 {
+			total += clamp(d.Score, 0, 100) * d.Weight
+			weightSum += d.Weight
+		}
 	}
-	r.OverallScore = math.Round(total*100) / 100
+
+	// Neutral-fill: if there's any valid score, missing dimensions take the average of what WAS scored
+	// (so they neither penalize nor artificially boost the overall outcome).
+	var averageScore float64
+	if weightSum > 0 {
+		averageScore = total / weightSum
+	} else {
+		averageScore = 0 // edge case: no questions mapped to any known dimension
+	}
+
+	for name, d := range r.Dimensions {
+		if counts[name] == 0 {
+			d.Score = averageScore
+			r.Dimensions[name] = d
+		}
+	}
+
+	r.OverallScore = math.Round(averageScore*100) / 100
 	return r, nil
 }
 

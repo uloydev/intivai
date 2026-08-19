@@ -2,10 +2,12 @@ package application
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/hibiken/asynq"
 	cvdomain "github.com/intivai/backend/internal/cv/domain"
 	"github.com/intivai/backend/internal/iam/application"
 	iamdomain "github.com/intivai/backend/internal/iam/domain"
@@ -37,17 +39,19 @@ type CreateScreeningCommand struct {
 }
 
 type ApplicationResult struct {
-	ID              uuid.UUID `json:"id"`
-	CandidateID     uuid.UUID `json:"candidate_id"`
-	CandidateName   string    `json:"candidate_name"`
-	CandidateEmail  string    `json:"candidate_email"`
-	JobID           uuid.UUID `json:"job_id"`
-	JobTitle        string    `json:"job_title"`
-	Status          string    `json:"status"`
-	CVScore         *float64  `json:"cv_score,omitempty"`
-	PassedScreening *bool     `json:"passed_screening,omitempty"`
-	Stage           *string   `json:"stage,omitempty"`
-	RecruiterNotes  *string   `json:"recruiter_notes,omitempty"`
+	ID              uuid.UUID       `json:"id"`
+	CandidateID     uuid.UUID       `json:"candidate_id"`
+	CandidateName   string          `json:"candidate_name"`
+	CandidateEmail  string          `json:"candidate_email"`
+	JobID           uuid.UUID       `json:"job_id"`
+	JobTitle        string          `json:"job_title"`
+	Status          string          `json:"status"`
+	CVScore         *float64        `json:"cv_score,omitempty"`
+	PassedScreening *bool           `json:"passed_screening,omitempty"`
+	Stage           *string         `json:"stage,omitempty"`
+	RecruiterNotes  *string         `json:"recruiter_notes,omitempty"`
+	ScoreBreakdown  json.RawMessage `json:"score_breakdown,omitempty"`
+	InterviewScore  *float64        `json:"interview_score,omitempty"`
 }
 
 func (s *ScreeningService) Create(ctx context.Context, actor application.AuthContext, cmd CreateScreeningCommand) (*ApplicationResult, error) {
@@ -115,7 +119,7 @@ func (s *ScreeningService) Create(ctx context.Context, actor application.AuthCon
 	}
 	if _, err := s.queue.Enqueue(ctx, TaskScoreCV, ScoreCVPayload{
 		OrgID: actor.OrgID.String(), ApplicationID: app.ID.String(),
-	}); err != nil {
+	}, asynq.MaxRetry(5)); err != nil {
 		return nil, err
 	}
 	return &ApplicationResult{ID: app.ID, CandidateID: app.CandidateID, JobID: app.JobID, Status: app.Status}, nil
@@ -154,11 +158,8 @@ func (s *ScreeningService) UpdateDecision(ctx context.Context, actor application
 				current = scrdomain.Stage(*app.Stage)
 			}
 			if !current.CanTransitionTo(*next, fromNil) {
-				// Backward/correction moves are allowed only for admins.
-				if !current.RequiresAdmin(*next) || actor.Role != string(iamdomain.RoleAdmin) {
-					return errors.NewDomainError("INVALID_STAGE_TRANSITION",
-						fmt.Sprintf("transition from %q to %q is not allowed", current, *next))
-				}
+				return errors.NewDomainError("INVALID_STAGE_TRANSITION",
+					fmt.Sprintf("transition from %q to %q is not allowed", current, *next))
 			}
 		}
 		if err := s.appRepo.UpdateDecision(tctx, actor.OrgID, appID, next, notes); err != nil {
@@ -170,8 +171,11 @@ func (s *ScreeningService) UpdateDecision(ctx context.Context, actor application
 		}
 		out = &ApplicationResult{
 			ID: app.ID, CandidateID: app.CandidateID, JobID: app.JobID, Status: app.Status,
-			CVScore: app.CVScore, PassedScreening: app.PassedScreening,
-			Stage: app.Stage, RecruiterNotes: app.RecruiterNotes,
+			CVScore:         app.CVScore,
+			PassedScreening: app.PassedScreening,
+			Stage:           app.Stage,
+			RecruiterNotes:  app.RecruiterNotes,
+			ScoreBreakdown:  app.ScoreBreakdown,
 		}
 		return nil
 	})
@@ -191,6 +195,7 @@ func (s *ScreeningService) List(ctx context.Context, actor application.AuthConte
 				ID: a.ID, CandidateID: a.CandidateID, JobID: a.JobID, Status: a.Status,
 				CVScore: a.CVScore, PassedScreening: a.PassedScreening,
 				Stage: a.Stage, RecruiterNotes: a.RecruiterNotes,
+				ScoreBreakdown: a.ScoreBreakdown,
 			}
 			// Candidate/job lookups are RLS-scoped to the tenant tx. NotFound
 			// → empty display field; real errors surface loudly instead of
