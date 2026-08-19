@@ -146,7 +146,7 @@ jobs:
       - name: Wait for health
         run: |
           for i in $(seq 1 30); do
-            code=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8080/health || true)
+            code=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8081/health || true)
             [ "$code" = "200" ] && break
             sleep 2
           done
@@ -174,6 +174,9 @@ jobs:
           %%EOF''')
 
       - name: Smoke scenario
+        env:
+          INTIVAI_DEEPSEEK_API_KEY: ${{ secrets.INTIVAI_DEEPSEEK_API_KEY }}
+          BASE: http://localhost:8081/api/v1
         run: |
           pip3 install --quiet websocket-client
           bash scripts/smoke.sh /tmp/cv.pdf
@@ -183,9 +186,12 @@ jobs:
         run: docker compose down -v
 
   deploy:
-    needs: [backend, backend-integration]
+    needs: [backend, backend-integration, backend-smoke]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
     steps:
       - uses: actions/checkout@v4
 
@@ -205,6 +211,17 @@ jobs:
           docker push ghcr.io/${IMAGE}:${{ steps.tag.outputs.tag }}
           docker push ghcr.io/${IMAGE}:latest
         id: image
+
+      - name: Build + push sandbox images
+        run: |
+          IMAGE=${{ steps.image.outputs.IMAGE }}
+          for lang in go python node ts; do
+            img="ghcr.io/${IMAGE}-sandbox-${lang}"
+            docker build -t $img:${{ steps.tag.outputs.tag }} ./docker/sandbox/$lang
+            docker tag $img:${{ steps.tag.outputs.tag }} $img:latest
+            docker push $img:${{ steps.tag.outputs.tag }}
+            docker push $img:latest
+          done
 
       - name: Build frontend
         working-directory: frontend
@@ -228,10 +245,18 @@ jobs:
           username: ${{ secrets.PROD_USER }}
           key: ${{ secrets.PROD_SSH_KEY }}
           script: |
+            set -e
             cd /opt/intivai
             export TAG=${{ steps.tag.outputs.tag }}
-            IMAGE=${{ steps.image.outputs.IMAGE }}
-            sed -i "s|ghcr.io/intivai/backend|ghcr.io/${IMAGE}|g" docker-compose.prod.yml
+            export IMAGE=${{ steps.image.outputs.IMAGE }}
+            
+            for lang in go python node ts; do
+              docker pull ghcr.io/${IMAGE}-sandbox-${lang}:${TAG}
+              docker tag ghcr.io/${IMAGE}-sandbox-${lang}:${TAG} intivai-sandbox-${lang}:latest
+            done
+            
+            bash scripts/gen-sandbox-certs.sh
+            
             docker compose --env-file .env.prod -f docker-compose.yml -f docker-compose.prod.yml pull app migrate
             docker compose --env-file .env.prod -f docker-compose.yml -f docker-compose.prod.yml up -d migrate
             docker compose --env-file .env.prod -f docker-compose.yml -f docker-compose.prod.yml up -d app

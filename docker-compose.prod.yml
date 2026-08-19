@@ -9,13 +9,13 @@
 # !override REPLACES the base port lists (compose v5 appends otherwise).
 services:
   migrate:
-    image: ghcr.io/intivai/backend:${TAG:-latest}
+    image: ghcr.io/${IMAGE:-intivai/backend}:${TAG:-latest}
     environment:
       INTIVAI_MIGRATE_URL: ${INTIVAI_MIGRATE_URL:?set in .env.prod}
     restart: "no"
 
   app:
-    image: ghcr.io/intivai/backend:${TAG:-latest}
+    image: ghcr.io/${IMAGE:-intivai/backend}:${TAG:-latest}
     ports: !override []
     environment:
       INTIVAI_APP_PORT: ${INTIVAI_APP_PORT:-8080}
@@ -30,6 +30,11 @@ services:
       INTIVAI_JWT_SECRET: ${INTIVAI_JWT_SECRET:?set in .env.prod}
       INTIVAI_JWT_EXPIRY_HRS: ${INTIVAI_JWT_EXPIRY_HRS:-12}
       INTIVAI_BCRYPT_COST: ${INTIVAI_BCRYPT_COST:-12}
+      INTIVAI_SMTP_HOST: ${INTIVAI_SMTP_HOST:?set in .env.prod}
+      INTIVAI_SMTP_PORT: ${INTIVAI_SMTP_PORT:?set in .env.prod}
+      INTIVAI_SMTP_USER: ${INTIVAI_SMTP_USER:?set in .env.prod}
+      INTIVAI_SMTP_PASS: ${INTIVAI_SMTP_PASS:?set in .env.prod}
+      INTIVAI_SMTP_FROM: ${INTIVAI_SMTP_FROM:?set in .env.prod}
       INTIVAI_DEEPSEEK_API_KEY: ${INTIVAI_DEEPSEEK_API_KEY:-}
       INTIVAI_DEEPSEEK_BASE_URL: ${INTIVAI_DEEPSEEK_BASE_URL:-https://api.deepseek.com}
       INTIVAI_DEEPSEEK_MODEL: ${INTIVAI_DEEPSEEK_MODEL:-deepseek-chat}
@@ -66,7 +71,7 @@ services:
         condition: service_started
 
   sandbox-sidecar:
-    image: ghcr.io/intivai/backend:${TAG:-latest}
+    image: ghcr.io/${IMAGE:-intivai/backend}:${TAG:-latest}
     entrypoint: ["sandboxd"]
     environment:
       SANDBOXD_ADDR: :8443
@@ -115,6 +120,9 @@ services:
       context: ./backend/docker/whisper
     ports: !override []
     restart: always
+
+  mailpit:
+    profiles: ["none"]
 
 volumes:
   redisdata:

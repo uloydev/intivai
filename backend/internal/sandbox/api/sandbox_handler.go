@@ -7,6 +7,7 @@ import (
 	iamdomain "github.com/intivai/backend/internal/iam/domain"
 	sbapp "github.com/intivai/backend/internal/sandbox/application"
 	"github.com/intivai/backend/internal/sandbox/domain"
+	"github.com/intivai/backend/internal/shared/errors"
 	"github.com/intivai/backend/internal/shared/httpapi"
 )
 
@@ -32,7 +33,7 @@ func (h *SandboxHandler) Execute(c *fiber.Ctx) error {
 	}
 	var req domain.ExecutionRequest
 	if err := c.BodyParser(&req); err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": "invalid request body"})
+		return httpapi.Error(c, errors.NewDomainError("INVALID_INPUT", "invalid request body"))
 	}
 
 	result, err := h.svc.Execute(c.UserContext(), req)
@@ -58,10 +59,10 @@ func (h *SandboxHandler) Evaluate(c *fiber.Ctx) error {
 		Problem  string          `json:"problem"`
 	}
 	if err := c.BodyParser(&req); err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": "invalid request body"})
+		return httpapi.Error(c, errors.NewDomainError("INVALID_INPUT", "invalid request body"))
 	}
 
-	result, err := h.svc.EvaluateCode(c.UserContext(), req.Language, req.Code, req.Problem)
+	result, err := h.svc.EvaluateCode(c.UserContext(), actor.OrgID.String(), req.Language, req.Code, req.Problem)
 	if err != nil {
 		return httpapi.Error(c, err)
 	}

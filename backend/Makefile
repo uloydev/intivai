@@ -1,4 +1,35 @@
-.PHONY: check lint vet build test proto sandbox-images coverage test-integration test-integration-dev migrate dev redis-clear smoke load-ws seed backup restore load-k6
+.DEFAULT_GOAL := help
+.PHONY: help check lint vet build test proto sandbox-images coverage test-integration test-integration-dev migrate dev redis-clear smoke load-ws seed backup restore load-k6
+
+# Display available commands and descriptions
+help:
+	@printf "\n\033[1;36mIntivai Backend — Commands & Targets\033[0m\n\n"
+	@printf "\033[1mUsage:\033[0m make <target> [OPTIONS]\n\n"
+	@printf "\033[1;33mBuild & Quality Gates:\033[0m\n"
+	@printf "  \033[32mcheck\033[0m                 Run lint, vet, build, and unit tests\n"
+	@printf "  \033[32mlint\033[0m                  Run golangci-lint (.golangci.yml)\n"
+	@printf "  \033[32mvet\033[0m                   Run go vet ./...\n"
+	@printf "  \033[32mbuild\033[0m                 Compile backend binary\n"
+	@printf "  \033[32mtest\033[0m                  Run Go unit tests\n"
+	@printf "  \033[32mcoverage\033[0m              Verify per-package coverage floors (domain >=70%%, others >=50%%)\n\n"
+	@printf "\033[1;33mSandbox & Protobuf:\033[0m\n"
+	@printf "  \033[32mproto\033[0m                 Regenerate sandbox gRPC stubs from proto/sandbox.proto\n"
+	@printf "  \033[32msandbox-images\033[0m        Build the 4 language sandbox images (Go, Python, Node, TS)\n\n"
+	@printf "\033[1;33mDatabase & Seed Scenarios:\033[0m\n"
+	@printf "  \033[32mmigrate\033[0m               Apply pending PostgreSQL migrations\n"
+	@printf "  \033[32mseed [SCENARIO=demo]\033[0m  Apply modular SQL seed scenario (e.g. 'make seed demo')\n"
+	@printf "  \033[32mseed-fresh [SCENARIO]\033[0m Reset volumes, recreate containers, migrate & seed\n"
+	@printf "  \033[32mbackup\033[0m                Create PostgreSQL and MinIO backup archive\n"
+	@printf "  \033[32mrestore DUMP=...\033[0m      Restore database from backup dump\n\n"
+	@printf "\033[1;33mTesting & Benchmarks:\033[0m\n"
+	@printf "  \033[32mtest-integration-dev\033[0m  Run integration tests against local dev compose stack\n"
+	@printf "  \033[32mtest-integration\033[0m      Run integration tests against custom TEST_DATABASE_URL\n"
+	@printf "  \033[32msmoke [CV_PDF=...]\033[0m    Run end-to-end API scenario against running stack\n"
+	@printf "  \033[32mload-ws\033[0m               Run 100-concurrent WebSocket load check (CONNS overrides)\n"
+	@printf "  \033[32mload-k6\033[0m               Run k6 REST load test (100 concurrent virtual users)\n\n"
+	@printf "\033[1;33mDevelopment Stack:\033[0m\n"
+	@printf "  \033[32mdev\033[0m                   Boot full stack on fresh Redis (builds app, sandbox & certs)\n"
+	@printf "  \033[32mredis-clear\033[0m           Flush Redis queue while stack stays running\n\n"
 
 # Full pre-commit gate (unit-level)
 check: lint vet build test

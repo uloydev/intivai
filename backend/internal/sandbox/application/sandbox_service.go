@@ -52,20 +52,21 @@ func (s *SandboxService) Execute(ctx context.Context, req domain.ExecutionReques
 }
 
 // EvaluateCode performs AI code quality and time/space complexity analysis.
-func (s *SandboxService) EvaluateCode(ctx context.Context, language domain.Language, code, problemDescription string) (*domain.AICodeReview, error) {
+func (s *SandboxService) EvaluateCode(ctx context.Context, orgID string, language domain.Language, code, problemDescription string) (*domain.AICodeReview, error) {
 	if s.llm == nil {
 		return &domain.AICodeReview{
-			TimeComplexity:  "O(N)",
-			SpaceComplexity: "O(1)",
-			QualityScore:    85,
-			Summary:         "Code executed successfully.",
-			Strengths:       []string{"Working solution"},
-			Improvements:    []string{"Consider additional edge case testing"},
+			TimeComplexity:  "N/A",
+			SpaceComplexity: "N/A",
+			QualityScore:    0,
+			Summary:         "AI evaluation skipped due to missing provider configuration.",
+			Strengths:       []string{},
+			Improvements:    []string{},
 		}, nil
 	}
 
 	userPrompt := fmt.Sprintf("Problem Description: %s\n\nLanguage: %s\n\nCandidate Code:\n%s", problemDescription, language, code)
 	out, err := s.llm.StructuredOutput(ctx, llm.StructuredRequest{
+		OrgID:  orgID,
 		System: codeReviewSystem,
 		User:   userPrompt,
 		Schema: domain.AICodeReview{},
@@ -97,15 +98,13 @@ func (s *SandboxService) EvaluateCode(ctx context.Context, language domain.Langu
 
 // SaveCodingSession persists the coding session snapshot onto the interview aggregate.
 func (s *SandboxService) SaveCodingSession(ctx context.Context, orgID string, interviewID uuid.UUID, session domain.CodingSession) error {
-	var finalRes map[string]interface{}
+	var finalRes *ivdomain.ExecutionResult
 	if raw, err := json.Marshal(session.FinalResult); err == nil {
 		_ = json.Unmarshal(raw, &finalRes)
 	}
-	var aiReview map[string]interface{}
-	if session.AICodeReview != nil {
-		if raw, err := json.Marshal(session.AICodeReview); err == nil {
-			_ = json.Unmarshal(raw, &aiReview)
-		}
+	var aiReview *ivdomain.AICodeReview
+	if raw, err := json.Marshal(session.AICodeReview); err == nil {
+		_ = json.Unmarshal(raw, &aiReview)
 	}
 	subTime := session.SubmittedAt
 	if subTime.IsZero() {

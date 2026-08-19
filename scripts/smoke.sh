@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # End-to-end API scenario against a running stack (make dev first).
-# Requires a DeepSeek key OR tolerates failed_extract (both asserted honestly).
+# Requires a DeepSeek key in the stack to pass full extraction.
 set -euo pipefail
 
 BASE="${BASE:-http://localhost:8081/api/v1}"
@@ -56,7 +56,8 @@ case "$STATUS" in
     curl -sf "$BASE/applications" -H "Authorization: Bearer $TOKEN" | jq_get "['data']"
     ;;
   failed_extract)
-    echo "extract failed honestly (DeepSeek key missing?) — POST /cvs/:id/extract retries after key is set"
+    echo "extract failed — DeepSeek key missing in stack?"
+    exit 1
     ;;
   *)
     echo "unexpected state: $STATUS"; exit 1 ;;
@@ -79,9 +80,7 @@ V3=$(curl -sf -X POST "$BASE/orgs/$ORG/contexts" -H "Authorization: Bearer $TOKE
 echo "versions: $V1 (dedup=$V2, bump=$V3)"
 [ "$V1" = "$V2" ] && [ "$V3" = "$((V1+1))" ] || { echo "versioning broken"; exit 1; }
 
-# Interview flow: only runs when the CV pipeline reached "extracted" (needs
-# INTIVAI_DEEPSEEK_API_KEY in the stack). Without the key the extract step
-# fails honestly and there is no passed application to interview.
+# Interview flow: runs when the CV pipeline reached "extracted".
 PASSED_APP=$(curl -sf "$BASE/applications" -H "Authorization: Bearer $TOKEN" | \
   python3 -c 'import sys,json; apps=[a for a in json.load(sys.stdin)["data"] if a.get("passed_screening")]; print(apps[0]["id"] if apps else "")' 2>/dev/null || true)
 if [ -n "$PASSED_APP" ]; then
@@ -164,7 +163,8 @@ PYEOF
   echo "$CAND_REPORT" | python3 -c "import sys,json; data=json.load(sys.stdin)['data']; assert data['candidate']['id'] == '$CV_ID', 'candidate id mismatch'; assert len(data['interviews']) >= 1, 'no interview summaries'"
   echo "candidate report ok"
 else
-  echo "interview flow skipped (no extracted/passed candidate — DeepSeek key missing in stack?)"
+  echo "interview flow skipped (no extracted/passed candidate found)"
+  exit 1
 fi
 
 say "SMOKE PASSED"
