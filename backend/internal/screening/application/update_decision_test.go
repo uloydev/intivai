@@ -26,7 +26,7 @@ func TestScreeningService_UpdateDecisionTransitions(t *testing.T) {
 	require.NoError(t, err)
 
 	repo := persistence.NewPostgresApplicationRepo(pool)
-	svc := scrapp.NewScreeningService(pool, repo, nil, nil, nil)
+	svc := scrapp.NewScreeningService(pool, repo, nil, nil, nil, "http://localhost:5173")
 
 	orgID := uuid.New()
 	candID := uuid.New()

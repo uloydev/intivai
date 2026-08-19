@@ -37,10 +37,14 @@ func TestStageTransitions(t *testing.T) {
 }
 
 func TestStageBackward(t *testing.T) {
-	// Backward moves are now allowed for manual reversion.
-	require.True(t, StageHired.CanTransitionTo(StageOfferExtended, false))
-	require.True(t, StageScreeningPassed.CanTransitionTo(StageApplied, false))
-	require.True(t, StageRejected.CanTransitionTo(StageApplied, false))
+	// Backward moves are NOT allowed by the ladder — they require an admin
+	// override (ADR-0001), which RequiresAdmin flags for the service to check.
+	require.False(t, StageHired.CanTransitionTo(StageOfferExtended, false))
+	require.True(t, StageHired.RequiresAdmin(StageOfferExtended))
+	require.False(t, StageScreeningPassed.CanTransitionTo(StageApplied, false))
+	require.True(t, StageScreeningPassed.RequiresAdmin(StageApplied))
+	require.False(t, StageRejected.CanTransitionTo(StageApplied, false))
+	require.True(t, StageRejected.RequiresAdmin(StageApplied))
 }
 
 func TestStageFromNil(t *testing.T) {
