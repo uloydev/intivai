@@ -1,4 +1,3 @@
--- 013_otp_hashing.down.sql
 ALTER TABLE candidate_otps DROP COLUMN IF EXISTS attempts;
 
 DO $$

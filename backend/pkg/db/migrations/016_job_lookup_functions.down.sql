@@ -1,5 +1,3 @@
--- 016_job_lookup_functions.down.sql
-
 DROP FUNCTION IF EXISTS public_active_jobs_lookup(TEXT);
 DROP FUNCTION IF EXISTS public_job_detail_lookup(UUID);
 

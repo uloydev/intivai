@@ -1,4 +1,7 @@
--- 017_fix_public_job_published.up.sql
+-- Fix vs 016: public job lookups were missing the is_published filter, so
+-- draft/unpublished jobs leaked onto the public job board. 017 adds
+-- `AND j.is_published = true` to both lookup functions (same shape as 016,
+-- no schema change).
 
 CREATE OR REPLACE FUNCTION public_active_jobs_lookup(p_org_slug TEXT DEFAULT NULL)
 RETURNS TABLE(

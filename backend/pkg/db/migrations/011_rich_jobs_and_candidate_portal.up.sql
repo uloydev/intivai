@@ -1,4 +1,3 @@
--- 011_rich_jobs_and_candidate_portal.up.sql
 -- 1. Extend jobs table with rich job board specs
 ALTER TABLE jobs
     ADD COLUMN IF NOT EXISTS location TEXT DEFAULT 'Remote',

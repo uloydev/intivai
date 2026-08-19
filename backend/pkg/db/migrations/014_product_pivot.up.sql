@@ -1,4 +1,3 @@
--- 014_product_pivot.up.sql
 -- Additions for Phase 5 Pivot: Proctoring modes, Bulk Upload batches, and Global Candidate Passports
 
 -- Jobs: Proctoring Mode and Published flag

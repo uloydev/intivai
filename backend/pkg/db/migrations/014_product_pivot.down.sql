@@ -1,4 +1,3 @@
--- 014_product_pivot.down.sql
 -- Revert Additions for Phase 5 Pivot
 
 DROP TABLE IF EXISTS global_candidate_passports;

@@ -1,4 +1,3 @@
--- 009_proctoring.up.sql
 -- Anti-Cheating & AI Proctoring Guardrails
 
 ALTER TABLE interviews

@@ -1,3 +1,7 @@
+-- NOTE: this down migration is only valid when run contiguously (all
+-- migrations up to 002 applied first, then down 002 → 001). Rolling back past
+-- 002 drops the intivai_app / intivai_rls_bypass roles that every later
+-- migration assumes exist; a non-contiguous down leaves the schema broken.
 DROP INDEX IF EXISTS idx_mnemosyne_embedding;
 DROP INDEX IF EXISTS idx_mnemosyne_filter;
 DROP INDEX IF EXISTS idx_mnemosyne_entity;

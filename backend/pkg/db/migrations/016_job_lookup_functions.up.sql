@@ -1,4 +1,3 @@
--- 016_job_lookup_functions.up.sql
 -- Replace public job lookup functions to include new columns
 
 DROP FUNCTION IF EXISTS public_active_jobs_lookup(TEXT);

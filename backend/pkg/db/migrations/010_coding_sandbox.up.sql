@@ -1,4 +1,3 @@
--- 010_coding_sandbox.up.sql
 -- Coding Sandbox & Live Pair-Programming Terminal
 
 ALTER TABLE interviews

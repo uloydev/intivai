@@ -1,4 +1,3 @@
--- 012_applications_decision.up.sql
 -- Recruiter lifecycle stage + hiring notes persisted on the application row
 -- (previously frontend-only state that never reached the server).
 

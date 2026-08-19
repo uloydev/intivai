@@ -1,4 +1,3 @@
--- 013_otp_hashing.up.sql
 -- Bring existing dev DBs in line with 011's hashed-code schema: rename the
 -- plaintext `code` column (011 creates `code_hash` on fresh installs).
 DO $$

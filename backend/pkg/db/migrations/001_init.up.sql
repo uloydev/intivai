@@ -1,5 +1,6 @@
 CREATE EXTENSION IF NOT EXISTS vector;
 
+-- IDs: `id UUID PRIMARY KEY`; new tables default to gen_random_uuid().
 -- Organizations
 CREATE TABLE orgs (
     id UUID PRIMARY KEY,

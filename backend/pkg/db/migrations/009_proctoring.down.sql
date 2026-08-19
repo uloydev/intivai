@@ -1,4 +1,3 @@
--- 009_proctoring.down.sql
 DROP INDEX IF EXISTS idx_interviews_proctoring_summary;
 
 ALTER TABLE interviews

@@ -1,5 +1,3 @@
--- 017_fix_public_job_published.down.sql
-
 CREATE OR REPLACE FUNCTION public_active_jobs_lookup(p_org_slug TEXT DEFAULT NULL)
 RETURNS TABLE(
     id UUID,
