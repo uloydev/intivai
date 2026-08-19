@@ -17,6 +17,7 @@ const (
 	StatusParsed        = "parsed"
 	StatusExtracting    = "extracting"
 	StatusExtracted     = "extracted"
+	StatusPendingReview = "pending_review"
 	StatusFailedOCR     = "failed_ocr"
 	StatusFailedExtract = "failed_extract"
 )
@@ -32,6 +33,8 @@ type Candidate struct {
 	CVOCRMethod  string
 	Status       string
 	ErrorMessage string
+	BatchID      *uuid.UUID
+	ReviewToken  *string
 }
 
 func NewCandidate(orgID uuid.UUID, name, email string) (*Candidate, error) {

@@ -46,6 +46,10 @@ func (f *PostgresFactory) ForBank(orgID string) memdomain.MemoryBank {
 // withTenant runs fn inside a transaction with app.org_id set so the RLS
 // policy resolves. Equivalent to the tenant-tx middleware used by the API.
 func (b *PostgresBank) withTenant(ctx context.Context, fn func(tx *gorm.DB) error) error {
+	if existingTx, ok := db.TxFrom(ctx); ok {
+		return fn(existingTx)
+	}
+
 	tx := b.pool.WithContext(ctx).Begin()
 	if tx.Error != nil {
 		return tx.Error

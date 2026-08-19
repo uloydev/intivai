@@ -879,6 +879,9 @@ components:
           additionalProperties: { type: number }
         min_score_to_proceed: { type: number }
         status: { type: string, enum: [active, archived] }
+        proctoring_mode: { type: string, enum: [optional, required, none] }
+        is_published: { type: boolean }
+        rubric: { type: string, description: JSON string }
         created_at: { type: string, format: date-time }
     JobCreate:
       type: object

@@ -103,12 +103,19 @@ type ResumeMessage struct {
 	SessionID string `json:"session_id"`
 }
 
+type TelemetryDetails struct {
+	PastedTextLength int    `json:"pasted_text_length,omitempty"`
+	WindowWidth      int    `json:"window_width,omitempty"`
+	WindowHeight     int    `json:"window_height,omitempty"`
+	AudioStatus      string `json:"audio_status,omitempty"`
+}
+
 type TelemetryMessage struct {
-	Type        string                 `json:"type"`
-	EventType   string                 `json:"event_type"` // tab_switch, paste, focus_lost, focus_regained, window_resize, audio_anomaly
-	Timestamp   string                 `json:"timestamp"`
-	QuestionIdx int                    `json:"question_idx,omitempty"`
-	Details     map[string]interface{} `json:"details,omitempty"`
+	Type        string            `json:"type"`
+	EventType   string            `json:"event_type"` // tab_switch, paste, focus_lost, focus_regained, window_resize, audio_anomaly
+	Timestamp   string            `json:"timestamp"`
+	QuestionIdx int               `json:"question_idx,omitempty"`
+	Details     *TelemetryDetails `json:"details,omitempty"`
 }
 
 type CodeChangeMessage struct {
@@ -134,24 +141,49 @@ type CodeRunMessage struct {
 	TestCases   []CodeRunTestCase `json:"test_cases,omitempty"`
 }
 
+type TestResult struct {
+	ID             string `json:"id"`
+	Passed         bool   `json:"passed"`
+	ActualOutput   string `json:"actual_output,omitempty"`
+	ExpectedOutput string `json:"expected_output,omitempty"`
+	Error          string `json:"error,omitempty"`
+}
+
+type ExecutionResult struct {
+	Stdout      string       `json:"stdout"`
+	Stderr      string       `json:"stderr"`
+	ExitCode    int          `json:"exit_code"`
+	DurationMs  int64        `json:"duration_ms"`
+	AllPassed   bool         `json:"all_passed"`
+	TestResults []TestResult `json:"test_results,omitempty"`
+	Error       string       `json:"error,omitempty"`
+}
+
+type AICodeReview struct {
+	Score           float64  `json:"score"`
+	Strengths       []string `json:"strengths,omitempty"`
+	Weaknesses      []string `json:"weaknesses,omitempty"`
+	Recommendations []string `json:"recommendations,omitempty"`
+}
+
 type CodeResultMessage struct {
-	Type        string        `json:"type"`
-	Stdout      string        `json:"stdout"`
-	Stderr      string        `json:"stderr"`
-	ExitCode    int           `json:"exit_code"`
-	DurationMs  int64         `json:"duration_ms"`
-	AllPassed   bool          `json:"all_passed"`
-	TestResults []interface{} `json:"test_results,omitempty"`
-	Error       string        `json:"error,omitempty"`
+	Type        string       `json:"type"`
+	Stdout      string       `json:"stdout"`
+	Stderr      string       `json:"stderr"`
+	ExitCode    int          `json:"exit_code"`
+	DurationMs  int64        `json:"duration_ms"`
+	AllPassed   bool         `json:"all_passed"`
+	TestResults []TestResult `json:"test_results,omitempty"`
+	Error       string       `json:"error,omitempty"`
 }
 
 type CodingSession struct {
-	QuestionIdx  int                    `json:"question_idx"`
-	Language     string                 `json:"language"`
-	Code         string                 `json:"code"`
-	FinalResult  map[string]interface{} `json:"final_result,omitempty"`
-	AICodeReview map[string]interface{} `json:"ai_code_review,omitempty"`
-	SubmittedAt  string                 `json:"submitted_at"`
+	QuestionIdx  int              `json:"question_idx"`
+	Language     string           `json:"language"`
+	Code         string           `json:"code"`
+	FinalResult  *ExecutionResult `json:"final_result,omitempty"`
+	AICodeReview *AICodeReview    `json:"ai_code_review,omitempty"`
+	SubmittedAt  string           `json:"submitted_at"`
 }
 
 func NewInterviewStart(sessionID string, total int) InterviewStartMessage {

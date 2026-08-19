@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"flag"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -60,14 +62,27 @@ import (
 	"github.com/rs/zerolog"
 )
 
-// evalEnqueuer — async evaluation retry via the shared asynq client.
-type evalEnqueuer struct {
-	client *queue.Client
+// interviewEnqueuer — async evaluation retry and candidate invitation emails via the shared asynq client.
+type interviewEnqueuer struct {
+	client    *queue.Client
+	publicURL string
 }
 
-func (e evalEnqueuer) EnqueueEvaluation(ctx context.Context, orgID, interviewID string) error {
+func (e interviewEnqueuer) EnqueueEvaluation(ctx context.Context, orgID, interviewID string) error {
 	_, err := e.client.Enqueue(ctx, evalapp.TaskEvaluateInterview, evalapp.EvaluatePayload{
 		OrgID: orgID, InterviewID: interviewID,
+	}, asynq.MaxRetry(5))
+	return err
+}
+
+func (e interviewEnqueuer) EnqueueInterviewInvitation(ctx context.Context, to, name, jobTitle, interviewID, inviteToken string) error {
+	inviteURL := fmt.Sprintf("%s/invite/%s?t=%s", strings.TrimSuffix(e.publicURL, "/"), interviewID, inviteToken)
+	_, err := e.client.Enqueue(ctx, notifapp.TaskSendEmail, notifapp.SendEmailPayload{
+		Type:          notifapp.EmailTypeInvitation,
+		To:            to,
+		CandidateName: name,
+		JobTitle:      jobTitle,
+		InviteURL:     inviteURL,
 	})
 	return err
 }
@@ -139,17 +154,22 @@ func main() {
 	if cfg.LLM.FallbackBaseURL != "" {
 		fallback = llm.NewDeepSeekProvider(cfg.LLM.FallbackAPIKey, cfg.LLM.FallbackBaseURL, cfg.LLM.DeepSeekModel)
 	}
+	tokenLedger := llm.NewRedisTokenLedger(rdb, 100_000) // Default 100k daily cap for now
+
 	llmClient := llm.NewClient(
 		llm.NewDeepSeekProvider(cfg.LLM.DeepSeekAPIKey, cfg.LLM.DeepSeekBaseURL, cfg.LLM.DeepSeekModel),
 		fallback,
+		tokenLedger,
 		cfg.LLM.MaxRetries,
 	)
 
 	var memoryFactory memdomain.BankFactory
+	var embedder emb.Embedder
 	if cfg.Memory.Driver == "postgres" {
 		pgFactory := pgmem.NewPostgresFactory(pool)
 		if cfg.Embeddings.Enabled {
-			pgFactory = pgFactory.WithEmbedder(emb.NewBGESmall(cfg.Embeddings.ModelDir))
+			embedder = emb.NewBGESmall(cfg.Embeddings.ModelDir)
+			pgFactory = pgFactory.WithEmbedder(embedder)
 		}
 		memoryFactory = pgFactory
 	} else {
@@ -173,14 +193,15 @@ func main() {
 
 	// --- M2 contexts: job, cv, screening, company context ---
 	jobRepo := jobrepo.NewPostgresJobRepo(pool)
-	jobService := jobapp.NewJobService(jobRepo)
+	jobService := jobapp.NewJobService(jobRepo, queueClient)
 	jobHandler := jobapi.NewJobHandler(jobService)
 
+	appRepo := scrrepo.NewPostgresApplicationRepo(pool)
+
 	candidateRepo := cvrepo.NewPostgresCandidateRepo(pool)
-	cvService := cvapp.NewCVService(candidateRepo, store, queueClient)
+	cvService := cvapp.NewCVService(candidateRepo, appRepo, store, queueClient)
 	cvHandler := cvapi.NewCVHandler(cvService, cfg.Cv.MaxUploadMB)
 
-	appRepo := scrrepo.NewPostgresApplicationRepo(pool)
 	screeningService := scrapp.NewScreeningService(pool, appRepo, candidateRepo, jobRepo, queueClient)
 	screeningHandler := scrapi.NewScreeningHandler(screeningService)
 
@@ -193,7 +214,7 @@ func main() {
 	tokenRepo := ivrepo.NewPostgresTokenRepo(pool)
 	questionBank := ivrepo.NewPostgresQuestionBank(pool)
 	evalWorker := evalapp.NewEvaluationWorker(pool, ivRepo, evalllm.NewEvaluator(llmClient))
-	interviewService := ivapp.NewInterviewService(pool, ivRepo, tokenRepo, questionBank, appRepo, candidateRepo, jobRepo, contextRepo, store, tokens, ivdomain.SystemClock(), evalEnqueuer{client: queueClient})
+	interviewService := ivapp.NewInterviewService(pool, ivRepo, tokenRepo, questionBank, appRepo, candidateRepo, jobRepo, contextRepo, store, tokens, ivdomain.SystemClock(), interviewEnqueuer{client: queueClient, publicURL: cfg.App.PublicURL})
 	sessionRegistry := ivapi.NewRedisSessionRegistry(rdb, 35*time.Minute)
 	chatHandler := ivapi.NewChatHandler(interviewService, llmClient, tokens, logger, sessionRegistry)
 	evalService := evalapp.NewEvaluationService(pool, ivRepo, appRepo, candidateRepo, jobRepo, store)
@@ -231,15 +252,17 @@ func main() {
 
 	// --- Workers ---
 	parseWorker := cvapp.NewParseWorker(pool, candidateRepo, store, queueClient, logger)
-	extractWorker := cvapp.NewExtractWorker(pool, candidateRepo, appRepo, jobRepo, llmClient, queueClient, logger)
-	scoreWorker := scrapp.NewScoreWorker(pool, appRepo, candidateRepo, jobRepo, orgSettings{repo: iamRepo}, logger)
+	extractWorker := cvapp.NewExtractWorker(pool, candidateRepo, appRepo, jobRepo, llmClient, queueClient, cfg.App.PublicURL, logger)
+	scoreWorker := scrapp.NewScoreWorker(pool, appRepo, candidateRepo, jobRepo, orgSettings{repo: iamRepo}, embedder, logger)
 	indexWorker := ctxapp.NewIndexWorker(pool, contextRepo, store, memoryFactory, logger)
+	rubricWorker := jobapp.NewRubricWorker(pool, jobRepo, llmClient, logger)
 	workerMux := asynq.NewServeMux()
 	syncWorker.Register(workerMux)
 	parseWorker.Register(workerMux)
 	extractWorker.Register(workerMux)
 	scoreWorker.Register(workerMux)
 	indexWorker.Register(workerMux)
+	rubricWorker.Register(workerMux)
 	evalWorker.Register(workerMux)
 	emailWorker.Register(workerMux)
 
@@ -284,6 +307,9 @@ func main() {
 	authRateLimit := httpmw.RateLimit(rdb, cfg.RateLimit.AuthPerMin, time.Minute, func(c *fiber.Ctx) string {
 		return "auth:" + c.IP()
 	})
+	publicRateLimit := httpmw.RateLimit(rdb, 100, time.Minute, func(c *fiber.Ctx) string {
+		return "public:" + c.IP()
+	})
 	tenantRateLimit := httpmw.RateLimit(rdb, cfg.RateLimit.TenantPerMin, time.Minute, func(c *fiber.Ctx) string {
 		if actor, ok := api.Actor(c); ok {
 			return "tenant:" + actor.OrgID.String()
@@ -300,15 +326,17 @@ func main() {
 	authMW := api.AuthMiddleware(tokens)
 	tenantMW := api.TenantTxMiddleware(pool)
 
-	v1 := app.Group("/api/v1", tenantRateLimit)
+	v1 := app.Group("/api/v1")
 
 	// Public Job Board & Application endpoints (unauthenticated, rate-limited)
-	publicRoutes := v1.Group("/public")
+	publicRoutes := v1.Group("/public", publicRateLimit)
 	publicRoutes.Get("/jobs", publicJobHandler.ListPublicJobs)
 	publicRoutes.Get("/jobs/:id", publicJobHandler.GetPublicJob)
 	publicRoutes.Post("/jobs/:id/apply", authRateLimit, publicJobHandler.Apply)
 	publicRoutes.Post("/candidate/auth/otp", authRateLimit, candidatePortalHandler.RequestOTP)
 	publicRoutes.Post("/candidate/auth/verify", authRateLimit, candidatePortalHandler.VerifyOTP)
+	publicRoutes.Get("/candidate-review/:token", cvHandler.ReviewProfile)
+	publicRoutes.Post("/candidate-review/:token/confirm", cvHandler.ConfirmProfile)
 
 	authRoutes := v1.Group("/auth")
 	authRoutes.Post("/register", authRateLimit, authHandler.Register)
@@ -325,7 +353,7 @@ func main() {
 	v1.Get("/candidate/interviews/:id/chat", chatHandler.RequireTicket, chatHandler.Chat(cfg.App.AllowedOrigins))
 	chatHandler.RegisterVoiceRoutes(v1, cfg.App.AllowedOrigins)
 
-	authed := v1.Group("", authMW, tenantMW, userRateLimit)
+	authed := v1.Group("", authMW, tenantRateLimit, userRateLimit, tenantMW)
 	authed.Get("/me", authHandler.Me)
 	authed.Post("/users", authHandler.CreateUser)
 	authed.Post("/sandbox/execute", sandboxHandler.Execute)
@@ -337,6 +365,7 @@ func main() {
 	authed.Patch("/jobs/:id", jobHandler.Update)
 
 	authed.Post("/cvs", cvHandler.Upload)
+	authed.Post("/cvs/bulk", cvHandler.BulkUpload)
 	authed.Get("/cvs", cvHandler.List)
 	authed.Get("/cvs/:id", cvHandler.Get)
 	authed.Post("/cvs/:id/extract", cvHandler.ReExtract)

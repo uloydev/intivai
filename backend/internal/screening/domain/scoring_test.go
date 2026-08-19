@@ -90,17 +90,21 @@ func TestSemanticScore(t *testing.T) {
 }
 
 func TestEducationLevels(t *testing.T) {
-	cases := map[string]float64{
-		"PhD in Computer Science": 1.0,
-		"Master of Business":      0.8,
-		"Bachelor of Engineering": 0.6,
-		"Higher National Diploma": 0.4,
-		"high school diploma":     0.2,
-		"":                        0,
+	tests := []struct {
+		input string
+		want  float64
+	}{
+		{"PhD in Computer Science", 1.0},
+		{"Master of Business", 0.8},
+		{"Bachelor of Engineering", 0.6},
+		{"Higher National Diploma", 0.4},
+		{"high school diploma", 0.2},
+		{"", 0.5},
+		{"Unknown", 0.5},
 	}
-	for input, want := range cases {
-		if got := scoreEducation(input); got != want {
-			t.Errorf("scoreEducation(%q) = %v, want %v", input, got, want)
+	for _, tc := range tests {
+		if got := scoreEducation(tc.input); got != tc.want {
+			t.Errorf("scoreEducation(%q) = %v, want %v", tc.input, got, tc.want)
 		}
 	}
 }

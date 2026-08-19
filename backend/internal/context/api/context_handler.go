@@ -9,7 +9,7 @@ import (
 	ctxapp "github.com/intivai/backend/internal/context/application"
 	ctxdomain "github.com/intivai/backend/internal/context/domain"
 	"github.com/intivai/backend/internal/iam/api"
-	"github.com/intivai/backend/internal/shared/errors"
+	sharederr "github.com/intivai/backend/internal/shared/errors"
 	"github.com/intivai/backend/internal/shared/httpapi"
 )
 
@@ -29,7 +29,7 @@ func (h *ContextHandler) orgFromPath(c *fiber.Ctx) (uuid.UUID, error) {
 	}
 	orgID, err := uuid.Parse(c.Params("orgId"))
 	if err != nil || orgID != actor.OrgID {
-		return uuid.Nil, errors.NewDomainError("FORBIDDEN", "org mismatch")
+		return uuid.Nil, sharederr.NewDomainError("FORBIDDEN", "org mismatch")
 	}
 	return orgID, nil
 }
@@ -47,23 +47,23 @@ func (h *ContextHandler) UploadContext(c *fiber.Ctx) error {
 		contentType = ctxdomain.TypeFile
 		fileHeader, err := c.FormFile("file")
 		if err != nil {
-			return c.Status(400).JSON(fiber.Map{"error": "file field required"})
+			return httpapi.Error(c, sharederr.NewDomainError("BAD_REQUEST", "file field required"))
 		}
 		file, err := fileHeader.Open()
 		if err != nil {
-			return c.Status(400).JSON(fiber.Map{"error": "cannot read file"})
+			return httpapi.Error(c, sharederr.NewDomainError("BAD_REQUEST", "cannot read file"))
 		}
 		defer file.Close()
 		content, err = io.ReadAll(io.LimitReader(file, 128*1024))
 		if err != nil {
-			return c.Status(400).JSON(fiber.Map{"error": "cannot read file"})
+			return httpapi.Error(c, sharederr.NewDomainError("BAD_REQUEST", "cannot read file"))
 		}
 	default:
 		var req struct {
 			Content string `json:"content"`
 		}
 		if err := c.BodyParser(&req); err != nil {
-			return c.Status(400).JSON(fiber.Map{"error": "invalid body"})
+			return httpapi.Error(c, sharederr.NewDomainError("BAD_REQUEST", "invalid body"))
 		}
 		content = []byte(req.Content)
 	}
@@ -96,7 +96,7 @@ func (h *ContextHandler) SetPrompt(c *fiber.Ctx) error {
 		SystemPrompt string `json:"system_prompt"`
 	}
 	if err := c.BodyParser(&req); err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": "invalid body"})
+		return httpapi.Error(c, sharederr.NewDomainError("BAD_REQUEST", "invalid body"))
 	}
 	result, err := h.svc.SetPrompt(c.UserContext(), actor, ctxapp.SetPromptCommand{SystemPrompt: req.SystemPrompt})
 	if err != nil {

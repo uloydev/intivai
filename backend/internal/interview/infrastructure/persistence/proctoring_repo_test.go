@@ -71,7 +71,7 @@ func TestProctoringRepoRoundTrip(t *testing.T) {
 			Type:        ivdomain.EventTypePaste,
 			Timestamp:   now.Add(5 * time.Second),
 			QuestionIdx: 1,
-			Details:     map[string]interface{}{"char_count": float64(240)},
+			Details:     &ivdomain.TelemetryDetails{PastedTextLength: 240},
 		}
 		return repo.RecordProctoringEvent(tctx, iv.ID, ev2)
 	})

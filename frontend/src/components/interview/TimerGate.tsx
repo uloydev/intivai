@@ -9,6 +9,7 @@ export interface TimerGateProps {
   total: number
   archetype?: "conversational" | "system_design" | "coding"
   active: boolean
+  isProcessing?: boolean
   onExpire: () => void
 }
 
@@ -21,6 +22,7 @@ export function TimerGate({
   total,
   archetype = "conversational",
   active,
+  isProcessing = false,
   onExpire,
 }: TimerGateProps) {
   const [sessionClock, setSessionClock] = useState(sessionRemainingSec || 1800)
@@ -65,32 +67,32 @@ export function TimerGate({
 
   // Question Stage Countdown
   useEffect(() => {
-    if (!active) return
+    if (!active || isProcessing) return
 
     const interval = setInterval(() => {
       setQuestionClock((prev) => (prev > 0 ? prev - 1 : prev))
     }, 1000)
 
     return () => clearInterval(interval)
-  }, [active])
+  }, [active, isProcessing])
 
   // When the question clock hits 0, start the grace period (once per stage)
   useEffect(() => {
-    if (!active || questionClock > 0 || graceClock !== null) return
+    if (!active || isProcessing || questionClock > 0 || graceClock !== null) return
     setGraceClock(GRACE_PERIOD_SEC)
-  }, [active, questionClock, graceClock])
+  }, [active, questionClock, graceClock, isProcessing])
 
   // Grace countdown — separate ticker so the banner starts at a full 15s
   // instead of being decremented on the same tick that starts it.
   useEffect(() => {
-    if (!active || graceClock === null) return
+    if (!active || isProcessing || graceClock === null) return
 
     const interval = setInterval(() => {
       setGraceClock((prev) => (prev === null || prev <= 0 ? prev : prev - 1))
     }, 1000)
 
     return () => clearInterval(interval)
-  }, [active, graceClock])
+  }, [active, isProcessing, graceClock])
 
   // Clean trigger when grace period expires
   useEffect(() => {
@@ -150,7 +152,7 @@ export function TimerGate({
           </div>
           {total > 0 && (
             <span className="text-muted-foreground font-mono">
-              Stage {currentIdx} of {total}
+              Stage {Math.min(currentIdx, total)} of {total}
             </span>
           )}
         </div>

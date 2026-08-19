@@ -81,7 +81,7 @@ func TestScoreWorkerPipeline(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	worker := NewScoreWorker(pool, appRepo, cvrepo.NewPostgresCandidateRepo(pool), jobrepo.NewPostgresJobRepo(pool), stubOrgSettings{orgID: orgID}, testLogger())
+	worker := NewScoreWorker(pool, appRepo, cvrepo.NewPostgresCandidateRepo(pool), jobrepo.NewPostgresJobRepo(pool), stubOrgSettings{orgID: orgID}, nil, testLogger())
 	payload, _ := json.Marshal(ScoreCVPayload{OrgID: orgID, ApplicationID: app.ID.String()})
 	if err := worker.handle(ctx, asynq.NewTask(TaskScoreCV, payload)); err != nil {
 		t.Fatalf("score worker: %v", err)

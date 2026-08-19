@@ -45,7 +45,7 @@ export function DashboardPage() {
     queryKey: ["health"],
     queryFn: async () => {
       try {
-        const res = await fetch("/api/v1/ready")
+        const res = await fetch("/ready")
         return res.ok ? "healthy" : "degraded"
       } catch {
         return "offline"

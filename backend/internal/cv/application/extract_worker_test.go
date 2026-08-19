@@ -62,7 +62,7 @@ func TestExtractWorkerIdempotentRetry(t *testing.T) {
 	candID := uuid.New()
 
 	llmStub := &stubLLM{}
-	worker := NewExtractWorker(pool, cvrepo.NewPostgresCandidateRepo(pool), scrrepo.NewPostgresApplicationRepo(pool), jobrepo.NewPostgresJobRepo(pool), llmStub, queue.NewClient(redisAddr), zerolog.Nop())
+	worker := NewExtractWorker(pool, cvrepo.NewPostgresCandidateRepo(pool), scrrepo.NewPostgresApplicationRepo(pool), jobrepo.NewPostgresJobRepo(pool), llmStub, queue.NewClient(redisAddr), "http://localhost:5173", zerolog.Nop())
 
 	seedCandidate := func(status string) {
 		t.Helper()
@@ -122,7 +122,7 @@ func TestExtractWorkerIdempotentRetry(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cand.Status != cvdomain.StatusExtracted || len(cand.CVStructured) == 0 {
-		t.Fatalf("candidate state after retry: %s structured=%d", cand.Status, len(cand.CVStructured))
+	if cand.Status != cvdomain.StatusPendingReview || len(cand.CVStructured) == 0 {
+		t.Fatalf("candidate state: %s structured=%d", cand.Status, len(cand.CVStructured))
 	}
 }

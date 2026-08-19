@@ -22,12 +22,13 @@ import (
 	"sync"
 	"time"
 
+	"net"
+	"net/url"
+
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 	"github.com/intivai/backend/pkg/db"
 	"gorm.io/gorm"
-	"net"
-	"net/url"
 )
 
 type connResult struct {

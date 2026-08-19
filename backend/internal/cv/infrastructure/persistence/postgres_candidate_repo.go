@@ -7,9 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	cvdomain "github.com/intivai/backend/internal/cv/domain"
-	sharederr "github.com/intivai/backend/internal/shared/errors"
 	"github.com/intivai/backend/pkg/db"
-	"github.com/jackc/pgx/v5/pgconn"
 	"gorm.io/gorm"
 )
 
@@ -35,14 +33,10 @@ func (r *PostgresCandidateRepo) Create(ctx context.Context, c *cvdomain.Candidat
 		return err
 	}
 	err = q.WithContext(ctx).Exec(
-		`INSERT INTO candidates (id, org_id, name, email, cv_path, status, created_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-		c.ID, c.OrgID, c.Name, c.Email, c.CVPath, c.Status, c.CreatedAt).Error
-	var pgErr *pgconn.PgError
-	if errors.As(err, &pgErr) && pgErr.Code == "23503" {
-		return sharederr.NewDomainError("NOT_FOUND", "organization not found")
-	}
-	return err
+		`INSERT INTO candidates (id, org_id, name, email, cv_path, status, batch_id, review_token, created_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+		c.ID, c.OrgID, c.Name, c.Email, c.CVPath, c.Status, c.BatchID, c.ReviewToken, c.CreatedAt).Error
+	return db.WrapError(err)
 }
 
 func (r *PostgresCandidateRepo) GetByID(ctx context.Context, id uuid.UUID) (*cvdomain.Candidate, error) {
@@ -51,8 +45,19 @@ func (r *PostgresCandidateRepo) GetByID(ctx context.Context, id uuid.UUID) (*cvd
 		return nil, err
 	}
 	row := q.Raw(
-		`SELECT id, org_id, name, email, cv_path, cv_raw_text, cv_structured, cv_ocr_method, status, error_message, created_at
+		`SELECT id, org_id, name, email, cv_path, cv_raw_text, cv_structured, cv_ocr_method, status, error_message, batch_id, review_token, created_at
 		 FROM candidates WHERE id = $1`, id).Row()
+	return scanCandidate(row)
+}
+
+func (r *PostgresCandidateRepo) GetByReviewToken(ctx context.Context, token string) (*cvdomain.Candidate, error) {
+	q, err := r.q(ctx)
+	if err != nil {
+		return nil, err
+	}
+	row := q.Raw(
+		`SELECT id, org_id, name, email, cv_path, cv_raw_text, cv_structured, cv_ocr_method, status, error_message, batch_id, review_token, created_at
+		 FROM candidates WHERE review_token = $1`, token).Row()
 	return scanCandidate(row)
 }
 
@@ -62,7 +67,7 @@ func (r *PostgresCandidateRepo) List(ctx context.Context, orgID uuid.UUID) ([]*c
 		return nil, err
 	}
 	rows, err := q.Raw(
-		`SELECT id, org_id, name, email, cv_path, cv_raw_text, cv_structured, cv_ocr_method, status, error_message, created_at
+		`SELECT id, org_id, name, email, cv_path, cv_raw_text, cv_structured, cv_ocr_method, status, error_message, batch_id, review_token, created_at
 		 FROM candidates WHERE org_id = $1 ORDER BY created_at DESC`, orgID).Rows()
 	if err != nil {
 		return nil, err
@@ -84,11 +89,12 @@ func (r *PostgresCandidateRepo) Update(ctx context.Context, c *cvdomain.Candidat
 	if err != nil {
 		return err
 	}
-	return q.WithContext(ctx).Exec(
+	err = q.WithContext(ctx).Exec(
 		`UPDATE candidates SET name = $1, email = $2, cv_path = $3, cv_raw_text = $4,
-		 cv_structured = $5, cv_ocr_method = $6, status = $7, error_message = $8, updated_at = NOW()
-		 WHERE id = $9`,
-		c.Name, c.Email, c.CVPath, c.CVRawText, c.CVStructured, c.CVOCRMethod, c.Status, c.ErrorMessage, c.ID).Error
+		 cv_structured = $5, cv_ocr_method = $6, status = $7, error_message = $8, batch_id = $9, review_token = $10, updated_at = NOW()
+		 WHERE id = $11`,
+		c.Name, c.Email, c.CVPath, c.CVRawText, c.CVStructured, c.CVOCRMethod, c.Status, c.ErrorMessage, c.BatchID, c.ReviewToken, c.ID).Error
+	return db.WrapError(err)
 }
 
 func (r *PostgresCandidateRepo) Delete(ctx context.Context, id uuid.UUID) error {
@@ -96,7 +102,8 @@ func (r *PostgresCandidateRepo) Delete(ctx context.Context, id uuid.UUID) error 
 	if err != nil {
 		return err
 	}
-	return q.WithContext(ctx).Exec(`DELETE FROM candidates WHERE id = $1`, id).Error
+	err = q.WithContext(ctx).Exec(`DELETE FROM candidates WHERE id = $1`, id).Error
+	return db.WrapError(err)
 }
 
 type rowScanner interface {
@@ -112,7 +119,7 @@ func scanCandidate(row rowScanner) (*cvdomain.Candidate, error) {
 		errMsg     *string
 		ocrMethod  *string
 	)
-	err := row.Scan(&c.ID, &c.OrgID, &c.Name, &c.Email, &path, &raw, &structured, &ocrMethod, &c.Status, &errMsg, &c.CreatedAt)
+	err := row.Scan(&c.ID, &c.OrgID, &c.Name, &c.Email, &path, &raw, &structured, &ocrMethod, &c.Status, &errMsg, &c.BatchID, &c.ReviewToken, &c.CreatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, cvdomain.ErrNotFound
 	}

@@ -58,13 +58,15 @@ func (w *ParseWorker) handle(ctx context.Context, t *asynq.Task) error {
 
 	text, err := extractPDFText(data)
 	if err != nil {
-		return w.mark(ctx, p, cvdomain.StatusFailedOCR, err)
+		_ = w.mark(ctx, p, cvdomain.StatusFailedOCR, err)
+		return asynq.SkipRetry
 	}
 	method := "pdfcpu"
 	if len(strings.TrimSpace(text)) < 50 {
 		ocrText, oerr := ocr.Extract(data)
 		if oerr != nil {
-			return w.mark(ctx, p, cvdomain.StatusFailedOCR, oerr)
+			_ = w.mark(ctx, p, cvdomain.StatusFailedOCR, oerr)
+			return oerr
 		}
 		text = ocrText
 		method = "tesseract"
@@ -87,7 +89,7 @@ func (w *ParseWorker) handle(ctx context.Context, t *asynq.Task) error {
 	return nil
 }
 func (w *ParseWorker) queueExtract(ctx context.Context, p ParseCVPayload) {
-	if _, err := w.queue.Enqueue(ctx, TaskExtractCV, p); err != nil {
+	if _, err := w.queue.Enqueue(ctx, TaskExtractCV, p, asynq.MaxRetry(5)); err != nil {
 		w.log.Error().Err(err).Str("candidate_id", p.CandidateID).Msg("enqueue extract_cv failed")
 	}
 }

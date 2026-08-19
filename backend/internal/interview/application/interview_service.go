@@ -26,10 +26,11 @@ import (
 
 const ticketTTL = 10 * time.Minute
 
-// TaskEnqueuer — async evaluation retry seam (main wires the asynq client;
+// TaskEnqueuer — async evaluation and notification seam (main wires the asynq client;
 // tests pass nil).
 type TaskEnqueuer interface {
 	EnqueueEvaluation(ctx context.Context, orgID, interviewID string) error
+	EnqueueInterviewInvitation(ctx context.Context, to, name, jobTitle, interviewID, inviteToken string) error
 }
 
 // InterviewService — create interviews (recruiter), issue WS tickets
@@ -77,6 +78,7 @@ func (s *InterviewService) CreateInterview(ctx context.Context, actor applicatio
 		return nil, err
 	}
 	var result *CreateInterviewResult
+	var candEmail, candName, jobTitle string
 	err := db.RunInTx(ctx, s.pool, actor.OrgID.String(), func(tctx context.Context) error {
 		app, err := s.appRepo.GetByID(tctx, cmd.ApplicationID)
 		if err == scrdomain.ErrNotFound {
@@ -103,6 +105,10 @@ func (s *InterviewService) CreateInterview(ctx context.Context, actor applicatio
 		if job.Status != jobdomain.StatusActive {
 			return errors.NewDomainError("JOB_NOT_ACTIVE", "job is not active")
 		}
+
+		candEmail = candidate.Email
+		candName = candidate.Name
+		jobTitle = job.Title
 
 		questions := s.generateQuestions(candidate, job, cmd.QuestionCount)
 		domainQuestions := make([]ivdomain.Question, 0, len(questions))
@@ -141,7 +147,13 @@ func (s *InterviewService) CreateInterview(ctx context.Context, actor applicatio
 		result = &CreateInterviewResult{InterviewID: iv.ID, Token: invite.Token, ExpiresAt: invite.ExpiresAt, ContextVersion: iv.ContextVersion}
 		return nil
 	})
-	return result, err
+	if err != nil {
+		return nil, err
+	}
+	if s.enqueuer != nil && candEmail != "" && result != nil {
+		_ = s.enqueuer.EnqueueInterviewInvitation(ctx, candEmail, candName, jobTitle, result.InterviewID.String(), result.Token)
+	}
+	return result, nil
 }
 
 type IssueTicketCommand struct {
@@ -285,13 +297,13 @@ func (s *InterviewService) AnswerAndAdvanceWithPacing(ctx context.Context, orgID
 		}
 		next = iv.NextQuestion()
 		// Weakness probe: follow up on the CURRENT topic (the question just
-		// answered) when the answer was shallow.
-		if answered != nil && gensvc.ShouldProbe(gensvc.ProbeInput{Answer: content}) {
+		// answered) when the answer was shallow, ensuring we finish exploring the topic before advancing.
+		if answered != nil && !answered.IsProbe && !isProbeQuestion(answered.Content, answered.Category) && gensvc.ShouldProbe(gensvc.ProbeInput{Answer: content}) {
 			probe := gensvc.ProbeQuestion(answered.Category, answered.Skill)
 			if p, err := iv.InsertProbeAfter(answered.Idx, probe.Prompt, probe.Category, probe.Skill); err == nil {
 				// NOTE: iv.OrgID is NOT hydrated by GetByID (interviews have no
 				// org_id column; RLS resolves via applications) — use the arg.
-				if err := s.bank.Create(tctx, uuid.MustParse(orgID), ivdomain.Question{Idx: p.Idx, Content: p.Content, Category: p.Category, Skill: p.Skill}); err == nil {
+				if err := s.bank.Create(tctx, uuid.MustParse(orgID), ivdomain.Question{Idx: p.Idx, Content: p.Content, Category: p.Category, Skill: p.Skill, IsProbe: true}); err == nil {
 					next = p
 				}
 			}
@@ -302,6 +314,11 @@ func (s *InterviewService) AnswerAndAdvanceWithPacing(ctx context.Context, orgID
 		return s.ivRepo.Update(tctx, iv)
 	})
 	return next, err
+}
+
+func isProbeQuestion(content, category string) bool {
+	lower := strings.ToLower(content)
+	return category == "probe" || strings.Contains(lower, "your answer was brief") || strings.Contains(lower, "could you elaborate")
 }
 
 // SessionRemaining calculates remaining seconds before the 30-minute global budget expires.

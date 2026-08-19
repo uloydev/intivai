@@ -8,18 +8,10 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestDefaultProctoringSummary(t *testing.T) {
-	summary := domain.DefaultProctoringSummary()
-	assert.Equal(t, 100, summary.IntegrityScore)
-	assert.Equal(t, domain.RiskLow, summary.RiskLevel)
-	assert.Equal(t, 0, summary.TabSwitchCount)
-	assert.Empty(t, summary.Flags)
-}
-
 func TestCalculateProctoringSummary_CleanSession(t *testing.T) {
 	summary := domain.CalculateProctoringSummary([]domain.ProctoringEvent{})
-	assert.Equal(t, 100, summary.IntegrityScore)
-	assert.Equal(t, domain.RiskLow, summary.RiskLevel)
+	assert.Equal(t, 0, summary.IntegrityScore)
+	assert.Empty(t, string(summary.RiskLevel))
 	assert.Empty(t, summary.Flags)
 }
 
@@ -59,13 +51,13 @@ func TestCalculateProctoringSummary_SuspiciousPastesAndAudio(t *testing.T) {
 			Type:        domain.EventTypePaste,
 			Timestamp:   now,
 			QuestionIdx: 1,
-			Details:     map[string]interface{}{"char_count": 350},
+			Details:     &domain.TelemetryDetails{PastedTextLength: 350},
 		},
 		{
 			Type:        domain.EventTypeAudioAnomaly,
 			Timestamp:   now.Add(30 * time.Second),
 			QuestionIdx: 2,
-			Details:     map[string]interface{}{"anomaly": "multiple_speakers"},
+			Details:     &domain.TelemetryDetails{AudioStatus: "multiple_speakers"},
 		},
 		{
 			Type:        domain.EventTypeTabSwitch,

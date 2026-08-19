@@ -34,8 +34,8 @@ func (r *PostgresApplicationRepo) Create(ctx context.Context, app *scrdomain.App
 		return err
 	}
 	err = q.WithContext(ctx).Exec(
-		`INSERT INTO applications (id, org_id, candidate_id, job_id, status, created_at)
-		 VALUES ($1, $2, $3, $4, $5, $6)`,
+		`INSERT INTO applications (id, org_id, candidate_id, job_id, status, stage, created_at)
+		 VALUES ($1, $2, $3, $4, $5, 'applied', $6)`,
 		app.ID, app.OrgID, app.CandidateID, app.JobID, app.Status, app.CreatedAt).Error
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == "23505" {

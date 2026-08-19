@@ -21,6 +21,8 @@ func Error(c *fiber.Ctx, err error) error {
 			status = http.StatusUnauthorized
 		case "FORBIDDEN":
 			status = http.StatusForbidden
+		case "TOO_MANY_REQUESTS":
+			status = http.StatusTooManyRequests
 		}
 		return c.Status(status).JSON(fiber.Map{"error": de.Message, "code": de.Code})
 	}

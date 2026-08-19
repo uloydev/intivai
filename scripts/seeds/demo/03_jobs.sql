@@ -6,7 +6,8 @@ INSERT INTO jobs (
     id, org_id, title, description, location, employment_type,
     salary_min, salary_max, currency, required_skills, min_experience,
     responsibilities, requirements, nice_to_haves, benefits,
-    scoring_weights, min_score_to_proceed, status, created_at, updated_at
+    scoring_weights, min_score_to_proceed, status, created_at, updated_at,
+    proctoring_mode, is_published
 )
 VALUES (
     'c3d4e5f6-a1b2-4c3d-8e4f-5a6b7c8d9e0f',
@@ -28,19 +29,24 @@ VALUES (
     60.0,
     'active',
     NOW() - INTERVAL '15 days',
-    NOW() - INTERVAL '15 days'
+    NOW() - INTERVAL '15 days',
+    'optional',
+    true
 )
 ON CONFLICT (id) DO UPDATE SET
     title = EXCLUDED.title,
     description = EXCLUDED.description,
-    status = EXCLUDED.status;
+    status = EXCLUDED.status,
+    proctoring_mode = EXCLUDED.proctoring_mode,
+    is_published = EXCLUDED.is_published;
 
 -- Job 2: Staff Frontend Architect
 INSERT INTO jobs (
     id, org_id, title, description, location, employment_type,
     salary_min, salary_max, currency, required_skills, min_experience,
     responsibilities, requirements, nice_to_haves, benefits,
-    scoring_weights, min_score_to_proceed, status, created_at, updated_at
+    scoring_weights, min_score_to_proceed, status, created_at, updated_at,
+    proctoring_mode, is_published
 )
 VALUES (
     'd4e5f6a1-b2c3-4d4e-8f5a-6b7c8d9e0f1a',
@@ -62,19 +68,24 @@ VALUES (
     65.0,
     'active',
     NOW() - INTERVAL '12 days',
-    NOW() - INTERVAL '12 days'
+    NOW() - INTERVAL '12 days',
+    'strict',
+    true
 )
 ON CONFLICT (id) DO UPDATE SET
     title = EXCLUDED.title,
     description = EXCLUDED.description,
-    status = EXCLUDED.status;
+    status = EXCLUDED.status,
+    proctoring_mode = EXCLUDED.proctoring_mode,
+    is_published = EXCLUDED.is_published;
 
 -- Job 3: Principal AI & ML Systems Engineer
 INSERT INTO jobs (
     id, org_id, title, description, location, employment_type,
     salary_min, salary_max, currency, required_skills, min_experience,
     responsibilities, requirements, nice_to_haves, benefits,
-    scoring_weights, min_score_to_proceed, status, created_at, updated_at
+    scoring_weights, min_score_to_proceed, status, created_at, updated_at,
+    proctoring_mode, is_published
 )
 VALUES (
     'e5f6a1b2-c3d4-4e5f-8a6b-7c8d9e0f1a2b',
@@ -96,9 +107,13 @@ VALUES (
     70.0,
     'active',
     NOW() - INTERVAL '10 days',
-    NOW() - INTERVAL '10 days'
+    NOW() - INTERVAL '10 days',
+    'none',
+    false
 )
 ON CONFLICT (id) DO UPDATE SET
     title = EXCLUDED.title,
     description = EXCLUDED.description,
-    status = EXCLUDED.status;
+    status = EXCLUDED.status,
+    proctoring_mode = EXCLUDED.proctoring_mode,
+    is_published = EXCLUDED.is_published;

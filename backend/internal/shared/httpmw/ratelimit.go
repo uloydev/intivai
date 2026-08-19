@@ -4,9 +4,12 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
+	sharederr "github.com/intivai/backend/internal/shared/errors"
+	"github.com/intivai/backend/internal/shared/httpapi"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -35,13 +38,16 @@ func RateLimit(rdb *redis.Client, limit int, window time.Duration, keyFn func(c 
 		countCmd := pipe.ZCard(ctx, redisKey)
 		pipe.Expire(ctx, redisKey, window*2)
 		if _, err := pipe.Exec(ctx); err != nil {
-			return c.Next() // fail open on Redis errors; auth/audit still protected
+			if strings.Contains(c.Path(), "/auth/") {
+				return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{"error": "rate limiter unavailable"})
+			}
+			return c.Next() // fail open on Redis errors for non-critical endpoints
 		}
 
 		if countCmd.Val() > int64(limit) {
 			retry := int64(window.Seconds()) - int64(now-float64(int64(now)))
 			c.Set("Retry-After", strconv.FormatInt(retry, 10))
-			return c.Status(429).JSON(fiber.Map{"error": "rate limit exceeded"})
+			return httpapi.Error(c, sharederr.NewDomainError("TOO_MANY_REQUESTS", "rate limit exceeded"))
 		}
 		return c.Next()
 	}

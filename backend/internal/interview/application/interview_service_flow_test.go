@@ -161,16 +161,26 @@ func TestAnswerAndAdvanceFlow(t *testing.T) {
 	if err := s.svc.StartInterview(ctx, s.orgID.String(), s.ivID); err != nil {
 		t.Fatal(err)
 	}
+	// Q1 (Topic 1): shallow answer triggers a probe for Topic 1.
 	next, err := s.svc.AnswerAndAdvance(ctx, s.orgID.String(), s.ivID, "answer one")
 	if err != nil || next == nil {
 		t.Fatalf("advance: %v", err)
 	}
-	// Shallow answers trigger probes — the question list grows dynamically.
 	if !strings.Contains(next.Content, "elaborate") {
 		t.Fatalf("expected probe after shallow answer, got %q", next.Content)
 	}
-	if _, err := s.svc.AnswerAndAdvance(ctx, s.orgID.String(), s.ivID, "answer two"); err != nil {
-		t.Fatal(err)
+	// Answer probe on Topic 1 -> Topic 1 finishes, moves to Topic 2.
+	next, err = s.svc.AnswerAndAdvance(ctx, s.orgID.String(), s.ivID, "answer two")
+	if err != nil || next == nil {
+		t.Fatalf("advance after probe: %v", err)
+	}
+	if _, total, status, err := s.svc.CurrentState(ctx, s.orgID.String(), s.ivID); err != nil || total != 4 || status == "" {
+		t.Fatalf("state: %v total=%d (want 4: 3 planned + 1 probe for topic 1)", err, total)
+	}
+	// Q2 (Topic 2): shallow answer triggers a probe for Topic 2.
+	next, err = s.svc.AnswerAndAdvance(ctx, s.orgID.String(), s.ivID, "answer three")
+	if err != nil || next == nil {
+		t.Fatalf("advance: %v", err)
 	}
 	if _, total, status, err := s.svc.CurrentState(ctx, s.orgID.String(), s.ivID); err != nil || total != 5 || status == "" {
 		t.Fatalf("state: %v total=%d (want 5: 3 planned + 2 probes)", err, total)

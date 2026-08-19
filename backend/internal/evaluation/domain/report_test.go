@@ -29,7 +29,7 @@ func TestEvaluateSingleAnswer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := 80 * 0.4 // technical weight
+	want := 80.0 // neutral-fill means the overall score equals the single dimension's score
 	if math.Abs(r.OverallScore-want) > 1e-9 {
 		t.Fatalf("overall = %f, want %f", r.OverallScore, want)
 	}
@@ -60,8 +60,8 @@ func TestEvaluateLongInterview(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if math.Abs(r.OverallScore-30) > 1e-9 { // 75 × 0.4
-		t.Fatalf("overall = %f, want 30", r.OverallScore)
+	if math.Abs(r.OverallScore-75) > 1e-9 { // 75 neutral-filled
+		t.Fatalf("overall = %f, want 75", r.OverallScore)
 	}
 }
 

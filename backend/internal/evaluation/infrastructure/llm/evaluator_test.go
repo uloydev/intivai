@@ -48,7 +48,7 @@ func TestEvaluatePreservesLLMFieldsAndRecomputesOverall(t *testing.T) {
 		{"question_idx": 2, "category": "communication", "score": 60.0, "rationale": "brief", "strengths": []any{}, "weaknesses": []any{"short"}},
 	})})
 
-	r, err := e.Evaluate(context.Background(), pairs(2))
+	r, err := e.Evaluate(context.Background(), "org1", pairs(2))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -56,8 +56,8 @@ func TestEvaluatePreservesLLMFieldsAndRecomputesOverall(t *testing.T) {
 	if r.Recommendation != "proceed" || len(r.Strengths) != 1 || r.Strengths[0] != "Go" || len(r.Weaknesses) != 1 {
 		t.Fatalf("LLM fields lost: %+v", r)
 	}
-	// Domain owns the math: 80×0.4 + 60×0.2 (weights sum 1).
-	if r.OverallScore != 80*0.4+60*0.2 {
+	// Domain owns the math: neutral-fill makes (32 + 12) / 0.6 = 73.33
+	if r.OverallScore != 73.33 {
 		t.Fatalf("overall = %f", r.OverallScore)
 	}
 	if r.Dimensions["technical"].Score != 80 {
@@ -71,7 +71,7 @@ func TestEvaluateClampsOutOfRangeScores(t *testing.T) {
 		{"question_idx": 2, "category": "communication", "score": -10.0, "rationale": "r", "strengths": []any{}, "weaknesses": []any{}},
 	})})
 
-	r, err := e.Evaluate(context.Background(), pairs(2))
+	r, err := e.Evaluate(context.Background(), "org1", pairs(2))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,14 +85,14 @@ func TestEvaluateClampsOutOfRangeScores(t *testing.T) {
 
 func TestEvaluateLLMFailure(t *testing.T) {
 	e := NewEvaluator(&mockEvalLLM{err: errors.New("llm down")})
-	if _, err := e.Evaluate(context.Background(), nil); err == nil {
+	if _, err := e.Evaluate(context.Background(), "org1", nil); err == nil {
 		t.Fatal("llm failure accepted")
 	}
 }
 
 func TestEvaluateEmptyScoresRejected(t *testing.T) {
 	e := NewEvaluator(&mockEvalLLM{out: evalOut([]map[string]any{})})
-	if _, err := e.Evaluate(context.Background(), pairs(1)); err == nil {
+	if _, err := e.Evaluate(context.Background(), "org1", pairs(1)); err == nil {
 		t.Fatal("empty per-question accepted")
 	}
 }
@@ -105,10 +105,10 @@ func TestEvaluateWindowsLongTranscripts(t *testing.T) {
 	})}
 	e := NewEvaluator(m)
 
-	if _, err := e.Evaluate(context.Background(), pairs(2*EvalWindow)); err != nil {
+	if _, err := e.Evaluate(context.Background(), "org1", pairs(2*EvalWindow)); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(m.req.User, "last 30 Q&A") {
+	if !strings.Contains(m.req.User, "last 100 Q&A") {
 		t.Fatalf("prompt not windowed: %.120s", m.req.User)
 	}
 	var sent []ivdomain.TranscriptPair
@@ -130,7 +130,7 @@ func TestEvaluateRejectsInconsistentIndices(t *testing.T) {
 		{"question_idx": 1, "category": "communication", "score": 60.0, "rationale": "r", "strengths": []any{}, "weaknesses": []any{}},
 	}
 	e := NewEvaluator(&mockEvalLLM{out: evalOut(dups)})
-	if _, err := e.Evaluate(context.Background(), pairs(2)); err == nil {
+	if _, err := e.Evaluate(context.Background(), "org1", pairs(2)); err == nil {
 		t.Fatal("duplicate question_idx accepted")
 	}
 
@@ -138,7 +138,7 @@ func TestEvaluateRejectsInconsistentIndices(t *testing.T) {
 		{"question_idx": 99, "category": "technical", "score": 80.0, "rationale": "r", "strengths": []any{}, "weaknesses": []any{}},
 	}
 	e2 := NewEvaluator(&mockEvalLLM{out: evalOut(outOfRange)})
-	if _, err := e2.Evaluate(context.Background(), pairs(2)); err == nil {
+	if _, err := e2.Evaluate(context.Background(), "org1", pairs(2)); err == nil {
 		t.Fatal("out-of-range question_idx accepted")
 	}
 }

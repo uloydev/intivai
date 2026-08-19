@@ -236,7 +236,19 @@ func TestChatInterruptStopsStream(t *testing.T) {
 // the first connection stays functional.
 func TestChatSecondConnectionRejected(t *testing.T) {
 	_, svc, orgID, appID := seedChatOrg(t)
-	ivID, ticket := createInterviewAndTicket(t, svc, orgID, appID)
+	created, err := svc.CreateInterview(context.Background(), actorWith(uuid.MustParse(orgID), "admin"), ivapp.CreateInterviewCommand{ApplicationID: uuid.MustParse(appID), QuestionCount: 3})
+	if err != nil {
+		t.Fatalf("create interview: %v", err)
+	}
+	if err := svc.GiveConsent(context.Background(), created.InterviewID, created.Token); err != nil {
+		t.Fatalf("consent: %v", err)
+	}
+	tk, err := svc.IssueTicket(context.Background(), ivapp.IssueTicketCommand{InterviewID: created.InterviewID, InvitationToken: created.Token})
+	if err != nil {
+		t.Fatalf("issue ticket: %v", err)
+	}
+	ivID := created.InterviewID.String()
+	ticket := tk.Ticket
 
 	app := chatApp(svc, slowStreamLLM{}, nil)
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
@@ -258,7 +270,13 @@ func TestChatSecondConnectionRejected(t *testing.T) {
 		t.Fatal("no question")
 	}
 
-	second, code := dialChatWS(t, ln.Addr().String(), ivID, ticket, "")
+	// A second connection with a DIFFERENT ticket (different session_id) MUST be rejected.
+	ticket2, err := svc.IssueTicket(context.Background(), ivapp.IssueTicketCommand{InterviewID: created.InterviewID, InvitationToken: created.Token})
+	if err != nil {
+		t.Fatalf("issue second ticket: %v", err)
+	}
+
+	second, code := dialChatWS(t, ln.Addr().String(), ivID, ticket2.Ticket, "")
 	if second == nil {
 		t.Fatalf("second dial failed: %d", code)
 	}

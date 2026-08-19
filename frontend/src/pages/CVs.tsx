@@ -11,6 +11,7 @@ import {
   Sparkle,
   Briefcase,
   Trash,
+  Files,
 } from "@phosphor-icons/react"
 import { api } from "@/lib/api"
 import type { CVListItem, Job } from "@/types/api"
@@ -75,6 +76,10 @@ export function CVsPage() {
   const [uploading, setUploading] = useState(false)
   const [search, setSearch] = useState("")
 
+  const [uploadMode, setUploadMode] = useState<"single" | "bulk">("single")
+  const [bulkFiles, setBulkFiles] = useState<File[]>([])
+  const bulkFileRef = useRef<HTMLInputElement>(null)
+
   // Screen candidate dialog state
   const [screenCandidate, setScreenCandidate] = useState<CVListItem | null>(null)
   const [selectedJobId, setSelectedJobId] = useState<string>("")
@@ -101,6 +106,29 @@ export function CVsPage() {
     onError: (e) => {
       setUploading(false)
       toast.error(e instanceof Error ? e.message : "Upload failed")
+    },
+  })
+
+  const bulkUpload = useMutation({
+    mutationFn: async () => {
+      if (!bulkFiles.length && !bulkFileRef.current?.files?.length) {
+        throw new Error("Pick at least one PDF first")
+      }
+      const filesToUpload = bulkFiles.length ? bulkFiles : Array.from(bulkFileRef.current?.files || [])
+      const form = new FormData()
+      filesToUpload.forEach((f) => form.append("files", f))
+      return api.postForm<{ batch_id: string }>("/cvs/bulk", form)
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["cvs"] })
+      setUploading(false)
+      setBulkFiles([])
+      if (bulkFileRef.current) bulkFileRef.current.value = ""
+      toast.success("Bulk CVs uploaded — processing pipeline started")
+    },
+    onError: (e) => {
+      setUploading(false)
+      toast.error(e instanceof Error ? e.message : "Bulk upload failed")
     },
   })
 
@@ -140,12 +168,13 @@ export function CVsPage() {
     onError: (e) => toast.error(e instanceof Error ? e.message : "Screening failed"),
   })
 
-  const filteredCVs = (cvs ?? []).filter(
-    (c) =>
-      c.name.toLowerCase().includes(search.toLowerCase()) ||
-      c.email.toLowerCase().includes(search.toLowerCase()) ||
-      c.status.toLowerCase().includes(search.toLowerCase())
-  )
+  const filteredCVs = (cvs ?? []).filter((c) => {
+    const name = (c.name || "").toLowerCase()
+    const email = (c.email || "").toLowerCase()
+    const status = (c.status || "").toLowerCase()
+    const q = (search || "").toLowerCase()
+    return name.includes(q) || email.includes(q) || status.includes(q)
+  })
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
@@ -160,65 +189,117 @@ export function CVsPage() {
 
       {/* Upload Card */}
       <Card className="glass border-primary/20 bg-gradient-to-b from-card via-card to-primary/5 shadow-md">
-        <CardHeader>
-          <CardTitle className="font-display text-lg flex items-center gap-2">
-            <CloudArrowUp className="h-5 w-5 text-primary" weight="bold" /> Upload Candidate Resume
-          </CardTitle>
-          <CardDescription>
-            PDF documents will be automatically parsed via poppler/tesseract and vectorized.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="grid gap-4 md:grid-cols-12">
-            <div className="space-y-1.5 md:col-span-3">
-              <Label htmlFor="cv-name" className="text-xs font-semibold">Candidate Full Name</Label>
-              <Input
-                id="cv-name"
-                placeholder="e.g. Alex Morgan"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                className="bg-background/80"
-              />
+        <CardHeader className="pb-3 border-b border-border/50 mb-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle className="font-display text-lg flex items-center gap-2">
+                <CloudArrowUp className="h-5 w-5 text-primary" weight="bold" /> Upload Candidate Resume(s)
+              </CardTitle>
+              <CardDescription>
+                PDF documents will be automatically parsed via poppler/tesseract and vectorized.
+              </CardDescription>
             </div>
-            <div className="space-y-1.5 md:col-span-3">
-              <Label htmlFor="cv-email" className="text-xs font-semibold">Candidate Email</Label>
-              <Input
-                id="cv-email"
-                type="email"
-                placeholder="alex@example.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="bg-background/80"
-              />
-            </div>
-            <div className="space-y-1.5 md:col-span-4">
-              <Label htmlFor="cv-file" className="text-xs font-semibold">Resume File (PDF)</Label>
-              <div className="flex items-center gap-2">
-                <Input
-                  id="cv-file"
-                  ref={fileRef}
-                  type="file"
-                  accept="application/pdf"
-                  onChange={(e) => setSelectedFile(e.target.files?.[0] || null)}
-                  className="bg-background/80 file:mr-2 file:rounded-md file:border-0 file:bg-primary/10 file:px-2 file:py-1 file:text-xs file:font-semibold file:text-primary"
-                />
-              </div>
-            </div>
-            <div className="flex items-end md:col-span-2">
-              <Button
-                className="w-full shadow-sm"
-                variant="gradient"
-                onClick={() => {
-                  setUploading(true)
-                  upload.mutate()
-                }}
-                disabled={uploading || !name.trim() || !email.trim() || (!selectedFile && !fileRef.current?.files?.[0])}
+            <div className="flex bg-muted p-1 rounded-lg">
+              <button
+                className={`px-3 py-1 text-xs font-semibold rounded-md transition-colors ${uploadMode === "single" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"}`}
+                onClick={() => setUploadMode("single")}
               >
-                <CloudArrowUp className="mr-1.5 h-4 w-4" weight="bold" />
-                {uploading ? "Ingesting…" : "Ingest CV"}
-              </Button>
+                Single Candidate
+              </button>
+              <button
+                className={`px-3 py-1 text-xs font-semibold rounded-md transition-colors ${uploadMode === "bulk" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"}`}
+                onClick={() => setUploadMode("bulk")}
+              >
+                Bulk Upload
+              </button>
             </div>
           </div>
+        </CardHeader>
+        <CardContent>
+          {uploadMode === "single" ? (
+            <div className="grid gap-4 md:grid-cols-12 animate-in fade-in zoom-in-95">
+              <div className="space-y-1.5 md:col-span-3">
+                <Label htmlFor="cv-name" className="text-xs font-semibold">Candidate Full Name</Label>
+                <Input
+                  id="cv-name"
+                  placeholder="e.g. Alex Morgan"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  className="bg-background/80"
+                />
+              </div>
+              <div className="space-y-1.5 md:col-span-3">
+                <Label htmlFor="cv-email" className="text-xs font-semibold">Candidate Email</Label>
+                <Input
+                  id="cv-email"
+                  type="email"
+                  placeholder="alex@example.com"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="bg-background/80"
+                />
+              </div>
+              <div className="space-y-1.5 md:col-span-4">
+                <Label htmlFor="cv-file" className="text-xs font-semibold">Resume File (PDF)</Label>
+                <div className="flex items-center gap-2">
+                  <Input
+                    id="cv-file"
+                    ref={fileRef}
+                    type="file"
+                    accept="application/pdf"
+                    onChange={(e) => setSelectedFile(e.target.files?.[0] || null)}
+                    className="bg-background/80 file:mr-2 file:rounded-md file:border-0 file:bg-primary/10 file:px-2 file:py-1 file:text-xs file:font-semibold file:text-primary"
+                  />
+                </div>
+              </div>
+              <div className="flex items-end md:col-span-2">
+                <Button
+                  className="w-full shadow-sm"
+                  variant="gradient"
+                  onClick={() => {
+                    setUploading(true)
+                    upload.mutate()
+                  }}
+                  disabled={uploading || !name.trim() || !email.trim() || (!selectedFile && !fileRef.current?.files?.[0])}
+                >
+                  <CloudArrowUp className="mr-1.5 h-4 w-4" weight="bold" />
+                  {uploading ? "Ingesting…" : "Ingest CV"}
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <div className="flex flex-col gap-4 animate-in fade-in zoom-in-95">
+              <div className="space-y-1.5 w-full">
+                <Label htmlFor="cv-bulk" className="text-xs font-semibold">Select Multiple PDFs</Label>
+                <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
+                  <Input
+                    id="cv-bulk"
+                    ref={bulkFileRef}
+                    type="file"
+                    accept="application/pdf"
+                    multiple
+                    onChange={(e) => setBulkFiles(Array.from(e.target.files || []))}
+                    className="bg-background/80 flex-1 file:mr-2 file:rounded-md file:border-0 file:bg-primary/10 file:px-2 file:py-1 file:text-xs file:font-semibold file:text-primary"
+                  />
+                  <Button
+                    className="shadow-sm shrink-0"
+                    variant="gradient"
+                    onClick={() => {
+                      setUploading(true)
+                      bulkUpload.mutate()
+                    }}
+                    disabled={uploading || (!bulkFiles.length && !bulkFileRef.current?.files?.length)}
+                  >
+                    <Files className="mr-1.5 h-4 w-4" weight="bold" />
+                    {uploading ? "Ingesting Batch…" : `Ingest ${bulkFiles.length || bulkFileRef.current?.files?.length || 0} CVs`}
+                  </Button>
+                </div>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                <strong className="text-foreground">Note:</strong> Bulk uploaded CVs will use the PDF filename as the candidate name. HR or Candidates can review and correct the profile later.
+              </p>
+            </div>
+          )}
         </CardContent>
       </Card>
 

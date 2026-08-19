@@ -4,11 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"github.com/google/uuid"
 	"net"
 	"os"
 	"testing"
 	"time"
+
+	"github.com/google/uuid"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/gorilla/websocket"
@@ -224,14 +225,15 @@ nextQuestion:
 	}
 
 	// 6b. Context window: second stream request must carry the history pair
-	// (assistant question 1 + user answer 1) after the system prompt.
-	if len(lastStreamRequest.Messages) != 3 {
-		t.Fatalf("stream request messages = %d, want 3 (system + q1 + a1)", len(lastStreamRequest.Messages))
+	// (assistant question 1 + user answer 1) after the system prompt, PLUS the transition prompt.
+	if len(lastStreamRequest.Messages) != 4 {
+		t.Fatalf("stream request messages = %d, want 4 (system + q1 + a1 + transition)", len(lastStreamRequest.Messages))
 	}
 	if lastStreamRequest.Messages[0].Role != "system" ||
 		lastStreamRequest.Messages[1].Role != "assistant" ||
 		lastStreamRequest.Messages[2].Role != "user" ||
-		lastStreamRequest.Messages[2].Content != "I built Go services" {
+		lastStreamRequest.Messages[2].Content != "I built Go services" ||
+		lastStreamRequest.Messages[3].Role != "system" {
 		t.Fatalf("history window wrong: %+v", lastStreamRequest.Messages)
 	}
 
@@ -249,8 +251,8 @@ nextQuestion:
 	if q3["type"] != ivdomain.MsgQuestion {
 		t.Fatalf("expected next question, got %v", q3)
 	}
-	if len(lastStreamRequest.Messages) != 5 {
-		t.Fatalf("stream request messages = %d, want 5 (system + 2 pairs)", len(lastStreamRequest.Messages))
+	if len(lastStreamRequest.Messages) != 6 {
+		t.Fatalf("stream request messages = %d, want 6 (system + 2 pairs + transition)", len(lastStreamRequest.Messages))
 	}
 
 	// 7b. Detailed answers (no probe) drive to completion; the final frame is

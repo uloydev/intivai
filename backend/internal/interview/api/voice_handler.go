@@ -13,6 +13,8 @@ import (
 	iamapp "github.com/intivai/backend/internal/iam/application"
 	ivapp "github.com/intivai/backend/internal/interview/application"
 	"github.com/intivai/backend/internal/interview/infrastructure/webrtc"
+	sharederr "github.com/intivai/backend/internal/shared/errors"
+	"github.com/intivai/backend/internal/shared/httpapi"
 )
 
 // RegisterVoiceRoutes — WS /api/v1/interviews/:id/voice. Gated the same way
@@ -41,28 +43,28 @@ func (h *ChatHandler) RequireVoiceAuth(c *fiber.Ctx) error {
 		token = q
 	}
 	if token == "" {
-		return c.Status(401).JSON(fiber.Map{"error": "missing ws ticket or auth token"})
+		return httpapi.Error(c, sharederr.NewDomainError("UNAUTHORIZED", "missing ws ticket or auth token"))
 	}
 	claims, err := h.tokens.Parse(token)
 	if err != nil {
-		return c.Status(401).JSON(fiber.Map{"error": "invalid token"})
+		return httpapi.Error(c, sharederr.NewDomainError("UNAUTHORIZED", "invalid token"))
 	}
 	switch claims.Type {
 	case iamapp.TokenTypeWSTicket:
 		if claims.Extra["interview_id"] != c.Params("id") {
-			return c.Status(401).JSON(fiber.Map{"error": "ticket not bound to this interview"})
+			return httpapi.Error(c, sharederr.NewDomainError("UNAUTHORIZED", "ticket not bound to this interview"))
 		}
 	case iamapp.TokenTypeAuth:
 		// Recruiter voice room — the token's org must own the interview.
 		interviewID, err := uuid.Parse(c.Params("id"))
 		if err != nil {
-			return c.Status(400).JSON(fiber.Map{"error": "invalid interview id"})
+			return httpapi.Error(c, sharederr.NewDomainError("BAD_REQUEST", "invalid interview id"))
 		}
 		if err := h.svc.VerifyInterviewOrg(c.UserContext(), claims.OrgID, interviewID); err != nil {
-			return c.Status(403).JSON(fiber.Map{"error": "interview not accessible in this org"})
+			return httpapi.Error(c, sharederr.NewDomainError("FORBIDDEN", "interview not accessible in this org"))
 		}
 	default:
-		return c.Status(401).JSON(fiber.Map{"error": "invalid token type"})
+		return httpapi.Error(c, sharederr.NewDomainError("UNAUTHORIZED", "invalid token type"))
 	}
 	c.Locals("ws_claims", claims)
 	return c.Next()
@@ -82,17 +84,21 @@ func (h *ChatHandler) handleVoiceSession(c *fiberws.Conn) {
 		return
 	}
 
-	connID := uuid.NewString()
+	sessionID, _ := claims.Extra["session_id"].(string)
+	if sessionID == "" {
+		sessionID = uuid.NewString() // fallback for recruiter tokens
+	}
+
 	connCtx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	ok, err := h.sessions.TryAcquire(connCtx, interviewID.String(), connID)
+	ok, err := h.sessions.TryAcquire(connCtx, interviewID.String(), sessionID)
 	if err != nil || !ok {
 		_ = c.WriteJSON(webrtc.SignalingMessage{Type: "error", Data: "interview already active on another connection"})
 		_ = c.Close()
 		return
 	}
 	defer func() {
-		_ = h.sessions.Release(context.Background(), interviewID.String(), connID)
+		_ = h.sessions.Release(context.Background(), interviewID.String(), sessionID)
 	}()
 
 	h.log.Info().Str("interview_id", interviewID.String()).Msg("New voice WebSocket connection")

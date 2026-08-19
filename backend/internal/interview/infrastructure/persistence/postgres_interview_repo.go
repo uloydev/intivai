@@ -37,14 +37,14 @@ func (r *PostgresInterviewRepo) Create(ctx context.Context, iv *ivdomain.Intervi
 	rawEvents, _ := json.Marshal(iv.ProctoringEvents)
 	rawSummary, _ := json.Marshal(iv.ProctoringSummary)
 	rawSessions, _ := json.Marshal(iv.CodingSessions)
-	return q.WithContext(ctx).Exec(
+	return db.WrapError(q.WithContext(ctx).Exec(
 		`INSERT INTO interviews (id, application_id, type, status, transcript, last_question_idx,
 		 context_version, proctoring_events, proctoring_summary, coding_sessions,
 		 started_at, completed_at, expires_at, created_at)
 		 VALUES ($1, $2, 'chat', $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
 		iv.ID, iv.ApplicationID, string(iv.Status), raw, iv.LastQuestionIdx,
 		iv.ContextVersion, rawEvents, rawSummary, rawSessions,
-		iv.StartedAt, iv.CompletedAt, iv.ExpiresAt, iv.CreatedAt).Error
+		iv.StartedAt, iv.CompletedAt, iv.ExpiresAt, iv.CreatedAt).Error)
 }
 
 func (r *PostgresInterviewRepo) GetByID(ctx context.Context, id uuid.UUID) (*ivdomain.Interview, error) {
@@ -69,12 +69,12 @@ func (r *PostgresInterviewRepo) Update(ctx context.Context, iv *ivdomain.Intervi
 	rawEvents, _ := json.Marshal(iv.ProctoringEvents)
 	rawSummary, _ := json.Marshal(iv.ProctoringSummary)
 	rawSessions, _ := json.Marshal(iv.CodingSessions)
-	return q.WithContext(ctx).Exec(
+	return db.WrapError(q.WithContext(ctx).Exec(
 		`UPDATE interviews SET status = $1, transcript = $2, last_question_idx = $3,
 		 proctoring_events = $4, proctoring_summary = $5, coding_sessions = $6,
 		 started_at = $7, completed_at = $8, expires_at = $9, updated_at = NOW() WHERE id = $10`,
 		string(iv.Status), raw, iv.LastQuestionIdx, rawEvents, rawSummary, rawSessions,
-		iv.StartedAt, iv.CompletedAt, iv.ExpiresAt, iv.ID).Error
+		iv.StartedAt, iv.CompletedAt, iv.ExpiresAt, iv.ID).Error)
 }
 
 // RecordProctoringEvent appends to the events JSONB and recomputes the
@@ -154,7 +154,7 @@ func (r *PostgresInterviewRepo) SaveEvaluation(ctx context.Context, id uuid.UUID
 		`UPDATE interviews SET evaluation = $1, updated_at = NOW() WHERE id = $2 AND evaluation IS NULL`,
 		report, id)
 	if res.Error != nil {
-		return res.Error
+		return db.WrapError(res.Error)
 	}
 	if res.RowsAffected == 0 {
 		return ivdomain.ErrEvaluationExists
@@ -167,8 +167,8 @@ func (r *PostgresInterviewRepo) SetConsent(ctx context.Context, id uuid.UUID) er
 	if err != nil {
 		return err
 	}
-	return q.WithContext(ctx).Exec(
-		`UPDATE interviews SET consent_given = true, updated_at = NOW() WHERE id = $1`, id).Error
+	return db.WrapError(q.WithContext(ctx).Exec(
+		`UPDATE interviews SET consent_given = true, updated_at = NOW() WHERE id = $1`, id).Error)
 }
 
 func (r *PostgresInterviewRepo) ByApplication(ctx context.Context, applicationID uuid.UUID) ([]*ivdomain.Interview, error) {
@@ -268,9 +268,7 @@ func scanInterview(row rowScanner) (*ivdomain.Interview, error) {
 	if len(rawSessions) > 0 {
 		_ = json.Unmarshal(rawSessions, &iv.CodingSessions)
 	}
-	if iv.ProctoringSummary.IntegrityScore == 0 && len(iv.ProctoringEvents) == 0 {
-		iv.ProctoringSummary = ivdomain.DefaultProctoringSummary()
-	}
+
 	iv.SetClock(ivdomain.SystemClock())
 	return &iv, nil
 }

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"encoding/json"
+
 	fiberws "github.com/gofiber/contrib/websocket"
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
@@ -117,11 +118,11 @@ func (h *ChatHandler) Create(c *fiber.Ctx) error {
 		QuestionCount int    `json:"question_count"`
 	}
 	if err := c.BodyParser(&req); err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": "invalid body"})
+		return httpapi.Error(c, sharederrors.NewDomainError("INVALID_INPUT", "invalid body"))
 	}
 	appID, err := uuid.Parse(req.ApplicationID)
 	if err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": "invalid application_id"})
+		return httpapi.Error(c, sharederrors.NewDomainError("INVALID_INPUT", "invalid application_id"))
 	}
 	result, err := h.svc.CreateInterview(c.UserContext(), actor, ivapp.CreateInterviewCommand{
 		ApplicationID: appID, QuestionCount: req.QuestionCount,
@@ -137,31 +138,31 @@ func (h *ChatHandler) Create(c *fiber.Ctx) error {
 func (h *ChatHandler) Consent(c *fiber.Ctx) error {
 	id, err := uuid.Parse(c.Params("id"))
 	if err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": "invalid interview id"})
+		return httpapi.Error(c, sharederrors.NewDomainError("INVALID_INPUT", "invalid interview id"))
 	}
 	var req struct {
 		InvitationToken string `json:"invitation_token"`
 	}
 	if err := c.BodyParser(&req); err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": "invalid body"})
+		return httpapi.Error(c, sharederrors.NewDomainError("INVALID_INPUT", "invalid body"))
 	}
 	if err := h.svc.GiveConsent(c.UserContext(), id, strings.TrimSpace(req.InvitationToken)); err != nil {
 		return httpapi.Error(c, err)
 	}
-	return c.Status(200).JSON(fiber.Map{"data": map[string]bool{"consent_given": true}})
+	return httpapi.OK(c, map[string]bool{"consent_given": true})
 }
 
 // Ticket — POST /candidate/interviews/:id/ticket (candidate, invitation token).
 func (h *ChatHandler) Ticket(c *fiber.Ctx) error {
 	id, err := uuid.Parse(c.Params("id"))
 	if err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": "invalid interview id"})
+		return httpapi.Error(c, sharederrors.NewDomainError("INVALID_INPUT", "invalid interview id"))
 	}
 	var req struct {
 		InvitationToken string `json:"invitation_token"`
 	}
 	if err := c.BodyParser(&req); err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": "invalid body"})
+		return httpapi.Error(c, sharederrors.NewDomainError("INVALID_INPUT", "invalid body"))
 	}
 	result, err := h.svc.IssueTicket(c.UserContext(), ivapp.IssueTicketCommand{
 		InterviewID: id, InvitationToken: strings.TrimSpace(req.InvitationToken),
@@ -176,18 +177,18 @@ func (h *ChatHandler) Ticket(c *fiber.Ctx) error {
 func (h *ChatHandler) Telemetry(c *fiber.Ctx) error {
 	id, err := uuid.Parse(c.Params("id"))
 	if err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": "invalid interview id"})
+		return httpapi.Error(c, sharederrors.NewDomainError("INVALID_INPUT", "invalid interview id"))
 	}
 	var req struct {
-		InvitationToken string                 `json:"invitation_token"`
-		Ticket          string                 `json:"ticket"`
-		EventType       string                 `json:"event_type"`
-		Timestamp       string                 `json:"timestamp"`
-		QuestionIdx     int                    `json:"question_idx"`
-		Details         map[string]interface{} `json:"details"`
+		InvitationToken string                     `json:"invitation_token"`
+		Ticket          string                     `json:"ticket"`
+		EventType       string                     `json:"event_type"`
+		Timestamp       string                     `json:"timestamp"`
+		QuestionIdx     int                        `json:"question_idx"`
+		Details         *ivdomain.TelemetryDetails `json:"details"`
 	}
 	if err := c.BodyParser(&req); err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": "invalid body"})
+		return httpapi.Error(c, sharederrors.NewDomainError("INVALID_INPUT", "invalid body"))
 	}
 
 	token := strings.TrimSpace(req.Ticket)
@@ -201,7 +202,7 @@ func (h *ChatHandler) Telemetry(c *fiber.Ctx) error {
 		}
 	}
 	if token == "" {
-		return c.Status(401).JSON(fiber.Map{"error": "missing authentication token or ticket"})
+		return httpapi.Error(c, sharederrors.NewDomainError("UNAUTHORIZED", "missing authentication token or ticket"))
 	}
 
 	var evTime time.Time
@@ -222,7 +223,7 @@ func (h *ChatHandler) Telemetry(c *fiber.Ctx) error {
 	if err := h.svc.RecordCandidateTelemetry(c.UserContext(), id, token, event); err != nil {
 		return httpapi.Error(c, err)
 	}
-	return c.Status(200).JSON(fiber.Map{"status": "ok"})
+	return httpapi.OK(c, map[string]string{"status": "ok"})
 }
 
 // RequireTicket — pre-upgrade gate: Bearer must be a ws_ticket bound to this
@@ -238,14 +239,14 @@ func (h *ChatHandler) RequireTicket(c *fiber.Ctx) error {
 		token = q
 	}
 	if token == "" {
-		return c.Status(401).JSON(fiber.Map{"error": "missing ws ticket"})
+		return httpapi.Error(c, sharederrors.NewDomainError("UNAUTHORIZED", "missing ws ticket"))
 	}
 	claims, err := h.tokens.Parse(token)
 	if err != nil || claims.Type != application.TokenTypeWSTicket {
-		return c.Status(401).JSON(fiber.Map{"error": "invalid ws ticket"})
+		return httpapi.Error(c, sharederrors.NewDomainError("UNAUTHORIZED", "invalid ws ticket"))
 	}
 	if claims.Extra["interview_id"] != c.Params("id") {
-		return c.Status(401).JSON(fiber.Map{"error": "ticket not bound to this interview"})
+		return httpapi.Error(c, sharederrors.NewDomainError("UNAUTHORIZED", "ticket not bound to this interview"))
 	}
 	c.Locals("ws_claims", claims)
 	return c.Next()
@@ -273,15 +274,14 @@ func (h *ChatHandler) Chat(origins []string) fiber.Handler {
 		connCtx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		connID := uuid.NewString()
-		ok, err := h.sessions.TryAcquire(connCtx, interviewID.String(), connID)
+		ok, err := h.sessions.TryAcquire(connCtx, interviewID.String(), sessionID)
 		if err != nil || !ok {
 			_ = conn.WriteJSON(ivdomain.ErrorMessage{Type: ivdomain.MsgError, Message: "interview already active on another connection"})
 			_ = conn.Close()
 			return
 		}
 		defer func() {
-			_ = h.sessions.Release(context.Background(), interviewID.String(), connID)
+			_ = h.sessions.Release(context.Background(), interviewID.String(), sessionID)
 		}()
 
 		// Single writer: all frames go through this goroutine.
@@ -357,7 +357,7 @@ func (h *ChatHandler) Chat(origins []string) fiber.Handler {
 			for {
 				// Keep the session lock alive for the whole connection — a
 				// 35-min TTL must not lapse under an active interview.
-				if err := h.sessions.Touch(connCtx, interviewID.String(), connID); err != nil {
+				if err := h.sessions.Touch(connCtx, interviewID.String(), sessionID); err != nil {
 					h.log.Warn().Err(err).Msg("session lock touch failed")
 				}
 				select {
@@ -522,9 +522,15 @@ func (h *ChatHandler) runCode(ctx context.Context, send func(any), orgID string,
 		})
 		return
 	}
-	var rawTests []interface{}
+	var rawTests []ivdomain.TestResult
 	for _, tr := range res.TestResults {
-		rawTests = append(rawTests, tr)
+		rawTests = append(rawTests, ivdomain.TestResult{
+			ID:             tr.TestCase.ID,
+			Passed:         tr.Passed,
+			ActualOutput:   tr.ActualOutput,
+			ExpectedOutput: tr.TestCase.ExpectedOutput,
+			Error:          tr.Error,
+		})
 	}
 	send(ivdomain.CodeResultMessage{
 		Type:        ivdomain.MsgCodeResult,
@@ -540,6 +546,15 @@ func (h *ChatHandler) runCode(ctx context.Context, send func(any), orgID string,
 		QuestionIdx: m.QuestionIdx,
 		Language:    m.Language,
 		Code:        m.Code,
+		FinalResult: &ivdomain.ExecutionResult{
+			Stdout:      res.Stdout,
+			Stderr:      res.Stderr,
+			ExitCode:    res.ExitCode,
+			DurationMs:  res.DurationMs,
+			AllPassed:   res.AllPassed,
+			TestResults: rawTests,
+			Error:       res.Error,
+		},
 	})
 }
 
@@ -595,6 +610,20 @@ func (h *ChatHandler) streamAndRespond(ctx context.Context, send func(any), prom
 	historyMu.Unlock()
 	msgs = append(msgs, historySnapshot...)
 
+	if next != nil {
+		msgs = append(msgs, gensvc.ContextMessage{
+			Role: gensvc.RoleSystem,
+			Content: "The system is about to ask the candidate the following question: \"" + next.Content + "\"\n" +
+				"Do NOT ask this question yourself, and do NOT ask any other questions. " +
+				"Your task is ONLY to briefly acknowledge the candidate's last answer and provide a natural, professional transition.",
+		})
+	} else {
+		msgs = append(msgs, gensvc.ContextMessage{
+			Role:    gensvc.RoleSystem,
+			Content: "The interview is now complete. Briefly thank the candidate for their time and conclude the conversation. Do NOT ask any questions.",
+		})
+	}
+
 	chatMsgs := make([]llm.Message, 0, len(msgs))
 	for _, m := range msgs {
 		chatMsgs = append(chatMsgs, llm.Message{Role: m.Role, Content: m.Content})
@@ -606,7 +635,7 @@ func (h *ChatHandler) streamAndRespond(ctx context.Context, send func(any), prom
 		return
 	}
 
-	ch, err := h.llm.ChatStream(ctx, llm.ChatRequest{Messages: chatMsgs})
+	ch, err := h.llm.ChatStream(ctx, llm.ChatRequest{OrgID: orgID, Messages: chatMsgs})
 	if err != nil {
 		h.log.Error().Err(err).Msg("chat stream failed")
 		send(ivdomain.ErrorMessage{Type: ivdomain.MsgError, Message: "llm unavailable"})
@@ -642,7 +671,7 @@ func (h *ChatHandler) sendEvaluation(ctx context.Context, send func(any), orgID 
 		h.pendingEvaluation(send, orgID, interviewID)
 		return
 	}
-	report, err := evalllm.NewEvaluator(h.llm).Evaluate(evalCtx, pairs)
+	report, err := evalllm.NewEvaluator(h.llm).Evaluate(evalCtx, orgID, pairs)
 	if err != nil {
 		h.log.Warn().Err(err).Msg("inline evaluation failed, deferring to worker")
 		h.pendingEvaluation(send, orgID, interviewID)

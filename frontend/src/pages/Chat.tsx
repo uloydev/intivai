@@ -347,7 +347,8 @@ export function ChatPage() {
               currentIdx={currentIdx}
               total={total}
               archetype={archetype}
-              active={!streaming && !pendingAnswer && !evaluation && !expired}
+              active={!evaluation && !expired}
+              isProcessing={streaming || pendingAnswer}
               onExpire={handleTimerExpire}
             />
           </div>

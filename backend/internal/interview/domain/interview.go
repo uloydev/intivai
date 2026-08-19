@@ -58,6 +58,7 @@ type Question struct {
 	Content  string `json:"content"`
 	Category string `json:"category"`
 	Skill    string `json:"skill,omitempty"`
+	IsProbe  bool   `json:"is_probe,omitempty"`
 }
 
 // Answer VO — candidate response, stored for evaluation.
@@ -185,6 +186,7 @@ func (iv *Interview) InsertProbeAfter(currentIdx int, content, category, skill s
 		Content:  content,
 		Category: category,
 		Skill:    skill,
+		IsProbe:  true,
 	}
 	iv.Questions = append(iv.Questions, Question{})
 	copy(iv.Questions[insertAt+1:], iv.Questions[insertAt:len(iv.Questions)-1])

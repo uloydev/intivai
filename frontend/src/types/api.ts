@@ -29,6 +29,8 @@ export interface Job {
   scoring_weights?: Record<string, number>
   min_score_to_proceed?: number
   status: string
+  proctoring_mode?: string
+  is_published?: boolean
   created_at: string
 }
 
@@ -102,6 +104,19 @@ export interface CVDetail extends CVListItem {
   cv_structured?: unknown
 }
 
+export interface BulkUploadResponse {
+  batch_id: string
+}
+
+export interface CandidatePassport {
+  id: string
+  email: string
+  verified_profile?: unknown
+  global_score?: number
+  created_at: string
+  updated_at: string
+}
+
 export type CandidateLifecycleStage =
   | "applied"
   | "screening_passed"
@@ -132,6 +147,7 @@ export interface Application {
   interview_id?: string
   interview_status?: string
   interview_score?: number
+  score_breakdown?: any
   recommendation?: string
   integrity_score?: number
   applied_at?: string

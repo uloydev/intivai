@@ -12,6 +12,7 @@ import (
 	"github.com/intivai/backend/internal/cv/domain"
 	"github.com/intivai/backend/internal/iam/application"
 	iamdomain "github.com/intivai/backend/internal/iam/domain"
+	scrdomain "github.com/intivai/backend/internal/screening/domain"
 	"github.com/intivai/backend/internal/shared/errors"
 )
 
@@ -32,13 +33,14 @@ type Enqueuer interface {
 // CVService handles upload: persist candidate row, store file in MinIO,
 // enqueue parse_cv.
 type CVService struct {
-	repo  domain.CandidateRepository
-	store ObjectStore
-	queue Enqueuer
+	repo    domain.CandidateRepository
+	appRepo scrdomain.ApplicationRepository
+	store   ObjectStore
+	queue   Enqueuer
 }
 
-func NewCVService(repo domain.CandidateRepository, store ObjectStore, q Enqueuer) *CVService {
-	return &CVService{repo: repo, store: store, queue: q}
+func NewCVService(repo domain.CandidateRepository, appRepo scrdomain.ApplicationRepository, store ObjectStore, q Enqueuer) *CVService {
+	return &CVService{repo: repo, appRepo: appRepo, store: store, queue: q}
 }
 
 func (s *CVService) Upload(ctx context.Context, actor application.AuthContext, name, email string, file []byte, contentType string) (*CVResult, error) {
@@ -61,7 +63,7 @@ func (s *CVService) Upload(ctx context.Context, actor application.AuthContext, n
 	}
 	if _, err := s.queue.Enqueue(ctx, TaskParseCV, ParseCVPayload{
 		OrgID: actor.OrgID.String(), CandidateID: candidate.ID.String(),
-	}); err != nil {
+	}, asynq.MaxRetry(5)); err != nil {
 		// Full compensation: no row, no file, no dangling task.
 		_ = s.store.Delete(ctx, candidate.CVPath)
 		_ = s.repo.Delete(ctx, candidate.ID)
@@ -91,14 +93,14 @@ func (s *CVService) ReExtract(ctx context.Context, actor application.AuthContext
 	case domain.StatusFailedOCR:
 		if _, err := s.queue.Enqueue(ctx, TaskParseCV, ParseCVPayload{
 			OrgID: actor.OrgID.String(), CandidateID: candidate.ID.String(),
-		}); err != nil {
+		}, asynq.MaxRetry(5)); err != nil {
 			return nil, errors.NewDomainError("CV_QUEUE_FAILED", "failed to enqueue cv parsing")
 		}
 		return &CVResult{ID: candidate.ID, Status: domain.StatusParsing}, nil
 	case domain.StatusFailedExtract, domain.StatusParsed:
 		if _, err := s.queue.Enqueue(ctx, TaskExtractCV, ExtractCVPayload{
 			OrgID: actor.OrgID.String(), CandidateID: candidate.ID.String(),
-		}); err != nil {
+		}, asynq.MaxRetry(5)); err != nil {
 			return nil, errors.NewDomainError("CV_QUEUE_FAILED", "failed to enqueue extraction")
 		}
 		return &CVResult{ID: candidate.ID, Status: domain.StatusExtracting}, nil
@@ -110,6 +112,48 @@ func (s *CVService) ReExtract(ctx context.Context, actor application.AuthContext
 type CVResult struct {
 	ID     uuid.UUID `json:"id"`
 	Status string    `json:"status"`
+}
+
+type BulkUploadResult struct {
+	BatchID uuid.UUID `json:"batch_id"`
+}
+
+type BulkUploadFile struct {
+	Name        string
+	Data        []byte
+	ContentType string
+}
+
+func (s *CVService) BulkUpload(ctx context.Context, actor application.AuthContext, files []BulkUploadFile) (*BulkUploadResult, error) {
+	if err := application.Authorize(actor, iamdomain.RoleAdmin, iamdomain.RoleRecruiter); err != nil {
+		return nil, err
+	}
+	batchID := uuid.New()
+
+	for _, f := range files {
+		candidate, err := domain.NewCandidate(actor.OrgID, strings.TrimSpace(f.Name), "")
+		if err != nil {
+			continue // skip invalid names
+		}
+		candidate.BatchID = &batchID
+		candidate.CVPath = fmt.Sprintf("cvs/%s/%s.pdf", actor.OrgID, candidate.ID)
+		candidate.Status = domain.StatusParsing
+
+		if err := s.store.Upload(ctx, candidate.CVPath, strings.NewReader(string(f.Data)), int64(len(f.Data)), f.ContentType); err != nil {
+			continue // skip if upload fails
+		}
+		if err := s.repo.Create(ctx, candidate); err != nil {
+			_ = s.store.Delete(ctx, candidate.CVPath)
+			continue
+		}
+		if _, err := s.queue.Enqueue(ctx, TaskParseCV, ParseCVPayload{
+			OrgID: actor.OrgID.String(), CandidateID: candidate.ID.String(),
+		}); err != nil {
+			_ = s.store.Delete(ctx, candidate.CVPath)
+			_ = s.repo.Delete(ctx, candidate.ID)
+		}
+	}
+	return &BulkUploadResult{BatchID: batchID}, nil
 }
 
 // CVListItem — summary only. Raw text and structured data (PII) stay on
@@ -194,6 +238,57 @@ func (s *CVService) DeleteCandidate(ctx context.Context, actor application.AuthC
 	}
 	if candidate.CVPath != "" {
 		_ = s.store.Delete(ctx, candidate.CVPath)
+	}
+	return nil
+}
+
+func (s *CVService) ReviewProfile(ctx context.Context, token string) (*CVDetail, error) {
+	candidate, err := s.repo.GetByReviewToken(ctx, token)
+	if err == domain.ErrNotFound {
+		return nil, errors.NewNotFoundError("candidate_review", "invalid token")
+	}
+	if err != nil {
+		return nil, err
+	}
+	if candidate.Status != domain.StatusPendingReview {
+		return nil, errors.NewDomainError("CANDIDATE_NOT_READY", "candidate is not pending review")
+	}
+	return toDetail(candidate), nil
+}
+
+func (s *CVService) ConfirmProfile(ctx context.Context, token string, structuredData []byte) error {
+	candidate, err := s.repo.GetByReviewToken(ctx, token)
+	if err == domain.ErrNotFound {
+		return errors.NewNotFoundError("candidate_review", "invalid token")
+	}
+	if err != nil {
+		return err
+	}
+	if candidate.Status != domain.StatusPendingReview {
+		return errors.NewDomainError("CANDIDATE_NOT_READY", "candidate is not pending review")
+	}
+
+	candidate.CVStructured = structuredData
+	candidate.Status = domain.StatusExtracted
+	candidate.ReviewToken = nil
+
+	if err := s.repo.Update(ctx, candidate); err != nil {
+		return err
+	}
+
+	// Enqueue TaskScoreCV
+	apps, err := s.appRepo.ByCandidate(ctx, candidate.OrgID, candidate.ID)
+	if err == nil {
+		for _, app := range apps {
+			type scoreCVPayload struct {
+				OrgID         string `json:"org_id"`
+				ApplicationID string `json:"application_id"`
+			}
+			_, _ = s.queue.Enqueue(ctx, "score_cv", scoreCVPayload{
+				OrgID:         candidate.OrgID.String(),
+				ApplicationID: app.ID.String(),
+			})
+		}
 	}
 	return nil
 }

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http/httptest"
 	"os"
 	"testing"
@@ -117,4 +118,75 @@ func TestCandidatePortal_OTPAndApplicationLookupFlow(t *testing.T) {
 	require.Equal(t, "Senior Go Architect", listResult.Data[0].JobTitle)
 	require.Equal(t, "Acme Tech", listResult.Data[0].OrgName)
 	require.Equal(t, 88.5, listResult.Data[0].CVScore)
+}
+
+func TestCandidatePortal_OTPLockoutAndReplay(t *testing.T) {
+	pool := setupTestDB(t)
+	tokens := iamauth.NewJWTProvider("secret-test-key-32-chars-intivai-1234")
+	handler := scrapi.NewCandidatePortalHandler(pool, tokens, nil, "http://localhost:5173")
+
+	app := fiber.New()
+	app.Post("/api/v1/public/candidate/auth/otp", handler.RequestOTP)
+	app.Post("/api/v1/public/candidate/auth/verify", handler.VerifyOTP)
+
+	email := "lockout-test-" + uuid.NewString()[:8] + "@candidate.io"
+
+	// 1. Request OTP
+	body, _ := json.Marshal(map[string]string{"email": email})
+	req := httptest.NewRequest("POST", "/api/v1/public/candidate/auth/otp", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := app.Test(req, -1)
+	require.NoError(t, err)
+	require.Equal(t, 200, resp.StatusCode)
+
+	// Fetch actual code for later
+	var magicToken string
+	err = pool.WithContext(context.Background()).Raw(
+		`SELECT token FROM candidate_otps WHERE email = ? AND used_at IS NULL`, email,
+	).Row().Scan(&magicToken)
+	require.NoError(t, err)
+	require.NotEmpty(t, magicToken, "magic token must not be empty")
+
+	// 2. 5 Failed attempts (Wrong code)
+	for i := 0; i < 5; i++ {
+		b, _ := json.Marshal(map[string]string{"email": email, "code": "000000"})
+		vReq := httptest.NewRequest("POST", "/api/v1/public/candidate/auth/verify", bytes.NewReader(b))
+		vReq.Header.Set("Content-Type", "application/json")
+		vResp, _ := app.Test(vReq, -1)
+		require.Equal(t, 401, vResp.StatusCode)
+	}
+
+	// 3. 6th attempt with CORRECT magic token should be rejected (Lockout)
+	b, _ := json.Marshal(map[string]string{"token": magicToken})
+	vReq := httptest.NewRequest("POST", "/api/v1/public/candidate/auth/verify", bytes.NewReader(b))
+	vReq.Header.Set("Content-Type", "application/json")
+	vResp, _ := app.Test(vReq, -1)
+	bodyBytes, _ := io.ReadAll(vResp.Body)
+	require.Equalf(t, 429, vResp.StatusCode, "Body: %s", string(bodyBytes))
+
+	// Create a fresh OTP to test replay protection
+	email2 := "replay-test-" + uuid.NewString()[:8] + "@candidate.io"
+	body2, _ := json.Marshal(map[string]string{"email": email2})
+	req2 := httptest.NewRequest("POST", "/api/v1/public/candidate/auth/otp", bytes.NewReader(body2))
+	req2.Header.Set("Content-Type", "application/json")
+	resp2, _ := app.Test(req2, -1)
+	require.Equal(t, 200, resp2.StatusCode)
+
+	var token2 string
+	_ = pool.WithContext(context.Background()).Raw(
+		`SELECT token FROM candidate_otps WHERE email = ? AND used_at IS NULL`, email2,
+	).Row().Scan(&token2)
+
+	// First verify succeeds
+	b2, _ := json.Marshal(map[string]string{"token": token2})
+	vReq2 := httptest.NewRequest("POST", "/api/v1/public/candidate/auth/verify", bytes.NewReader(b2))
+	vReq2.Header.Set("Content-Type", "application/json")
+	vResp2, _ := app.Test(vReq2, -1)
+	require.Equal(t, 200, vResp2.StatusCode)
+
+	// Second verify fails (Replay)
+	vReq3 := httptest.NewRequest("POST", "/api/v1/public/candidate/auth/verify", bytes.NewReader(b2))
+	vReq3.Header.Set("Content-Type", "application/json")
+	vResp3, _ := app.Test(vReq3, -1)
+	require.Equal(t, 401, vResp3.StatusCode)
 }

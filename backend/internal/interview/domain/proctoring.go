@@ -17,10 +17,10 @@ const (
 )
 
 type ProctoringEvent struct {
-	Type        ProctoringEventType    `json:"type"`
-	Timestamp   time.Time              `json:"timestamp"`
-	QuestionIdx int                    `json:"question_idx,omitempty"`
-	Details     map[string]interface{} `json:"details,omitempty"`
+	Type        ProctoringEventType `json:"type"`
+	Timestamp   time.Time           `json:"timestamp"`
+	QuestionIdx int                 `json:"question_idx,omitempty"`
+	Details     *TelemetryDetails   `json:"details,omitempty"`
 }
 
 type RiskLevel string
@@ -42,18 +42,10 @@ type ProctoringSummary struct {
 	Flags                []string  `json:"flags"`
 }
 
-func DefaultProctoringSummary() ProctoringSummary {
-	return ProctoringSummary{
-		IntegrityScore: 100,
-		RiskLevel:      RiskLow,
-		Flags:          []string{},
-	}
-}
-
 // CalculateProctoringSummary analyzes chronological telemetry events and computes
 // an integrity score (0-100), risk tier, and human-readable audit flags.
 func CalculateProctoringSummary(events []ProctoringEvent) ProctoringSummary {
-	summary := DefaultProctoringSummary()
+	var summary ProctoringSummary
 	if len(events) == 0 {
 		return summary
 	}
@@ -86,12 +78,8 @@ func CalculateProctoringSummary(events []ProctoringEvent) ProctoringSummary {
 		case EventTypePaste:
 			summary.PasteEventCount++
 			charCount := 0
-			if val, ok := ev.Details["char_count"]; ok {
-				if f, ok := val.(float64); ok {
-					charCount = int(f)
-				} else if i, ok := val.(int); ok {
-					charCount = i
-				}
+			if ev.Details != nil {
+				charCount = ev.Details.PastedTextLength
 			}
 			// Pastes over 150 chars or rapid pastes are treated as suspicious external snippets
 			if charCount > 150 {

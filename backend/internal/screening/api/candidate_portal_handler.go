@@ -15,6 +15,7 @@ import (
 	"github.com/google/uuid"
 	iamapp "github.com/intivai/backend/internal/iam/application"
 	notifapp "github.com/intivai/backend/internal/notification/application"
+	sharederr "github.com/intivai/backend/internal/shared/errors"
 	"github.com/intivai/backend/internal/shared/httpapi"
 	"github.com/intivai/backend/pkg/queue"
 	"gorm.io/gorm"
@@ -61,21 +62,21 @@ func otpHash(code string) string {
 func (h *CandidatePortalHandler) RequestOTP(c *fiber.Ctx) error {
 	var req RequestOTPRequest
 	if err := c.BodyParser(&req); err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
+		return httpapi.Error(c, sharederr.NewDomainError("BAD_REQUEST", "invalid request body"))
 	}
 
 	email := strings.ToLower(strings.TrimSpace(req.Email))
 	if email == "" || !strings.Contains(email, "@") {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "valid email address is required"})
+		return httpapi.Error(c, sharederr.NewDomainError("BAD_REQUEST", "valid email address is required"))
 	}
 
 	// Per-email resend cooldown + purge of consumed/expired rows (unbounded
 	// OTP emailing is an abuse vector).
-	var lastCreated *time.Time
+	var lastCreated sql.NullTime
 	_ = h.pool.WithContext(c.UserContext()).Raw(
-		`SELECT MAX(created_at) FROM candidate_otps WHERE LOWER(email) = ? AND used_at IS NULL`, email).Scan(&lastCreated)
-	if lastCreated != nil && !lastCreated.IsZero() && time.Since(*lastCreated) < otpResendCooldown {
-		return c.Status(fiber.StatusTooManyRequests).JSON(fiber.Map{"error": "please wait before requesting another code"})
+		`SELECT MAX(created_at) FROM candidate_otps WHERE LOWER(email) = ? AND used_at IS NULL`, email).Row().Scan(&lastCreated)
+	if lastCreated.Valid && time.Since(lastCreated.Time) < otpResendCooldown {
+		return httpapi.Error(c, sharederr.NewDomainError("TOO_MANY_REQUESTS", "please wait before requesting another code"))
 	}
 	_ = h.pool.WithContext(c.UserContext()).Exec(
 		`DELETE FROM candidate_otps WHERE LOWER(email) = ? AND (expires_at < NOW() OR used_at IS NOT NULL)`, email)
@@ -84,7 +85,7 @@ func (h *CandidatePortalHandler) RequestOTP(c *fiber.Ctx) error {
 	// the DB would be trivially brute-forced if the table leaks).
 	nBig, err := rand.Int(rand.Reader, big.NewInt(1000000))
 	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to generate otp"})
+		return httpapi.Error(c, sharederr.NewDomainError("INTERNAL_ERROR", "failed to generate otp"))
 	}
 	code := fmt.Sprintf("%06d", nBig.Int64())
 	magicToken := uuid.NewString()
@@ -96,7 +97,7 @@ func (h *CandidatePortalHandler) RequestOTP(c *fiber.Ctx) error {
 		uuid.New(), email, otpHash(code), magicToken, expiresAt,
 	).Error
 	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to record otp"})
+		return httpapi.Error(c, sharederr.NewDomainError("INTERNAL_ERROR", "failed to record otp"))
 	}
 
 	magicLink := fmt.Sprintf("%s/candidate/portal?token=%s", h.publicURL, magicToken)
@@ -128,7 +129,7 @@ type VerifyOTPRequest struct {
 func (h *CandidatePortalHandler) VerifyOTP(c *fiber.Ctx) error {
 	var req VerifyOTPRequest
 	if err := c.BodyParser(&req); err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
+		return httpapi.Error(c, sharederr.NewDomainError("BAD_REQUEST", "invalid request body"))
 	}
 
 	email := strings.ToLower(strings.TrimSpace(req.Email))
@@ -147,9 +148,9 @@ func (h *CandidatePortalHandler) VerifyOTP(c *fiber.Ctx) error {
 			 ORDER BY created_at DESC LIMIT 1`, token).Row()
 		if err := row.Scan(&otpID, &userEmail, &attempts); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
-				return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "invalid or expired verification code"})
+				return httpapi.Error(c, sharederr.NewDomainError("UNAUTHORIZED", "invalid or expired verification code"))
 			}
-			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "verification lookup failed"})
+			return httpapi.Error(c, sharederr.NewDomainError("INTERNAL_ERROR", "verification lookup failed"))
 		}
 	} else if email != "" && code != "" {
 		row := h.pool.WithContext(c.UserContext()).Raw(
@@ -163,15 +164,16 @@ func (h *CandidatePortalHandler) VerifyOTP(c *fiber.Ctx) error {
 				_ = h.pool.WithContext(c.UserContext()).Exec(
 					`UPDATE candidate_otps SET attempts = attempts + 1
 					 WHERE LOWER(email) = ? AND used_at IS NULL AND expires_at > NOW()`, email)
-				return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "invalid or expired verification code"})
+				return httpapi.Error(c, sharederr.NewDomainError("UNAUTHORIZED", "invalid or expired verification code"))
 			}
-			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "verification lookup failed"})
-		}
-		if attempts >= maxOTPAttempts {
-			return c.Status(fiber.StatusTooManyRequests).JSON(fiber.Map{"error": "too many attempts, request a new code"})
+			return httpapi.Error(c, sharederr.NewDomainError("INTERNAL_ERROR", "verification lookup failed"))
 		}
 	} else {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "provide either (email + code) or magic token"})
+		return httpapi.Error(c, sharederr.NewDomainError("BAD_REQUEST", "provide either (email + code) or magic token"))
+	}
+
+	if attempts >= maxOTPAttempts {
+		return httpapi.Error(c, sharederr.NewDomainError("TOO_MANY_REQUESTS", "too many attempts, request a new code"))
 	}
 
 	// Single-statement consume — two concurrent verifies cannot both pass
@@ -179,10 +181,10 @@ func (h *CandidatePortalHandler) VerifyOTP(c *fiber.Ctx) error {
 	res := h.pool.WithContext(c.UserContext()).Exec(
 		`UPDATE candidate_otps SET used_at = NOW() WHERE id = ? AND used_at IS NULL`, otpID)
 	if res.Error != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to consume verification code"})
+		return httpapi.Error(c, sharederr.NewDomainError("INTERNAL_ERROR", "failed to consume verification code"))
 	}
 	if res.RowsAffected == 0 {
-		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "invalid or expired verification code"})
+		return httpapi.Error(c, sharederr.NewDomainError("UNAUTHORIZED", "invalid or expired verification code"))
 	}
 
 	// Issue candidate token (valid for 7 days). Subject is a deterministic
@@ -194,7 +196,7 @@ func (h *CandidatePortalHandler) VerifyOTP(c *fiber.Ctx) error {
 	}
 	jwtToken, err := h.tokens.Issue(candidateID, uuid.Nil, "candidate", iamapp.TokenTypeCandidate, candidateTokenTTL, extra)
 	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to issue candidate token"})
+		return httpapi.Error(c, sharederr.NewDomainError("INTERNAL_ERROR", "failed to issue candidate token"))
 	}
 
 	return httpapi.OK(c, fiber.Map{
@@ -208,17 +210,17 @@ func (h *CandidatePortalHandler) VerifyOTP(c *fiber.Ctx) error {
 func (h *CandidatePortalHandler) RequireCandidateAuth(c *fiber.Ctx) error {
 	header := c.Get("Authorization")
 	if !strings.HasPrefix(header, "Bearer ") {
-		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "missing candidate authorization header"})
+		return httpapi.Error(c, sharederr.NewDomainError("UNAUTHORIZED", "missing candidate authorization header"))
 	}
 	token := strings.TrimPrefix(header, "Bearer ")
 	claims, err := h.tokens.Parse(token)
 	if err != nil || claims.Type != iamapp.TokenTypeCandidate {
-		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "invalid candidate authorization token"})
+		return httpapi.Error(c, sharederr.NewDomainError("UNAUTHORIZED", "invalid candidate authorization token"))
 	}
 
 	email, ok := claims.Extra["email"].(string)
 	if !ok || email == "" {
-		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "candidate email missing from claims"})
+		return httpapi.Error(c, sharederr.NewDomainError("UNAUTHORIZED", "candidate email missing from claims"))
 	}
 
 	c.Locals("candidate_email", email)
@@ -253,7 +255,7 @@ type CandidateApplicationDTO struct {
 func (h *CandidatePortalHandler) ListApplications(c *fiber.Ctx) error {
 	email, ok := c.Locals("candidate_email").(string)
 	if !ok || email == "" {
-		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "unauthorized"})
+		return httpapi.Error(c, sharederr.NewDomainError("UNAUTHORIZED", "unauthorized"))
 	}
 
 	rows, err := h.pool.WithContext(c.UserContext()).Raw(
@@ -262,7 +264,7 @@ func (h *CandidatePortalHandler) ListApplications(c *fiber.Ctx) error {
 		        applied_at, interview_id, interview_status, interview_type, invitation_token, overall_score, recommendation
 		 FROM candidate_applications_lookup(?)`, email).Rows()
 	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "internal server error"})
+		return httpapi.Error(c, sharederr.NewDomainError("INTERNAL_ERROR", "internal server error"))
 	}
 	defer func() { _ = rows.Close() }()
 
@@ -275,13 +277,13 @@ func (h *CandidatePortalHandler) ListApplications(c *fiber.Ctx) error {
 			&a.CandidateID, &a.CandidateName, &a.CandidateEmail, &a.CVScore, &a.PassedScreening, &a.ApplicationStatus,
 			&appliedAt, &a.InterviewID, &a.InterviewStatus, &a.InterviewType, &a.InvitationToken, &a.OverallScore, &a.Recommendation,
 		); err != nil {
-			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "internal server error"})
+			return httpapi.Error(c, sharederr.NewDomainError("INTERNAL_ERROR", "internal server error"))
 		}
 		a.AppliedAt = appliedAt.Format(time.RFC3339)
 		out = append(out, &a)
 	}
 	if err := rows.Err(); err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "internal server error"})
+		return httpapi.Error(c, sharederr.NewDomainError("INTERNAL_ERROR", "internal server error"))
 	}
 
 	return httpapi.OK(c, out)

@@ -36,23 +36,11 @@ func TestStageTransitions(t *testing.T) {
 	require.True(t, StageInterviewCompleted.CanTransitionTo(StageScreeningFailed, false))
 }
 
-func TestStageBackwardRequiresAdmin(t *testing.T) {
-	// Backward moves are admin-only: not allowed by the ladder, flagged as
-	// requiring an admin override.
-	require.False(t, StageHired.CanTransitionTo(StageOfferExtended, false))
-	require.True(t, StageHired.RequiresAdmin(StageOfferExtended))
-	require.False(t, StageScreeningPassed.CanTransitionTo(StageApplied, false))
-	require.True(t, StageScreeningPassed.RequiresAdmin(StageApplied))
-	// Terminal → ladder is also a correction move
-	require.False(t, StageRejected.CanTransitionTo(StageApplied, false))
-	require.True(t, StageRejected.RequiresAdmin(StageApplied))
-	// Forward moves never require admin
-	require.False(t, StageApplied.RequiresAdmin(StageScreeningPassed))
-	require.False(t, StageOfferExtended.RequiresAdmin(StageHired))
-	// Same stage is never a correction
-	require.False(t, StageHired.RequiresAdmin(StageHired))
-	// Into a terminal state is never a correction
-	require.False(t, StageApplied.RequiresAdmin(StageRejected))
+func TestStageBackward(t *testing.T) {
+	// Backward moves are now allowed for manual reversion.
+	require.True(t, StageHired.CanTransitionTo(StageOfferExtended, false))
+	require.True(t, StageScreeningPassed.CanTransitionTo(StageApplied, false))
+	require.True(t, StageRejected.CanTransitionTo(StageApplied, false))
 }
 
 func TestStageFromNil(t *testing.T) {

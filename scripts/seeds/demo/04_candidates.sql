@@ -4,7 +4,7 @@
 -- Candidate 1: Alex Rivera (Senior Go Distributed Systems Engineer)
 INSERT INTO candidates (
     id, org_id, name, email, cv_path, cv_raw_text, cv_structured,
-    cv_ocr_method, status, created_at
+    cv_ocr_method, status, created_at, batch_id, review_token
 )
 VALUES (
     'f6a1b2c3-d4e5-4f6a-8b7c-8d9e0f1a2b3c',
@@ -24,17 +24,21 @@ VALUES (
     }'::jsonb,
     'pdfcpu',
     'extracted',
-    NOW() - INTERVAL '8 days'
+    NOW() - INTERVAL '8 days',
+    '33333333-3333-3333-3333-333333333333',
+    'magic-link-token-alex-rivera-2026'
 )
 ON CONFLICT (id) DO UPDATE SET
     name = EXCLUDED.name,
     email = EXCLUDED.email,
-    cv_structured = EXCLUDED.cv_structured;
+    cv_structured = EXCLUDED.cv_structured,
+    batch_id = EXCLUDED.batch_id,
+    review_token = EXCLUDED.review_token;
 
 -- Candidate 2: Elena Rostova (Staff Frontend Architect)
 INSERT INTO candidates (
     id, org_id, name, email, cv_path, cv_raw_text, cv_structured,
-    cv_ocr_method, status, created_at
+    cv_ocr_method, status, created_at, batch_id, review_token
 )
 VALUES (
     'a2b3c4d5-e6f1-4a2b-8c3d-9e0f1a2b3c4d',
@@ -54,17 +58,21 @@ VALUES (
     }'::jsonb,
     'pdfcpu',
     'extracted',
-    NOW() - INTERVAL '7 days'
+    NOW() - INTERVAL '7 days',
+    '33333333-3333-3333-3333-333333333333',
+    'magic-link-token-elena-rostova-2026'
 )
 ON CONFLICT (id) DO UPDATE SET
     name = EXCLUDED.name,
     email = EXCLUDED.email,
-    cv_structured = EXCLUDED.cv_structured;
+    cv_structured = EXCLUDED.cv_structured,
+    batch_id = EXCLUDED.batch_id,
+    review_token = EXCLUDED.review_token;
 
 -- Candidate 3: David Chen (Principal AI/ML Systems Engineer)
 INSERT INTO candidates (
     id, org_id, name, email, cv_path, cv_raw_text, cv_structured,
-    cv_ocr_method, status, created_at
+    cv_ocr_method, status, created_at, batch_id, review_token
 )
 VALUES (
     'b3c4d5e6-f1a2-4b3c-8d4e-0f1a2b3c4d5e',
@@ -84,17 +92,21 @@ VALUES (
     }'::jsonb,
     'pdfcpu',
     'extracted',
-    NOW() - INTERVAL '6 days'
+    NOW() - INTERVAL '6 days',
+    NULL,
+    'magic-link-token-david-chen-2026'
 )
 ON CONFLICT (id) DO UPDATE SET
     name = EXCLUDED.name,
     email = EXCLUDED.email,
-    cv_structured = EXCLUDED.cv_structured;
+    cv_structured = EXCLUDED.cv_structured,
+    batch_id = EXCLUDED.batch_id,
+    review_token = EXCLUDED.review_token;
 
 -- Candidate 4: Marcus Vance (Junior Developer - Below threshold)
 INSERT INTO candidates (
     id, org_id, name, email, cv_path, cv_raw_text, cv_structured,
-    cv_ocr_method, status, created_at
+    cv_ocr_method, status, created_at, batch_id, review_token
 )
 VALUES (
     'c4d5e6f1-a2b3-4c4d-8e5f-1a2b3c4d5e6f',
@@ -114,9 +126,13 @@ VALUES (
     }'::jsonb,
     'pdfcpu',
     'extracted',
-    NOW() - INTERVAL '5 days'
+    NOW() - INTERVAL '5 days',
+    NULL,
+    'magic-link-token-marcus-vance-2026'
 )
 ON CONFLICT (id) DO UPDATE SET
     name = EXCLUDED.name,
     email = EXCLUDED.email,
-    cv_structured = EXCLUDED.cv_structured;
+    cv_structured = EXCLUDED.cv_structured,
+    batch_id = EXCLUDED.batch_id,
+    review_token = EXCLUDED.review_token;
