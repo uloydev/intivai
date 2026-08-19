@@ -18,7 +18,7 @@ Phase 3: Chat Interview (WebSocket + LLM)
 Phase 4: Evaluation & Reports
     │
     ▼
-Phase 5: Voice Interview (WebRTC + STT + TTS) — POST-MVP, skip sampai paying customer
+Phase 5: Voice MVP, Passports, Bulk CV, Public Board (Product Pivot)
     │
     ▼
 Phase 6: Production Polish (Observability, Deploy, Scale)

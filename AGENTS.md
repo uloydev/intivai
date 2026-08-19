@@ -1,5 +1,22 @@
 # Intivai — Engineering Workflow
 
+## Strict Production Guidelines (Target: Revenue-Generating Production Grade)
+
+1. **Mandatory TDD:** Use Test-Driven Development (TDD) for EVERY implementation. No exceptions.
+2. **Clean & Efficient Code:** Code must be highly optimized, readable, and free of technical debt.
+3. **Zero Mistakes:** Mistakes are unacceptable.
+4. **No Hallucinations:** If unsure, ASK immediately. Do not guess.
+5. **Idiomatic Code:** Strictly use Golang and TypeScript idioms.
+6. **Production-First Mindset:** This is NOT a beta project. It is aimed at making money. Every decision must prioritize stability, scalability, and security.
+7. **Strict Rule Adherence:** Strictly follow all rules defined in this document.
+8. **Fail-Safe Error Handling:** Never swallow errors. All errors must be handled, logged with context, and never leak sensitive data.
+9. **Strict Types:** TypeScript `any` is strictly forbidden. Go `interface{}` forbidden unless generic.
+10. **HR-Centric Product Mindset:** Every feature must strictly align with HR needs. Before implementing, ask: "As an HR professional, does this genuinely make my hiring process more efficient?" Build for the user, not just for the tech.
+11. **Depth Over Speed:** NEVER sacrifice quality for speed. Always perform deep, thorough, and systemic analysis (file-by-file, checking transaction boundaries, race conditions, and architecture constraints) before proposing solutions or declaring a review complete.
+12. **Proactive Systemic Auditing (Corollary to Depth Over Speed):** When a bug (e.g., missing database column in an `INSERT`, or an unchecked error) is identified in one repository or handler, NEVER stop at fixing just that one instance. You MUST proactively search and audit the entire codebase for the same class of bug before declaring the issue resolved.
+13. **Explicit State Inserts:** NEVER rely on database defaults (omitted columns) for fields that participate in state machines or domain logic (like `status`, `stage`). Always explicitly insert their starting values (e.g., `stage = 'applied'`) in repository `Create` methods and Raw SQL inserts to ensure the Go domain layer always loads a valid initial state.
+14. **No Dynamic JSON Parsing:** Enforcing the "Strict Types" rule. When handling incoming JSON (like WebSocket telemetry or worker payloads), you must define and use strict Go structs for nested data. NEVER use `map[string]interface{}` or `[]interface{}` as an escape hatch, even for "dynamic" or "extra" payload fields.
+
 ## Project
 
 - Monorepo: `backend/` (Go), `frontend/` (React SPA), `docker-compose*.yml` (dev/prod stacks), `.github/workflows/ci.yml`
