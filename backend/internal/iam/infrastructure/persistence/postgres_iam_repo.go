@@ -21,9 +21,9 @@ func NewPostgresIAMRepo(pool *gorm.DB) *PostgresIAMRepo {
 	return &PostgresIAMRepo{pool: pool}
 }
 
-// tq REQUIRES a tenant transaction — RLS-scoped tables must never be
+// tx REQUIRES a tenant transaction — RLS-scoped tables must never be
 // touched outside one, otherwise queries silently return zero rows.
-func (r *PostgresIAMRepo) tq(ctx context.Context) (*gorm.DB, error) {
+func (r *PostgresIAMRepo) tx(ctx context.Context) (*gorm.DB, error) {
 	tx, ok := db.TxFrom(ctx)
 	if !ok {
 		return nil, db.ErrNoTx
@@ -32,7 +32,7 @@ func (r *PostgresIAMRepo) tq(ctx context.Context) (*gorm.DB, error) {
 }
 
 func (r *PostgresIAMRepo) CreateOrg(ctx context.Context, org *iamdomain.Org) error {
-	q, err := r.tq(ctx)
+	tx, err := r.tx(ctx)
 	if err != nil {
 		return err
 	}
@@ -40,7 +40,7 @@ func (r *PostgresIAMRepo) CreateOrg(ctx context.Context, org *iamdomain.Org) err
 	if org.ScoringWeights != nil {
 		weights, _ = json.Marshal(org.ScoringWeights)
 	}
-	err = q.WithContext(ctx).Exec(
+	err = tx.WithContext(ctx).Exec(
 		`INSERT INTO orgs (id, name, slug, plan, scoring_weights, min_score_to_proceed, created_at)
 		 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
 		org.ID, org.Name, org.Slug, org.Plan, weights, org.MinScoreToProceed, org.CreatedAt).Error
@@ -48,21 +48,21 @@ func (r *PostgresIAMRepo) CreateOrg(ctx context.Context, org *iamdomain.Org) err
 }
 
 func (r *PostgresIAMRepo) GetOrg(ctx context.Context, id uuid.UUID) (*iamdomain.Org, error) {
-	q, err := r.tq(ctx)
+	tx, err := r.tx(ctx)
 	if err != nil {
 		return nil, err
 	}
-	row := q.Raw(
+	row := tx.Raw(
 		`SELECT id, name, slug, plan, scoring_weights, min_score_to_proceed, created_at FROM orgs WHERE id = $1`, id).Row()
 	return scanOrg(row)
 }
 
 func (r *PostgresIAMRepo) GetOrgBySlug(ctx context.Context, slug string) (*iamdomain.Org, error) {
-	q, err := r.tq(ctx)
+	tx, err := r.tx(ctx)
 	if err != nil {
 		return nil, err
 	}
-	row := q.Raw(
+	row := tx.Raw(
 		`SELECT id, name, slug, plan, scoring_weights, min_score_to_proceed, created_at FROM orgs WHERE slug = $1`, slug).Row()
 	return scanOrg(row)
 }
@@ -92,11 +92,11 @@ func scanOrg(row orgScanner) (*iamdomain.Org, error) {
 }
 
 func (r *PostgresIAMRepo) CreateUser(ctx context.Context, user *iamdomain.User) error {
-	q, err := r.tq(ctx)
+	tx, err := r.tx(ctx)
 	if err != nil {
 		return err
 	}
-	err = q.WithContext(ctx).Exec(
+	err = tx.WithContext(ctx).Exec(
 		`INSERT INTO users (id, org_id, email, role, password_hash, auth_provider, created_at)
 		 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
 		user.ID, user.OrgID, user.Email, string(user.Role), nilString(user.PasswordHash), user.AuthProvider, user.CreatedAt).Error
@@ -104,32 +104,32 @@ func (r *PostgresIAMRepo) CreateUser(ctx context.Context, user *iamdomain.User) 
 }
 
 func (r *PostgresIAMRepo) GetUserByID(ctx context.Context, id uuid.UUID) (*iamdomain.User, error) {
-	q, err := r.tq(ctx)
+	tx, err := r.tx(ctx)
 	if err != nil {
 		return nil, err
 	}
-	row := q.Raw(
+	row := tx.Raw(
 		`SELECT id, org_id, email, role, password_hash, auth_provider, created_at FROM users WHERE id = $1`, id).Row()
 	return scanUser(row)
 }
 
 func (r *PostgresIAMRepo) GetUserByEmail(ctx context.Context, orgID uuid.UUID, email string) (*iamdomain.User, error) {
-	q, err := r.tq(ctx)
+	tx, err := r.tx(ctx)
 	if err != nil {
 		return nil, err
 	}
-	row := q.Raw(
+	row := tx.Raw(
 		`SELECT id, org_id, email, role, password_hash, auth_provider, created_at FROM users WHERE org_id = $1 AND email = $2`,
 		orgID, email).Row()
 	return scanUser(row)
 }
 
 func (r *PostgresIAMRepo) ListUsers(ctx context.Context, orgID uuid.UUID) ([]*iamdomain.User, error) {
-	q, err := r.tq(ctx)
+	tx, err := r.tx(ctx)
 	if err != nil {
 		return nil, err
 	}
-	rows, err := q.Raw(
+	rows, err := tx.Raw(
 		`SELECT id, org_id, email, role, password_hash, auth_provider, created_at FROM users WHERE org_id = $1 ORDER BY created_at`,
 		orgID).Rows()
 	if err != nil {

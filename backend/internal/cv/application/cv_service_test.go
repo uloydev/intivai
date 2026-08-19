@@ -47,6 +47,10 @@ type stubRepo struct {
 	failCreate error
 }
 
+func (s *stubRepo) ListByIDs(ctx context.Context, orgID uuid.UUID, ids []uuid.UUID) (map[uuid.UUID]*domain.Candidate, error) {
+	return map[uuid.UUID]*domain.Candidate{}, nil
+}
+
 func (s *stubRepo) Create(ctx context.Context, c *domain.Candidate) error {
 	if s.failCreate != nil {
 		return s.failCreate

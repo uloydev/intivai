@@ -29,8 +29,8 @@ type ParseWorker struct {
 	log   zerolog.Logger
 }
 
-func NewParseWorker(pool *gorm.DB, repo cvdomain.CandidateRepository, store *storage.Storage, q *queue.Client, log zerolog.Logger) *ParseWorker {
-	return &ParseWorker{pool: pool, repo: repo, store: store, queue: q, log: log}
+func NewParseWorker(pool *gorm.DB, repo cvdomain.CandidateRepository, store *storage.Storage, queueClient *queue.Client, log zerolog.Logger) *ParseWorker {
+	return &ParseWorker{pool: pool, repo: repo, store: store, queue: queueClient, log: log}
 }
 
 func (w *ParseWorker) Register(mux *asynq.ServeMux) {

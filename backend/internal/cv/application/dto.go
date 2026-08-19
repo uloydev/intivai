@@ -1,17 +1,14 @@
 package application
 
 import (
-	"github.com/google/uuid"
+	scrdomain "github.com/intivai/backend/internal/screening/domain"
 )
 
 // ResumeData — structured CV extraction (DeepSeek json_object output).
-type ResumeData struct {
-	Skills          []string `json:"skills"`
-	ExperienceYears float64  `json:"experience_years"`
-	Education       string   `json:"education"`
-	Certifications  []string `json:"certifications"`
-	Summary         string   `json:"summary"`
-}
+// Canonical type lives in the screening domain (the scoring engine consumes
+// it); this package aliases it so the extract pipeline and the scorer always
+// speak the same shape.
+type ResumeData = scrdomain.ResumeData
 
 type ParseCVPayload struct {
 	OrgID       string `json:"org_id"`
@@ -21,9 +18,4 @@ type ParseCVPayload struct {
 type ExtractCVPayload struct {
 	OrgID       string `json:"org_id"`
 	CandidateID string `json:"candidate_id"`
-}
-
-func mustUUID(s string) uuid.UUID {
-	id, _ := uuid.Parse(s)
-	return id
 }
