@@ -5,6 +5,7 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/intivai/backend/internal/iam/application"
+	sharederr "github.com/intivai/backend/internal/shared/errors"
 	"github.com/intivai/backend/internal/shared/httpapi"
 )
 
@@ -32,7 +33,7 @@ type registerRequest struct {
 func (h *AuthHandler) Register(c *fiber.Ctx) error {
 	var req registerRequest
 	if err := c.BodyParser(&req); err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": "invalid body"})
+		return httpapi.Error(c, sharederr.NewDomainError("BAD_REQUEST", "invalid body"))
 	}
 	result, err := h.registerOrg.Execute(c.UserContext(), application.RegisterOrgCommand{
 		Name:          req.Name,
@@ -55,7 +56,7 @@ type loginRequest struct {
 func (h *AuthHandler) Login(c *fiber.Ctx) error {
 	var req loginRequest
 	if err := c.BodyParser(&req); err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": "invalid body"})
+		return httpapi.Error(c, sharederr.NewDomainError("BAD_REQUEST", "invalid body"))
 	}
 	result, err := h.authenticate.Execute(c.UserContext(), application.AuthenticateCommand{
 		OrgSlug:  req.OrgSlug,
@@ -94,7 +95,7 @@ func (h *AuthHandler) CreateUser(c *fiber.Ctx) error {
 	}
 	var req createUserRequest
 	if err := c.BodyParser(&req); err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": "invalid body"})
+		return httpapi.Error(c, sharederr.NewDomainError("BAD_REQUEST", "invalid body"))
 	}
 	result, err := h.createUser.Execute(c.UserContext(), actor, application.CreateUserCommand{
 		OrgID:    actor.OrgID,

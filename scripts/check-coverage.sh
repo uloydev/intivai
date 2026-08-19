@@ -21,6 +21,11 @@ while IFS= read -r line; do
       pkg=$(echo "$line" | awk '{print $2}')
       pct=0
       ;;
+    $'\t'*coverage:*)
+      pkg=$(echo "$line" | awk '{print $1}')
+      pct=$(echo "$line" | grep -oE '[0-9.]+%' | head -1 | tr -d '%' || true)
+      if [ -z "$pct" ]; then pct=0; fi
+      ;;
     ok\ *|FAIL\ *)
       pkg=$(echo "$line" | awk '{print $2}')
       pct=$(echo "$line" | grep -oE '[0-9.]+%' | head -1 | tr -d '%' || true)
@@ -38,7 +43,7 @@ while IFS= read -r line; do
   esac
 
   case "$pkg" in
-    pkg/*|*/shared/*|*/api|cmd/server|*/infrastructure/auth|*/memory/domain|*/pkg/db/migrations|github.com/intivai/backend/cmd/server) continue ;;
+    pkg/*|*/pkg/*|*/shared/*|*/api|cmd/server|*/infrastructure/auth|*/memory/domain|github.com/intivai/backend/cmd/server) continue ;;
     # Tool/model-gated: tests skip without tesseract/poppler (ocr) or the
     # downloaded embedding model; covered when run inside the app image.
     */infrastructure/ocr|github.com/intivai/backend/internal/embedding|github.com/intivai/backend/cmd/loadcheck) continue ;;
