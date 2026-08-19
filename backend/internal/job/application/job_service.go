@@ -10,6 +10,7 @@ import (
 	iamdomain "github.com/intivai/backend/internal/iam/domain"
 	jobdomain "github.com/intivai/backend/internal/job/domain"
 	"github.com/intivai/backend/internal/shared/errors"
+	"github.com/intivai/backend/pkg/queue"
 )
 
 type CreateJobCommand struct {
@@ -50,6 +51,7 @@ type UpdateJobCommand struct {
 	ScoringWeights    map[string]float64 // nil = keep
 	MinScoreToProceed *float64           // nil = keep
 	Status            string             // "" = keep
+	IsPublished       *bool
 }
 
 type JobResult struct {
@@ -70,15 +72,19 @@ type JobResult struct {
 	ScoringWeights    map[string]float64 `json:"scoring_weights,omitempty"`
 	MinScoreToProceed *float64           `json:"min_score_to_proceed,omitempty"`
 	Status            string             `json:"status"`
+	ProctoringMode    string             `json:"proctoring_mode"`
+	IsPublished       bool               `json:"is_published"`
+	Rubric            string             `json:"rubric,omitempty"`
 	CreatedAt         time.Time          `json:"created_at"`
 }
 
 type JobService struct {
 	repo jobdomain.JobRepository
+	q    *queue.Client
 }
 
-func NewJobService(repo jobdomain.JobRepository) *JobService {
-	return &JobService{repo: repo}
+func NewJobService(repo jobdomain.JobRepository, q *queue.Client) *JobService {
+	return &JobService{repo: repo, q: q}
 }
 
 func (s *JobService) Create(ctx context.Context, actor application.AuthContext, cmd CreateJobCommand) (*JobResult, error) {
@@ -119,6 +125,13 @@ func (s *JobService) Create(ctx context.Context, actor application.AuthContext, 
 	if err := s.repo.Create(ctx, job); err != nil {
 		return nil, err
 	}
+
+	if s.q != nil {
+		if _, err := s.q.Enqueue(ctx, TaskGenerateRubric, GenerateRubricPayload{JobID: job.ID.String(), OrgID: job.OrgID.String()}); err != nil {
+			return nil, err
+		}
+	}
+
 	return toResult(job), nil
 }
 
@@ -181,6 +194,9 @@ func (s *JobService) Update(ctx context.Context, actor application.AuthContext, 
 	if cmd.Status != "" {
 		job.Status = cmd.Status
 	}
+	if cmd.IsPublished != nil {
+		job.IsPublished = *cmd.IsPublished
+	}
 	if cmd.ScoringWeights != nil {
 		if err := job.SetScoringWeights(cmd.ScoringWeights); err != nil {
 			return nil, err
@@ -192,6 +208,13 @@ func (s *JobService) Update(ctx context.Context, actor application.AuthContext, 
 	if err := s.repo.Update(ctx, job); err != nil {
 		return nil, err
 	}
+
+	if s.q != nil {
+		if _, err := s.q.Enqueue(ctx, TaskGenerateRubric, GenerateRubricPayload{JobID: job.ID.String(), OrgID: job.OrgID.String()}); err != nil {
+			return nil, err
+		}
+	}
+
 	return toResult(job), nil
 }
 
@@ -240,6 +263,9 @@ func toResult(j *jobdomain.Job) *JobResult {
 		ScoringWeights:    j.ScoringWeights,
 		MinScoreToProceed: j.MinScoreToProceed,
 		Status:            j.Status,
+		ProctoringMode:    j.ProctoringMode,
+		IsPublished:       j.IsPublished,
+		Rubric:            string(j.Rubric),
 		CreatedAt:         j.CreatedAt,
 	}
 }

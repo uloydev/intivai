@@ -13,7 +13,7 @@ import (
 	"gorm.io/gorm"
 )
 
-const jobColumns = `id, org_id, title, description, location, employment_type, salary_min, salary_max, currency, required_skills, min_experience, responsibilities, requirements, nice_to_haves, benefits, scoring_weights, min_score_to_proceed, status, created_at`
+const jobColumns = `id, org_id, title, description, location, employment_type, salary_min, salary_max, currency, required_skills, min_experience, responsibilities, requirements, nice_to_haves, benefits, scoring_weights, min_score_to_proceed, status, proctoring_mode, is_published, rubric, created_at`
 
 type PostgresJobRepo struct {
 	pool *gorm.DB
@@ -45,11 +45,11 @@ func (r *PostgresJobRepo) Create(ctx context.Context, job *jobdomain.Job) error 
 	return q.WithContext(ctx).Exec(
 		`INSERT INTO jobs (id, org_id, title, description, location, employment_type, salary_min, salary_max, currency,
 		                   required_skills, min_experience, responsibilities, requirements, nice_to_haves, benefits,
-		                   scoring_weights, min_score_to_proceed, status, created_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)`,
+		                   scoring_weights, min_score_to_proceed, status, proctoring_mode, is_published, rubric, created_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)`,
 		job.ID, job.OrgID, job.Title, job.Description, job.Location, job.EmploymentType, job.SalaryMin, job.SalaryMax, job.Currency,
 		reqSkills, job.MinExperience, resp, reqs, nice, ben,
-		job.MarshalScoringWeights(), job.MinScoreToProceed, job.Status, job.CreatedAt).Error
+		job.MarshalScoringWeights(), job.MinScoreToProceed, job.Status, job.ProctoringMode, job.IsPublished, job.Rubric, job.CreatedAt).Error
 }
 
 func (r *PostgresJobRepo) GetByID(ctx context.Context, id uuid.UUID) (*jobdomain.Job, error) {
@@ -107,11 +107,11 @@ func (r *PostgresJobRepo) Update(ctx context.Context, job *jobdomain.Job) error 
 		`UPDATE jobs SET title = $1, description = $2, location = $3, employment_type = $4,
 		 salary_min = $5, salary_max = $6, currency = $7, required_skills = $8, min_experience = $9,
 		 responsibilities = $10, requirements = $11, nice_to_haves = $12, benefits = $13,
-		 scoring_weights = $14, min_score_to_proceed = $15, status = $16, updated_at = NOW() WHERE id = $17`,
+		 scoring_weights = $14, min_score_to_proceed = $15, status = $16, proctoring_mode = $17, is_published = $18, rubric = $19, updated_at = NOW() WHERE id = $20`,
 		job.Title, job.Description, job.Location, job.EmploymentType,
 		job.SalaryMin, job.SalaryMax, job.Currency, reqSkills, job.MinExperience,
 		resp, reqs, nice, ben,
-		job.MarshalScoringWeights(), job.MinScoreToProceed, job.Status, job.ID).Error
+		job.MarshalScoringWeights(), job.MinScoreToProceed, job.Status, job.ProctoringMode, job.IsPublished, job.Rubric, job.ID).Error
 }
 
 type rowScanner interface {
@@ -122,7 +122,7 @@ func scanJob(row rowScanner) (*jobdomain.Job, error) {
 	var (
 		j                             jobdomain.Job
 		skills, resp, reqs, nice, ben *[]byte
-		weights                       []byte
+		weights, rubric               []byte
 		minScore                      *float64
 		minExperience                 *int
 		salMin, salMax                *int
@@ -131,7 +131,7 @@ func scanJob(row rowScanner) (*jobdomain.Job, error) {
 		&j.ID, &j.OrgID, &j.Title, &j.Description, &j.Location, &j.EmploymentType,
 		&salMin, &salMax, &j.Currency,
 		&skills, &minExperience, &resp, &reqs, &nice, &ben,
-		&weights, &minScore, &j.Status, &j.CreatedAt,
+		&weights, &minScore, &j.Status, &j.ProctoringMode, &j.IsPublished, &rubric, &j.CreatedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, jobdomain.ErrNotFound
@@ -163,6 +163,9 @@ func scanJob(row rowScanner) (*jobdomain.Job, error) {
 	if len(weights) > 0 {
 		_ = json.Unmarshal(weights, &j.ScoringWeights)
 	}
+	if len(rubric) > 0 && string(rubric) != "null" {
+		j.Rubric = rubric
+	}
 	return &j, nil
 }
 
@@ -185,6 +188,9 @@ type PublicJobDTO struct {
 	NiceToHaves      []string  `json:"nice_to_haves"`
 	Benefits         []string  `json:"benefits"`
 	Status           string    `json:"status"`
+	ProctoringMode   string    `json:"proctoring_mode"`
+	IsPublished      bool      `json:"is_published"`
+	Rubric           string    `json:"rubric,omitempty"`
 	CreatedAt        string    `json:"created_at"`
 }
 
@@ -192,7 +198,7 @@ func (r *PostgresJobRepo) ListPublicActive(ctx context.Context, orgSlug string) 
 	rows, err := r.pool.WithContext(ctx).Raw(
 		`SELECT id, org_id, org_name, org_slug, title, description, location, employment_type,
 		        salary_min, salary_max, currency, required_skills, min_experience,
-		        responsibilities, requirements, nice_to_haves, benefits, status, created_at
+		        responsibilities, requirements, nice_to_haves, benefits, status, proctoring_mode, is_published, rubric, created_at
 		 FROM public_active_jobs_lookup($1)`, orgSlug).Rows()
 	if err != nil {
 		return nil, err
@@ -204,6 +210,7 @@ func (r *PostgresJobRepo) ListPublicActive(ctx context.Context, orgSlug string) 
 		var (
 			j                            PublicJobDTO
 			skills, resp, req, nice, ben []byte
+			rubric                       []byte
 			minExp                       *int
 			salMin, salMax               *int
 			createdAt                    time.Time
@@ -211,7 +218,7 @@ func (r *PostgresJobRepo) ListPublicActive(ctx context.Context, orgSlug string) 
 		if err := rows.Scan(
 			&j.ID, &j.OrgID, &j.OrgName, &j.OrgSlug, &j.Title, &j.Description, &j.Location, &j.EmploymentType,
 			&salMin, &salMax, &j.Currency, &skills, &minExp,
-			&resp, &req, &nice, &ben, &j.Status, &createdAt,
+			&resp, &req, &nice, &ben, &j.Status, &j.ProctoringMode, &j.IsPublished, &rubric, &createdAt,
 		); err != nil {
 			return nil, err
 		}
@@ -236,6 +243,9 @@ func (r *PostgresJobRepo) ListPublicActive(ctx context.Context, orgSlug string) 
 		if len(ben) > 0 && string(ben) != "null" {
 			_ = json.Unmarshal(ben, &j.Benefits)
 		}
+		if len(rubric) > 0 && string(rubric) != "null" {
+			j.Rubric = string(rubric)
+		}
 		out = append(out, &j)
 	}
 	return out, rows.Err()
@@ -245,12 +255,13 @@ func (r *PostgresJobRepo) GetPublicDetail(ctx context.Context, jobID uuid.UUID) 
 	row := r.pool.WithContext(ctx).Raw(
 		`SELECT id, org_id, org_name, org_slug, title, description, location, employment_type,
 		        salary_min, salary_max, currency, required_skills, min_experience,
-		        responsibilities, requirements, nice_to_haves, benefits, status, created_at
+		        responsibilities, requirements, nice_to_haves, benefits, status, proctoring_mode, is_published, rubric, created_at
 		 FROM public_job_detail_lookup($1)`, jobID).Row()
 
 	var (
 		j                            PublicJobDTO
 		skills, resp, req, nice, ben []byte
+		rubric                       []byte
 		minExp                       *int
 		salMin, salMax               *int
 		createdAt                    time.Time
@@ -258,7 +269,7 @@ func (r *PostgresJobRepo) GetPublicDetail(ctx context.Context, jobID uuid.UUID) 
 	err := row.Scan(
 		&j.ID, &j.OrgID, &j.OrgName, &j.OrgSlug, &j.Title, &j.Description, &j.Location, &j.EmploymentType,
 		&salMin, &salMax, &j.Currency, &skills, &minExp,
-		&resp, &req, &nice, &ben, &j.Status, &createdAt,
+		&resp, &req, &nice, &ben, &j.Status, &j.ProctoringMode, &j.IsPublished, &rubric, &createdAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, jobdomain.ErrNotFound
@@ -286,6 +297,9 @@ func (r *PostgresJobRepo) GetPublicDetail(ctx context.Context, jobID uuid.UUID) 
 	}
 	if len(ben) > 0 && string(ben) != "null" {
 		_ = json.Unmarshal(ben, &j.Benefits)
+	}
+	if len(rubric) > 0 && string(rubric) != "null" {
+		j.Rubric = string(rubric)
 	}
 	return &j, nil
 }

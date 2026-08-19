@@ -16,6 +16,7 @@ import (
 	jobdomain "github.com/intivai/backend/internal/job/domain"
 	"github.com/intivai/backend/internal/job/infrastructure/persistence"
 	notifapp "github.com/intivai/backend/internal/notification/application"
+	sharederr "github.com/intivai/backend/internal/shared/errors"
 	"github.com/intivai/backend/internal/shared/httpapi"
 	"github.com/intivai/backend/pkg/db"
 	"github.com/intivai/backend/pkg/queue"
@@ -51,7 +52,7 @@ func (h *PublicJobHandler) ListPublicJobs(c *fiber.Ctx) error {
 	orgSlug := c.Query("org", "")
 	jobs, err := h.jobRepo.ListPublicActive(c.UserContext(), orgSlug)
 	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "internal server error"})
+		return httpapi.Error(c, sharederr.NewDomainError("INTERNAL_ERROR", "internal server error"))
 	}
 	return httpapi.OK(c, jobs)
 }
@@ -60,14 +61,14 @@ func (h *PublicJobHandler) ListPublicJobs(c *fiber.Ctx) error {
 func (h *PublicJobHandler) GetPublicJob(c *fiber.Ctx) error {
 	id, err := uuid.Parse(c.Params("id"))
 	if err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid job id"})
+		return httpapi.Error(c, sharederr.NewDomainError("BAD_REQUEST", "invalid job id"))
 	}
 	job, err := h.jobRepo.GetPublicDetail(c.UserContext(), id)
 	if err == jobdomain.ErrNotFound {
 		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "job not found or inactive"})
 	}
 	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "internal server error"})
+		return httpapi.Error(c, sharederr.NewDomainError("INTERNAL_ERROR", "internal server error"))
 	}
 	return httpapi.OK(c, job)
 }
@@ -83,38 +84,38 @@ type PublicApplyResponse struct {
 func (h *PublicJobHandler) Apply(c *fiber.Ctx) error {
 	jobID, err := uuid.Parse(c.Params("id"))
 	if err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid job id"})
+		return httpapi.Error(c, sharederr.NewDomainError("INVALID_INPUT", "invalid job id"))
 	}
 
 	name := strings.TrimSpace(c.FormValue("name"))
 	email := strings.TrimSpace(c.FormValue("email"))
 	if name == "" || email == "" {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "name and email are required"})
+		return httpapi.Error(c, sharederr.NewDomainError("INVALID_INPUT", "name and email are required"))
 	}
 
 	fileHeader, err := c.FormFile("file")
 	if err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "resume PDF file is required"})
+		return httpapi.Error(c, sharederr.NewDomainError("INVALID_INPUT", "resume PDF file is required"))
 	}
 
 	// 10MB limit
 	if fileHeader.Size > 10*1024*1024 {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "file size exceeds 10MB limit"})
+		return httpapi.Error(c, sharederr.NewDomainError("INVALID_INPUT", "file size exceeds 10MB limit"))
 	}
 
 	file, err := fileHeader.Open()
 	if err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "cannot open uploaded file"})
+		return httpapi.Error(c, sharederr.NewDomainError("INVALID_INPUT", "cannot open uploaded file"))
 	}
 	defer func() { _ = file.Close() }()
 
 	fileBytes, err := io.ReadAll(file)
 	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "cannot read file bytes"})
+		return httpapi.Error(c, sharederr.NewDomainError("INTERNAL_ERROR", "cannot read file bytes"))
 	}
 	// Same validation as the authed upload path: non-empty PDF magic.
 	if len(fileBytes) < 5 || !bytes.HasPrefix(fileBytes, []byte("%PDF-")) {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "resume must be a valid PDF file"})
+		return httpapi.Error(c, sharederr.NewDomainError("INVALID_INPUT", "resume must be a valid PDF file"))
 	}
 
 	// Verify job exists and is active
@@ -123,11 +124,12 @@ func (h *PublicJobHandler) Apply(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "job not found or inactive"})
 	}
 	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "internal server error"})
+		return httpapi.Error(c, sharederr.NewDomainError("INTERNAL_ERROR", "internal server error"))
 	}
 
 	candidate := &cvdomain.Candidate{}
 	contentType := "application/pdf"
+	isNewCandidate := false
 
 	err = db.RunInTx(c.UserContext(), h.pool, job.OrgID.String(), func(txCtx context.Context) error {
 		gormTx, ok := db.TxFrom(txCtx)
@@ -153,6 +155,7 @@ func (h *PublicJobHandler) Apply(c *fiber.Ctx) error {
 				return err
 			}
 		case errors.Is(err, sql.ErrNoRows):
+			isNewCandidate = true
 			candidate, err = cvdomain.NewCandidate(job.OrgID, name, email)
 			if err != nil {
 				return err
@@ -174,28 +177,35 @@ func (h *PublicJobHandler) Apply(c *fiber.Ctx) error {
 
 		var appID uuid.UUID
 		return gormTx.Raw(
-			`INSERT INTO applications (id, org_id, candidate_id, job_id, status, created_at, updated_at)
-			 VALUES (?, ?, ?, ?, 'screening', NOW(), NOW())
+			`INSERT INTO applications (id, org_id, candidate_id, job_id, status, stage, created_at, updated_at)
+			 VALUES (?, ?, ?, ?, 'screening', 'applied', NOW(), NOW())
 			 ON CONFLICT (candidate_id, job_id) DO UPDATE SET updated_at = NOW()
 			 RETURNING id`,
 			uuid.New(), job.OrgID, candidate.ID, jobID,
 		).Row().Scan(&appID)
 	})
 	if err != nil {
-		_ = h.store.Delete(c.UserContext(), candidate.CVPath)
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to save candidate application record"})
+		if isNewCandidate {
+			_ = h.store.Delete(c.UserContext(), candidate.CVPath)
+		}
+		return httpapi.Error(c, sharederr.NewDomainError("INTERNAL_ERROR", "failed to save candidate application record"))
 	}
 
 	// Enqueue parse task
 	if _, err := h.queue.Enqueue(c.UserContext(), cvapp.TaskParseCV, cvapp.ParseCVPayload{
 		OrgID: job.OrgID.String(), CandidateID: candidate.ID.String(),
 	}); err != nil {
-		_ = h.store.Delete(c.UserContext(), candidate.CVPath)
-		_ = db.RunInTx(c.UserContext(), h.pool, job.OrgID.String(), func(txCtx context.Context) error {
-			_ = h.candRepo.Delete(txCtx, candidate.ID)
-			return nil
-		})
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to enqueue cv processing"})
+		if isNewCandidate {
+			_ = h.store.Delete(c.UserContext(), candidate.CVPath)
+			_ = db.RunInTx(c.UserContext(), h.pool, job.OrgID.String(), func(txCtx context.Context) error {
+				if tx, ok := db.TxFrom(txCtx); ok {
+					_ = tx.Exec("DELETE FROM applications WHERE candidate_id = ? AND job_id = ?", candidate.ID, jobID)
+				}
+				_ = h.candRepo.Delete(txCtx, candidate.ID)
+				return nil
+			})
+		}
+		return httpapi.Error(c, sharederr.NewDomainError("INTERNAL_ERROR", "failed to enqueue cv processing"))
 	}
 
 	// Enqueue confirmation email

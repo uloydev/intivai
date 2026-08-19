@@ -96,14 +96,23 @@ export function JobsPage() {
     onError: (e) => toast.error(e instanceof Error ? e.message : "Create failed"),
   })
 
-  const patchStatus = useMutation({
-    mutationFn: ({ id, status }: { id: string; status: string }) =>
-      api.patch<Job>(`/jobs/${id}`, { status }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["jobs"] })
-      toast.success("Job status updated")
-    },
-  })
+	const patchStatus = useMutation({
+		mutationFn: ({ id, status }: { id: string; status: string }) =>
+			api.patch<Job>(`/jobs/${id}`, { status }),
+		onSuccess: () => {
+			qc.invalidateQueries({ queryKey: ["jobs"] })
+			toast.success("Job status updated")
+		},
+	})
+
+	const patchPublished = useMutation({
+		mutationFn: ({ id, is_published }: { id: string; is_published: boolean }) =>
+			api.patch<Job>(`/jobs/${id}`, { is_published }),
+		onSuccess: (data) => {
+			qc.invalidateQueries({ queryKey: ["jobs"] })
+			toast.success(data.is_published ? "Job published to careers page" : "Job removed from careers page")
+		},
+	})
 
   function toggleSkill(skill: string) {
     const list = skills.split(",").map((s) => s.trim()).filter(Boolean)
@@ -226,15 +235,26 @@ export function JobsPage() {
                         </span>
                       </div>
                     </div>
-                    <Badge
-                      className={
-                        job.status === "active"
-                          ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20"
-                          : "bg-muted text-muted-foreground"
-                      }
-                    >
-                      {job.status}
-                    </Badge>
+                    <div className="flex flex-col items-end gap-1">
+                      <Badge
+                        className={
+                          job.status === "active"
+                            ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20"
+                            : "bg-muted text-muted-foreground"
+                        }
+                      >
+                        {job.status}
+                      </Badge>
+                      {job.is_published ? (
+                        <Badge variant="outline" className="text-[10px] bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20">
+                          Published
+                        </Badge>
+                      ) : (
+                        <Badge variant="outline" className="text-[10px] text-muted-foreground">
+                          Internal
+                        </Badge>
+                      )}
+                    </div>
                   </div>
 
                   {/* Relational Pipeline Badges */}
@@ -267,19 +287,34 @@ export function JobsPage() {
                       View Applicants ({applicantCount}) →
                     </Link>
                   </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="h-8 text-xs text-muted-foreground"
-                    onClick={() =>
-                      patchStatus.mutate({
-                        id: job.id,
-                        status: job.status === "active" ? "archived" : "active",
-                      })
-                    }
-                  >
-                    {job.status === "active" ? "Archive" : "Activate"}
-                  </Button>
+                  <div className="flex gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-8 text-xs"
+                      onClick={() =>
+                        patchPublished.mutate({
+                          id: job.id,
+                          is_published: !job.is_published,
+                        })
+                      }
+                    >
+                      {job.is_published ? "Unpublish" : "Publish"}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-8 text-xs text-muted-foreground"
+                      onClick={() =>
+                        patchStatus.mutate({
+                          id: job.id,
+                          status: job.status === "active" ? "archived" : "active",
+                        })
+                      }
+                    >
+                      {job.status === "active" ? "Archive" : "Activate"}
+                    </Button>
+                  </div>
                 </div>
               </div>
             )

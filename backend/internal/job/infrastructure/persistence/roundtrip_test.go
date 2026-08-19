@@ -134,6 +134,7 @@ func TestPublicJobQueries(t *testing.T) {
 	job.Requirements = []string{"5+ years Go", "PostgreSQL proficiency"}
 	job.NiceToHaves = []string{"Docker", "Kubernetes"}
 	job.Benefits = []string{"Health insurance", "401k"}
+	job.IsPublished = true
 
 	if err := db.RunInTx(ctx, pool, orgID, func(tctx context.Context) error {
 		return repo.Create(tctx, job)

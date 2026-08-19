@@ -5,6 +5,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/intivai/backend/internal/iam/api"
 	"github.com/intivai/backend/internal/job/application"
+	sharederr "github.com/intivai/backend/internal/shared/errors"
 	"github.com/intivai/backend/internal/shared/httpapi"
 )
 
@@ -54,6 +55,7 @@ type jobRequest struct {
 	ScoringWeights    map[string]float64 `json:"scoring_weights"`
 	MinScoreToProceed *float64           `json:"min_score_to_proceed"`
 	Status            string             `json:"status"`
+	IsPublished       *bool              `json:"is_published"`
 }
 
 func (h *JobHandler) Create(c *fiber.Ctx) error {
@@ -63,7 +65,7 @@ func (h *JobHandler) Create(c *fiber.Ctx) error {
 	}
 	var req jobRequest
 	if err := c.BodyParser(&req); err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": "invalid body"})
+		return httpapi.Error(c, sharederr.NewDomainError("BAD_REQUEST", "invalid body"))
 	}
 	result, err := h.svc.Create(c.UserContext(), actor, application.CreateJobCommand{
 		Title:             derefStr(req.Title),
@@ -95,11 +97,11 @@ func (h *JobHandler) Update(c *fiber.Ctx) error {
 	}
 	id, err := uuid.Parse(c.Params("id"))
 	if err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": "invalid job id"})
+		return httpapi.Error(c, sharederr.NewDomainError("BAD_REQUEST", "invalid job id"))
 	}
 	var req jobRequest
 	if err := c.BodyParser(&req); err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": "invalid body"})
+		return httpapi.Error(c, sharederr.NewDomainError("BAD_REQUEST", "invalid body"))
 	}
 	result, err := h.svc.Update(c.UserContext(), actor, application.UpdateJobCommand{
 		JobID: id, Title: req.Title, Description: req.Description,
@@ -110,6 +112,7 @@ func (h *JobHandler) Update(c *fiber.Ctx) error {
 		NiceToHaves: req.NiceToHaves, Benefits: req.Benefits,
 		ScoringWeights:    req.ScoringWeights,
 		MinScoreToProceed: req.MinScoreToProceed, Status: req.Status,
+		IsPublished: req.IsPublished,
 	})
 	if err != nil {
 		return httpapi.Error(c, err)
@@ -124,7 +127,7 @@ func (h *JobHandler) Get(c *fiber.Ctx) error {
 	}
 	id, err := uuid.Parse(c.Params("id"))
 	if err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": "invalid job id"})
+		return httpapi.Error(c, sharederr.NewDomainError("BAD_REQUEST", "invalid job id"))
 	}
 	result, err := h.svc.Get(c.UserContext(), actor, id)
 	if err != nil {

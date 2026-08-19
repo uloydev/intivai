@@ -35,6 +35,9 @@ type Job struct {
 	ScoringWeights    map[string]float64
 	MinScoreToProceed *float64
 	Status            string
+	ProctoringMode    string
+	IsPublished       bool
+	Rubric            json.RawMessage
 }
 
 func NewJob(orgID uuid.UUID, title, description string, requiredSkills []string, minExperience int) (*Job, error) {
@@ -56,6 +59,7 @@ func NewJob(orgID uuid.UUID, title, description string, requiredSkills []string,
 		NiceToHaves:      []string{},
 		Benefits:         []string{},
 		Status:           StatusActive,
+		IsPublished:      false,
 	}, nil
 }
 
