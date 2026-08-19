@@ -49,10 +49,9 @@ func (e *Evaluator) Evaluate(ctx context.Context, orgID string, pairs []ivdomain
 	raw, _ := json.Marshal(pairs)
 	out, err := e.llm.StructuredOutput(ctx, llm.StructuredRequest{
 		OrgID:  orgID,
-		Model:  "multi-qa-MiniLM-L6-cos-v1",
 		System: evalSystem,
 		User:   "Transcript (last " + fmt.Sprint(len(pairs)) + " Q&A):\n" + string(raw),
-		Schema: evalSchema{},
+		Schema: &evalSchema{},
 	})
 	if err != nil {
 		return evaldomain.Report{}, fmt.Errorf("evaluate: %w", err)

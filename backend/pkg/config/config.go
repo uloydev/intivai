@@ -129,7 +129,7 @@ func Load() (*Config, error) {
 
 	cfg.LLM.DeepSeekAPIKey = v.GetString("DEEPSEEK_API_KEY")
 	cfg.LLM.DeepSeekBaseURL = getString("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1")
-	cfg.LLM.DeepSeekModel = getString("DEEPSEEK_MODEL", "deepseek-chat")
+	cfg.LLM.DeepSeekModel = getString("DEEPSEEK_MODEL", "deepseek-v4-flash")
 	cfg.LLM.FallbackBaseURL = v.GetString("LLM_FALLBACK_BASE_URL")
 	cfg.LLM.FallbackAPIKey = v.GetString("LLM_FALLBACK_API_KEY")
 	cfg.LLM.MaxRetries = getInt("LLM_MAX_RETRIES", 3)

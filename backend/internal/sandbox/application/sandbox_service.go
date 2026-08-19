@@ -69,7 +69,7 @@ func (s *SandboxService) EvaluateCode(ctx context.Context, orgID string, languag
 		OrgID:  orgID,
 		System: codeReviewSystem,
 		User:   userPrompt,
-		Schema: domain.AICodeReview{},
+		Schema: &domain.AICodeReview{},
 	})
 	if err != nil {
 		// Never fabricate a baseline review — a broken submission must not

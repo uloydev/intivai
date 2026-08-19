@@ -102,10 +102,9 @@ Output JSON exactly matching the following schema:
 		} `json:"dimensions"`
 	}
 
-	var schema RubricSchema
+	schema := &RubricSchema{}
 	out, err := w.llmClient.StructuredOutput(ctx, llm.StructuredRequest{
 		OrgID:  job.OrgID.String(),
-		Model:  "multi-qa-MiniLM-L6-cos-v1", // or appropriate model
 		System: sys,
 		User:   user,
 		Schema: schema,
