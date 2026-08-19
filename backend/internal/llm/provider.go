@@ -6,6 +6,7 @@ import (
 
 // ChatRequest is provider-agnostic.
 type ChatRequest struct {
+	OrgID          string
 	Model          string
 	Messages       []Message
 	ResponseFormat string // "json_object" | ""
@@ -30,6 +31,7 @@ type Usage struct {
 }
 
 type StructuredRequest struct {
+	OrgID  string
 	Model  string
 	System string
 	User   string

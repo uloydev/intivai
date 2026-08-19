@@ -24,7 +24,7 @@ func (f *flakyProvider) Chat(ctx context.Context, req ChatRequest) (*ChatRespons
 
 func TestClientChatRetriesTransientFailures(t *testing.T) {
 	primary := &flakyProvider{fails: 2}
-	client := NewClient(primary, nil, 3)
+	client := NewClient(primary, nil, nil, 3)
 	resp, err := client.Chat(context.Background(), ChatRequest{})
 	if err != nil {
 		t.Fatal(err)
@@ -37,7 +37,7 @@ func TestClientChatRetriesTransientFailures(t *testing.T) {
 func TestClientChatFallsBackAfterRetries(t *testing.T) {
 	primary := &flakyProvider{fails: 99}
 	fallback := &mockProvider{chunks: []string{"fb"}}
-	client := NewClient(primary, fallback, 2)
+	client := NewClient(primary, fallback, nil, 2)
 	resp, err := client.Chat(context.Background(), ChatRequest{})
 	if err != nil {
 		t.Fatal(err)
@@ -53,7 +53,7 @@ func TestClientChatDoesNotRetryNonTransient(t *testing.T) {
 		count++
 		return nil, errors.New("bad request")
 	}}
-	client := NewClient(primary, nil, 5)
+	client := NewClient(primary, nil, nil, 5)
 	_, err := client.Chat(context.Background(), ChatRequest{})
 	if err == nil {
 		t.Fatal("expected error")
@@ -83,7 +83,7 @@ func (c *countingProvider) CountTokens(text string) int { return 0 }
 
 func TestClientChatAllProvidersFailed(t *testing.T) {
 	primary := &flakyProvider{fails: 99}
-	client := NewClient(primary, nil, 2)
+	client := NewClient(primary, nil, nil, 2)
 	_, err := client.Chat(context.Background(), ChatRequest{})
 	if err == nil {
 		t.Fatal("expected error")
@@ -117,7 +117,7 @@ func TestCountTokensFallback(t *testing.T) {
 
 func TestStructuredOutputDelegates(t *testing.T) {
 	mock := &mockProvider{structured: "delegated"}
-	client := NewClient(mock, nil, 1)
+	client := NewClient(mock, nil, nil, 1)
 	res, err := client.StructuredOutput(context.Background(), StructuredRequest{})
 	if err != nil {
 		t.Fatal(err)

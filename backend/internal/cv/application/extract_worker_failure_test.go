@@ -75,7 +75,7 @@ func TestExtractWorkerFailurePath(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	worker := NewExtractWorker(pool, cvrepo.NewPostgresCandidateRepo(pool), scrrepo.NewPostgresApplicationRepo(pool), nil, failingLLM{}, queue.NewClient(redisAddr), zerolog.Nop())
+	worker := NewExtractWorker(pool, cvrepo.NewPostgresCandidateRepo(pool), scrrepo.NewPostgresApplicationRepo(pool), nil, failingLLM{}, queue.NewClient(redisAddr), "http://localhost:5173", zerolog.Nop())
 	payload, _ := json.Marshal(ExtractCVPayload{OrgID: orgID, CandidateID: candID.String()})
 	err = worker.handle(ctx, asynq.NewTask(TaskExtractCV, payload))
 	if !errors.Is(err, ErrExtractTransient) {

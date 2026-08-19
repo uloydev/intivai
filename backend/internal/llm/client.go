@@ -12,25 +12,35 @@ import (
 type Client struct {
 	primary    Provider
 	fallback   Provider
+	ledger     TokenLedger
 	maxRetries int
 	onRetry    func(attempt int, err error)
 }
 
-func NewClient(primary, fallback Provider, maxRetries int) *Client {
+func NewClient(primary, fallback Provider, ledger TokenLedger, maxRetries int) *Client {
 	if maxRetries <= 0 {
 		maxRetries = 3
 	}
-	return &Client{primary: primary, fallback: fallback, maxRetries: maxRetries}
+	return &Client{primary: primary, fallback: fallback, ledger: ledger, maxRetries: maxRetries}
 }
 
 // OnRetry registers a hook (metrics/logging).
 func (c *Client) OnRetry(fn func(attempt int, err error)) { c.onRetry = fn }
 
 func (c *Client) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, error) {
+	if c.ledger != nil && req.OrgID != "" {
+		// Pre-flight check with a fixed estimate (e.g., 500) just to fail fast if totally out of budget.
+		if err := c.ledger.CheckAndRecord(ctx, req.OrgID, 500); err != nil {
+			return nil, err
+		}
+	}
+
+	var resp *ChatResponse
+	var err error
 	for attempt := 0; attempt < c.maxRetries; attempt++ {
-		resp, err := c.primary.Chat(ctx, req)
+		resp, err = c.primary.Chat(ctx, req)
 		if err == nil {
-			return resp, nil
+			break
 		}
 		if c.onRetry != nil {
 			c.onRetry(attempt+1, err)
@@ -47,13 +57,34 @@ func (c *Client) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, erro
 			}
 		}
 	}
-	if c.fallback != nil {
-		return c.fallback.Chat(ctx, req)
+
+	if err != nil && c.fallback != nil {
+		resp, err = c.fallback.Chat(ctx, req)
 	}
-	return nil, fmt.Errorf("all providers failed after %d attempts", c.maxRetries)
+
+	if err != nil {
+		return nil, fmt.Errorf("all providers failed after %d attempts: %w", c.maxRetries, err)
+	}
+
+	if c.ledger != nil && req.OrgID != "" {
+		// Post-flight true-up: we pre-charged 500, so we record the difference
+		total := resp.Usage.PromptTokens + resp.Usage.CompletionTokens
+		diff := total - 500
+		if diff > 0 {
+			_ = c.ledger.CheckAndRecord(context.Background(), req.OrgID, diff)
+		}
+	}
+
+	return resp, nil
 }
 
 func (c *Client) ChatStream(ctx context.Context, req ChatRequest) (<-chan string, error) {
+	if c.ledger != nil && req.OrgID != "" {
+		if err := c.ledger.CheckAndRecord(ctx, req.OrgID, 1500); err != nil {
+			return nil, err
+		}
+	}
+
 	ch, err := c.primary.ChatStream(ctx, req)
 	if err == nil {
 		return ch, nil
@@ -65,6 +96,12 @@ func (c *Client) ChatStream(ctx context.Context, req ChatRequest) (<-chan string
 }
 
 func (c *Client) StructuredOutput(ctx context.Context, req StructuredRequest) (any, error) {
+	if c.ledger != nil && req.OrgID != "" {
+		if err := c.ledger.CheckAndRecord(ctx, req.OrgID, 800); err != nil {
+			return nil, err
+		}
+	}
+
 	out, err := c.primary.StructuredOutput(ctx, req)
 	if err != nil && c.fallback != nil {
 		return c.fallback.StructuredOutput(ctx, req)

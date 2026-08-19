@@ -81,7 +81,7 @@ func (w *EvaluationWorker) handle(ctx context.Context, t *asynq.Task) error {
 	}
 
 	// Phase 2: LLM evaluation (no tx held).
-	report, err := w.evaluator.Evaluate(ctx, pairs)
+	report, err := w.evaluator.Evaluate(ctx, p.OrgID, pairs)
 	if err != nil {
 		return err
 	}

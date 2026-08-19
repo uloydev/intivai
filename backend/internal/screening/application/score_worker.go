@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
 	cvdomain "github.com/intivai/backend/internal/cv/domain"
+	"github.com/intivai/backend/internal/embedding"
 	jobdomain "github.com/intivai/backend/internal/job/domain"
 	scrdomain "github.com/intivai/backend/internal/screening/domain"
 	"github.com/intivai/backend/pkg/db"
@@ -30,11 +31,12 @@ type ScoreWorker struct {
 	candRepo cvdomain.CandidateRepository
 	jobRepo  jobdomain.JobRepository
 	orgs     OrgSettingsReader
+	embedder embedding.Embedder
 	log      zerolog.Logger
 }
 
-func NewScoreWorker(pool *gorm.DB, appRepo scrdomain.ApplicationRepository, candRepo cvdomain.CandidateRepository, jobRepo jobdomain.JobRepository, orgs OrgSettingsReader, log zerolog.Logger) *ScoreWorker {
-	return &ScoreWorker{pool: pool, appRepo: appRepo, candRepo: candRepo, jobRepo: jobRepo, orgs: orgs, log: log}
+func NewScoreWorker(pool *gorm.DB, appRepo scrdomain.ApplicationRepository, candRepo cvdomain.CandidateRepository, jobRepo jobdomain.JobRepository, orgs OrgSettingsReader, embedder embedding.Embedder, log zerolog.Logger) *ScoreWorker {
+	return &ScoreWorker{pool: pool, appRepo: appRepo, candRepo: candRepo, jobRepo: jobRepo, orgs: orgs, embedder: embedder, log: log}
 }
 
 func (w *ScoreWorker) Register(mux *asynq.ServeMux) {
@@ -78,10 +80,27 @@ func (w *ScoreWorker) handle(ctx context.Context, t *asynq.Task) error {
 			return asynq.SkipRetry
 		}
 
-		semantic := scrdomain.SemanticScore(
-			candidate.CVRawText+" "+resume.Summary+" "+strings.Join(resume.Skills, " "),
-			job.Description+" "+strings.Join(job.RequiredSkills, " "),
-		)
+		candText := candidate.CVRawText + " " + resume.Summary + " " + strings.Join(resume.Skills, " ")
+		jobText := job.Description + " " + strings.Join(job.RequiredSkills, " ")
+
+		var semantic float64
+		if w.embedder != nil {
+			candVec, err := w.embedder.Embed(tctx, candText)
+			if err != nil {
+				w.log.Warn().Err(err).Msg("failed to embed candidate text, falling back to keyword overlap")
+			}
+			jobVec, err := w.embedder.Embed(tctx, jobText)
+			if err != nil {
+				w.log.Warn().Err(err).Msg("failed to embed job text, falling back to keyword overlap")
+			}
+			if len(candVec) > 0 && len(jobVec) > 0 {
+				semantic = scrdomain.SemanticScoreWithEmbedder(candVec, jobVec)
+			}
+		}
+
+		if semantic == 0 {
+			semantic = scrdomain.SemanticScore(candText, jobText)
+		}
 
 		result := scrdomain.Score(resume, scrdomain.JobInfo{
 			RequiredSkills:    job.RequiredSkills,

@@ -57,7 +57,7 @@ func join(parts []string) string {
 
 func TestChatStreamDeliversChunksInOrderAndCloses(t *testing.T) {
 	mock := &mockProvider{chunks: []string{"Hello", " ", "world", "!"}}
-	client := NewClient(mock, nil, 1)
+	client := NewClient(mock, nil, nil, 1)
 
 	ch, err := client.ChatStream(context.Background(), ChatRequest{})
 	if err != nil {
@@ -81,7 +81,7 @@ func TestChatStreamDeliversChunksInOrderAndCloses(t *testing.T) {
 func TestChatStreamFallsBackToSecondary(t *testing.T) {
 	primary := &mockProvider{streamErr: fmt.Errorf("%w: upstream down", ErrUpstream)}
 	fallback := &mockProvider{chunks: []string{"fallback", "-ok"}}
-	client := NewClient(primary, fallback, 1)
+	client := NewClient(primary, fallback, nil, 1)
 
 	ch, err := client.ChatStream(context.Background(), ChatRequest{})
 	if err != nil {
@@ -95,7 +95,7 @@ func TestChatStreamFallsBackToSecondary(t *testing.T) {
 
 func TestChatStreamPropagatesErrorWithoutFallback(t *testing.T) {
 	primary := &mockProvider{streamErr: errors.New("upstream down")}
-	client := NewClient(primary, nil, 1)
+	client := NewClient(primary, nil, nil, 1)
 
 	if _, err := client.ChatStream(context.Background(), ChatRequest{}); err == nil {
 		t.Fatal("expected error")
