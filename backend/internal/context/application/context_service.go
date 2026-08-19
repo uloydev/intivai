@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -15,7 +16,8 @@ import (
 	"github.com/intivai/backend/internal/iam/application"
 	iamdomain "github.com/intivai/backend/internal/iam/domain"
 	memdomain "github.com/intivai/backend/internal/memory/domain"
-	"github.com/intivai/backend/internal/shared/errors"
+	sharederr "github.com/intivai/backend/internal/shared/errors"
+	"github.com/intivai/backend/internal/shared/uuidx"
 	"github.com/intivai/backend/pkg/db"
 	"github.com/intivai/backend/pkg/queue"
 	"github.com/intivai/backend/pkg/storage"
@@ -38,8 +40,8 @@ type ContextService struct {
 	log   zerolog.Logger
 }
 
-func NewContextService(pool *gorm.DB, repo ctxdomain.ContextRepository, store *storage.Storage, q *queue.Client, log zerolog.Logger) *ContextService {
-	return &ContextService{pool: pool, repo: repo, store: store, queue: q, log: log}
+func NewContextService(pool *gorm.DB, repo ctxdomain.ContextRepository, store *storage.Storage, queueClient *queue.Client, log zerolog.Logger) *ContextService {
+	return &ContextService{pool: pool, repo: repo, store: store, queue: queueClient, log: log}
 }
 
 type ContextResult struct {
@@ -57,13 +59,13 @@ func (s *ContextService) UploadContext(ctx context.Context, actor application.Au
 		return nil, err
 	}
 	if len(content) == 0 {
-		return nil, errors.NewDomainError("CTX_EMPTY", "context content is empty")
+		return nil, sharederr.NewDomainError("CTX_EMPTY", "context content is empty")
 	}
 	if len(content) > ctxMaxBytes {
-		return nil, errors.NewDomainError("CTX_TOO_LARGE", "context content exceeds 64KB")
+		return nil, sharederr.NewDomainError("CTX_TOO_LARGE", "context content exceeds 64KB")
 	}
 	if ctxdomain.ContainsInjection(string(content)) {
-		return nil, errors.NewDomainError("CTX_INJECTION", "context content contains forbidden content")
+		return nil, sharederr.NewDomainError("CTX_INJECTION", "context content contains forbidden content")
 	}
 	hash := sha256.Sum256(content)
 	hashHex := hex.EncodeToString(hash[:])
@@ -73,7 +75,6 @@ func (s *ContextService) UploadContext(ctx context.Context, actor application.Au
 	var cc *ctxdomain.CompanyContext
 	created := false
 	err := db.RunInTx(ctx, s.pool, actor.OrgID.String(), func(tctx context.Context) error {
-		// Removed lockOrg because store.Upload happens inside this transaction.
 		existing, err := s.repo.GetContextByHash(tctx, actor.OrgID, hashHex)
 		if err == nil && existing != nil {
 			cc = existing
@@ -98,14 +99,23 @@ func (s *ContextService) UploadContext(ctx context.Context, actor application.Au
 		if err := s.repo.CreateContext(tctx, cc); err != nil {
 			return err
 		}
-		if err := s.store.Upload(ctx, storagePath, strings.NewReader(string(content)), int64(len(content)), mimeOf(contentType)); err != nil {
-			return err
-		}
 		created = true
 		return nil
 	})
 	if err != nil {
 		return nil, err
+	}
+
+	// Upload AFTER the tx: a slow object-store write must not hold a DB
+	// connection (pool starvation), and the row only exists if we get here.
+	if created {
+		if err := s.store.Upload(ctx, storagePath, strings.NewReader(string(content)), int64(len(content)), mimeOf(contentType)); err != nil {
+			// Orphaned row without the object — best-effort cleanup + fail.
+			_ = db.RunInTx(ctx, s.pool, actor.OrgID.String(), func(tctx context.Context) error {
+				return s.repo.DeleteContext(tctx, actor.OrgID, cc.ID)
+			})
+			return nil, err
+		}
 	}
 
 	if created {
@@ -156,7 +166,7 @@ func (s *ContextService) SetPrompt(ctx context.Context, actor application.AuthCo
 // GetPrompt falls back to the global default when the tenant has none.
 func (s *ContextService) GetPrompt(ctx context.Context, actor application.AuthContext) (*PromptResult, error) {
 	p, err := s.repo.GetLatestPrompt(ctx, actor.OrgID)
-	if err == ctxdomain.ErrNotFound {
+	if errors.Is(err, ctxdomain.ErrNotFound) {
 		return &PromptResult{SystemPrompt: ctxdomain.DefaultPrompt(), Version: 0}, nil
 	}
 	if err != nil {
@@ -176,8 +186,6 @@ func (s *ContextService) ListContexts(ctx context.Context, actor application.Aut
 	}
 	return out, nil
 }
-
-
 
 // IndexWorker: index context content into the tenant's Mnemosyne bank.
 type IndexWorker struct {
@@ -206,7 +214,7 @@ func (w *IndexWorker) handle(ctx context.Context, t *asynq.Task) error {
 	if err := json.Unmarshal(t.Payload(), &p); err != nil {
 		return asynq.SkipRetry
 	}
-	ctxID := mustUUID(p.ContextID)
+	ctxID := uuidx.MustParse(p.ContextID)
 
 	var cc *ctxdomain.CompanyContext
 	err := db.RunInTx(ctx, w.pool, p.OrgID, func(tctx context.Context) error {
@@ -229,11 +237,6 @@ func (w *IndexWorker) handle(ctx context.Context, t *asynq.Task) error {
 		return err
 	}
 	return w.memory.ForBank(p.OrgID).Remember(ctx, "company_context_"+cc.Type, buf.String(), 0.8)
-}
-
-func mustUUID(s string) uuid.UUID {
-	id, _ := uuid.Parse(s)
-	return id
 }
 
 func ext(contentType string) string {

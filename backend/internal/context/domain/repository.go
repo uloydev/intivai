@@ -11,6 +11,8 @@ type ContextRepository interface {
 	GetContextByID(ctx context.Context, id uuid.UUID) (*CompanyContext, error)
 	GetContextByHash(ctx context.Context, orgID uuid.UUID, hash string) (*CompanyContext, error)
 	ListContexts(ctx context.Context, orgID uuid.UUID) ([]*CompanyContext, error)
+	// DeleteContext — removes one context row (orphan cleanup after failed uploads).
+	DeleteContext(ctx context.Context, orgID, id uuid.UUID) error
 	SetPrompt(ctx context.Context, p *TenantPrompt) error
 	GetLatestPrompt(ctx context.Context, orgID uuid.UUID) (*TenantPrompt, error)
 }
