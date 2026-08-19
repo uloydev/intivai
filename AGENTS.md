@@ -34,7 +34,7 @@
 | `make test` | unit tests | Before commit |
 | `make proto` | regenerate sandbox gRPC stubs from `proto/sandbox.proto` (needs protoc + plugins) | After editing the proto |
 | `make sandbox-images` | build the 4 per-language sandbox execution images (ADR-0002) | After Dockerfile changes / fresh machine |
-| `make dev` | boot full stack on FRESH redis (stale asynq tasks wiped; postgres/minio volumes persist; classic builder; builds sandbox images + mTLS certs) | Start of a session |
+| `make dev` | boot full stack on FRESH redis (stale asynq tasks wiped; postgres/minio volumes persist; builds sandbox images + mTLS certs) | Start of a session |
 | `make redis-clear` | `FLUSHALL` queue while stack stays up | Mid-session queue cleanup |
 | `make smoke` | end-to-end API scenario against running stack (`CV_PDF` env or `/tmp/kilo/cv.pdf`) | After any API change |
 | `make seed` | seed local DB with demo org, jobs, prompt rails, context | For local testing & demo |
@@ -190,6 +190,6 @@ is the top checklist in `M3_Plan.md`.
 
 - `make dev` uses `docker-compose.yml` + `docker-compose.dev.yml` (non-conflicting host ports: postgres 5433, redis 6380, minio 9002/9003, app 8081); prod = `docker-compose.prod.yml` (Caddy-only ports) + `--env-file .env.prod`
 - FE dev: `frontend/` Vite on :5173 (proxies `/api` + WS to :8081); `INTIVAI_ALLOWED_ORIGINS` must include the FE origin (CSWSH + CORS)
-- Docker buildx is broken on the dev machine: `DOCKER_BUILDKIT=0 docker build` (classic builder)
+- Docker: BuildKit is enabled (no `DOCKER_BUILDKIT=0`) — verified working for the app, sandboxd, and sandbox execution images
 - Tesseract OCR in image: needs `tesseract-ocr-data-eng` + `poppler-utils` — do not remove
 - DeepSeek key: `INTIVAI_DEEPSEEK_API_KEY`; absent → extract marks `failed_extract` honestly (use `POST /cvs/:id/extract` to retry after key is set)

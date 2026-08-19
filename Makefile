@@ -77,7 +77,7 @@ restart:
 
 # Pre-up steps for a fresh machine: app image + sandbox execution images + mTLS certs
 compose-build:
-	DOCKER_BUILDKIT=0 docker build -t intivai-app:latest ./backend
+	docker build -t intivai-app:latest ./backend
 	$(MAKE) -C backend sandbox-images
 	bash scripts/gen-sandbox-certs.sh
 

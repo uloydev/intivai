@@ -56,10 +56,10 @@ proto:
 # Build the sandbox execution images + the sidecar (ADR-0002). Run once per
 # machine (or after Dockerfile changes); the sidecar pulls them by tag.
 sandbox-images:
-	DOCKER_BUILDKIT=0 docker build -t intivai-sandbox-go ./docker/sandbox/go
-	DOCKER_BUILDKIT=0 docker build -t intivai-sandbox-python ./docker/sandbox/python
-	DOCKER_BUILDKIT=0 docker build -t intivai-sandbox-node ./docker/sandbox/node
-	DOCKER_BUILDKIT=0 docker build -t intivai-sandbox-ts ./docker/sandbox/ts
+	docker build -t intivai-sandbox-go ./docker/sandbox/go
+	docker build -t intivai-sandbox-python ./docker/sandbox/python
+	docker build -t intivai-sandbox-node ./docker/sandbox/node
+	docker build -t intivai-sandbox-ts ./docker/sandbox/ts
 
 lint:
 	golangci-lint run ./...
@@ -96,7 +96,7 @@ migrate:
 # (redis data lives in the container layer); postgres + minio volumes persist.
 dev:
 	cd .. && $(COMPOSE) down
-	DOCKER_BUILDKIT=0 docker build -t intivai-app:latest .
+	docker build -t intivai-app:latest .
 	$(MAKE) sandbox-images
 	bash ../scripts/gen-sandbox-certs.sh
 	cd .. && $(COMPOSE) up -d
@@ -129,7 +129,7 @@ seed:
 # Wipe volumes, start fresh containers, apply migrations, and seed sample data
 seed-fresh:
 	cd .. && $(COMPOSE) down -v
-	DOCKER_BUILDKIT=0 docker build -t intivai-app:latest .
+	docker build -t intivai-app:latest .
 	$(MAKE) sandbox-images
 	bash ../scripts/gen-sandbox-certs.sh
 	cd .. && $(COMPOSE) up -d
