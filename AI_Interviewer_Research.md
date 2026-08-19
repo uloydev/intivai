@@ -42,7 +42,7 @@ reasoning. Status markers: ✅ implemented as designed · ⚠️ deviated (reaso
 | §2 Chat: 30-min cap, 3-min question timeout, idle 5m, heartbeat 30s/10s | ✅ frozen-clock tested; WS read deadline = 3m; server ping 30s | `interview/domain`, `interview/api` |
 | §2 Sliding window (10 Q&A) + 8K token budget | ✅ | `interview/domain/service/context.go` |
 | §2 Weakness→probe, strength→next | ✅ deterministic probe (<8 words) | `interview/domain/service/probe.go` |
-| §3 Voice (WebRTC + Whisper.cpp + Edge TTS) | ✅ full duplex audio calling + speech signaling | `interview/infrastructure/{stt,tts,webrtc}`, `interview/api/voice_handler.go`, `/voice/:id` |
+| §3 Voice (WebRTC + Whisper.cpp + Edge TTS) | ⚠️ gated demo (STT/LLM mocked, no Opus decode/encode) | `interview/infrastructure/{stt,tts,webrtc}`, `interview/api/voice_handler.go`, `/voice/:id` |
 | §4.1 Modular monolith | ✅ single Go binary + asynq workers | `backend/` |
 | §4.2 Multi-tenant RLS | ✅ **plus FORCE RLS + least-privilege `intivai_app` role** (owner bypass bug fixed) | migrations 002 |
 | §4.3 Mnemosyne bank per tenant | ✅ SQLite (dev) + **pgvector bank (prod)** + cosine recall | `memory/infrastructure/{native,postgres}` |
@@ -326,7 +326,7 @@ Tenant uploads a file (PDF/MD/TXT) or pastes text containing company context:
 
 ```
 tenant upload file/text (POST /orgs/:id/contexts)
-  → validate type + size (10MB max)
+  → validate type + size (64KB max)
   → store raw in MinIO (file) / Postgres (text), hash for dedup
   → version bump (v1, v2, v3...)
   → queue: index_context
@@ -521,7 +521,7 @@ conn.SetReadDeadline(time.Now().Add(PongWait))
 > **Implementation notes (M3 landed):**
 > - WS ticket: `POST /candidate/interviews/:id/ticket` (invitation token → 10-min `ws_ticket` JWT with `extra.session_id` + `extra.interview_id`); upgrade on `WS /candidate/interviews/:id/chat` via `Authorization: Bearer <ticket>`.
 > - `resume` echoes the ticket's `session_id` — mismatch → `error: session mismatch`. Resume re-sends `interview.start` + the current (next unanswered) question.
-> - Idle timeout: 5-min read deadline per frame (not a timer) — LLM streaming runs in its own goroutine so pings remain serviced mid-stream.
+> - Idle timeout: 3-min read deadline per frame (not a timer) — LLM streaming runs in its own goroutine so pings remain serviced mid-stream.
 > - **Interrupt**: streaming goroutine's ctx is canceled → tokens stop; the next question is dispatched exactly once (`turnState.sendQuestionOnce`). LLM failure uses the same recovery — the interview never strands after a recorded answer.
 > - **Single active connection per interview** (`sessionRegistry`); a second socket gets `error: interview already active on another connection`.
 > - **Origin allowlist** (`INTIVAI_ALLOWED_ORIGINS`, same list as CORS) guards the upgrade; non-browser clients must send a matching Origin when set.

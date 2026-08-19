@@ -222,6 +222,36 @@ paths:
                         cv_ocr_method: { type: string }
                         error_message: { type: string }
                         created_at: { type: string, format: date-time }
+  /cvs/bulk:
+    post:
+      summary: "Bulk-upload CVs (multipart field 'files', repeatable) — async parse pipeline starts per file"
+      security: [bearerAuth]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [files]
+              properties:
+                files:
+                  type: array
+                  items: { type: string, format: binary }
+                  description: one or more PDF files under the same field name
+      responses:
+        "201":
+          description: Batch accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      batch_id: { type: string, format: uuid }
+        "400": { description: files field required / no valid pdf files found }
+        "413": { description: PAYLOAD_TOO_LARGE — one or more files exceed the CV size limit }
   /cvs/{id}:
     get:
       summary: Candidate detail (raw text + structured)
@@ -230,6 +260,15 @@ paths:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
       responses:
         "200": { description: Detail }
+        "404": { description: Not found }
+    delete:
+      summary: Delete a candidate and its CV object (admin/recruiter)
+      security: [bearerAuth]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "204": { description: Deleted (no body) }
+        "403": { description: FORBIDDEN — candidate belongs to another org }
         "404": { description: Not found }
   /cvs/{id}/extract:
     post:
@@ -240,6 +279,16 @@ paths:
       responses:
         "200": { description: Enqueued }
         "400": { description: CANDIDATE_NOT_RETRYABLE }
+  /candidates/{id}:
+    delete:
+      summary: Delete a candidate and its CV object (admin/recruiter; alias of DELETE /cvs/{id})
+      security: [bearerAuth]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "204": { description: Deleted (no body) }
+        "403": { description: FORBIDDEN — candidate belongs to another org }
+        "404": { description: Not found }
   /screenings:
     post:
       summary: Create application + trigger async scoring
@@ -461,6 +510,21 @@ paths:
                       completed_at: { type: string, format: date-time, nullable: true }
         "403": { description: FORBIDDEN — interview belongs to another org }
         "404": { description: Not found }
+  /interviews/{id}/report/pdf:
+    get:
+      summary: Download the executive PDF report for an interview (recruiter)
+      security: [bearerAuth]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: PDF report (attachment; filename=interview_report.pdf)
+          content:
+            application/pdf:
+              schema: { type: string, format: binary }
+        "400": { description: invalid interview id }
+        "403": { description: FORBIDDEN — interview belongs to another org }
+        "404": { description: Not found }
   /candidates/{id}/report:
     get:
       summary: Candidate report — candidate + all interviews with evaluations (recruiter)
@@ -599,6 +663,49 @@ paths:
         "400": { description: Provide either (email + code) or magic token }
         "401": { description: Invalid or expired verification code }
         "429": { description: Too many attempts — request a new code }
+  /public/candidate-review/{token}:
+    get:
+      summary: Review a candidate's extracted profile via one-time review token (public; status must be pending_review)
+      parameters:
+        - { name: token, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Candidate profile for review (same shape as GET /cvs/{id})
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/CVDetail'
+        "400": { description: CANDIDATE_NOT_READY — candidate is not pending review }
+        "404": { description: invalid review token }
+  /public/candidate-review/{token}/confirm:
+    post:
+      summary: Candidate confirms/corrects their extracted profile; stored as the structured CV payload
+      parameters:
+        - { name: token, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: Candidate-submitted structured profile (free-form JSON object)
+      responses:
+        "200":
+          description: Confirmed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      status: { type: string, enum: [confirmed] }
+        "400": { description: invalid json payload / CANDIDATE_NOT_READY }
+        "404": { description: invalid review token }
   /candidate/portal/applications:
     get:
       summary: List all applications and live screening/interview progress for authenticated candidate
@@ -653,7 +760,7 @@ paths:
               properties:
                 invitation_token: { type: string }
       responses:
-        "200": { description: consent_given: true (idempotent) }
+        "200": { description: "consent_given: true (idempotent)" }
         "400": { description: TOKEN_INVALID / TOKEN_MISMATCH }
   /candidate/interviews/{id}/ticket:
     post:
@@ -715,7 +822,7 @@ paths:
         - { name: Authorization, in: header, required: true, schema: { type: string } }
       responses:
         "101":
-          description: Switching Protocols — frames: interview.start {session_id, total_questions, session_budget_sec}, question {idx, content, archetype, time_limit_sec, session_remaining_sec}, token, response, answer {idx, content, pacing_telemetry: {time_to_first_keystroke_ms, duration_ms, typed_chars, pasted_chars, pasted_ratio}}, evaluation {scores, overall, recommendation, status: complete|pending}, error {code, message}
+          description: "Switching Protocols — frames: interview.start {session_id, total_questions, session_budget_sec}, question {idx, content, archetype, time_limit_sec, session_remaining_sec}, token, response, answer {idx, content, pacing_telemetry: {time_to_first_keystroke_ms, duration_ms, typed_chars, pasted_chars, pasted_ratio}}, evaluation {scores, overall, recommendation, status: complete|pending}, error {code, message}"
         "401": { description: missing/invalid ws ticket or not bound to this interview }
         "403": { description: origin not allowed }
   /interviews/{id}/voice:
@@ -751,7 +858,7 @@ paths:
                       input: { type: string }
                       expected_output: { type: string }
                       hidden: { type: boolean }
-                timeout_sec: { type: integer, default: 5 }
+                timeout_sec: { type: integer, default: 10, minimum: 1, maximum: 10 }
       responses:
         "200":
           description: Execution result
@@ -946,3 +1053,16 @@ components:
           additionalProperties: { type: number }
         min_score_to_proceed: { type: number }
         status: { type: string, enum: [active, archived] }
+    CVDetail:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        email: { type: string }
+        status: { type: string }
+        cv_path: { type: string }
+        cv_raw_text: { type: string, description: raw OCR text (PII — detail only) }
+        cv_structured: { type: object, description: parsed structured CV (PII — detail only) }
+        cv_ocr_method: { type: string }
+        error_message: { type: string }
+        created_at: { type: string, format: date-time }
