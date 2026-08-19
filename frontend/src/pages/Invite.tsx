@@ -24,10 +24,15 @@ export function InvitePage() {
 
   const [consented, setConsented] = useState(false)
   const [busy, setBusy] = useState(false)
+  // Persistent failure state — an expired or already-consumed invitation is
+  // not a transient toast: the page must tell the candidate what happened and
+  // how to get a fresh link, and must not re-enable the button.
+  const [failed, setFailed] = useState(false)
 
   async function start() {
     if (!id || !token) return
     setBusy(true)
+    setFailed(false)
     try {
       await api.post<ConsentResult>(`/candidate/interviews/${id}/consent`, { invitation_token: token })
       const ticket = await api.post<{ ticket: string }>(`/candidate/interviews/${id}/ticket`, {
@@ -36,6 +41,7 @@ export function InvitePage() {
       navigate(`/chat/${id}?t=${encodeURIComponent(ticket.ticket)}`)
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Could not start the interview")
+      setFailed(true)
       setBusy(false)
     }
   }
@@ -68,7 +74,7 @@ export function InvitePage() {
               <ul className="space-y-1.5 pl-1">
                 <li className="flex items-start gap-2">
                   <CheckCircle className="h-4 w-4 text-primary shrink-0 mt-0.5" weight="fill" />
-                  <span>Answer dynamic technical questions one at a time via keyboard or dictation.</span>
+                  <span>Answer dynamic technical questions one at a time via keyboard.</span>
                 </li>
                 <li className="flex items-start gap-2">
                   <CheckCircle className="h-4 w-4 text-primary shrink-0 mt-0.5" weight="fill" />
@@ -93,7 +99,7 @@ export function InvitePage() {
               <div className="space-y-1">
                 <Label htmlFor="consent" className="text-xs leading-relaxed text-foreground cursor-pointer font-medium">
                   I consent to my answers being evaluated by AI, and I acknowledge that the following telemetry is
-                  collected during the session: tab switching, paste events, window focus loss, and audio anomalies.
+                  collected during the session: tab switching, paste events, and window focus loss.
                 </Label>
                 <p className="text-[10px] text-muted-foreground leading-relaxed">
                   Flagged events are reviewed by a human recruiter before any hiring decision is made.
@@ -106,7 +112,7 @@ export function InvitePage() {
               variant="gradient"
               size="lg"
               onClick={start}
-              disabled={!consented || busy || !token}
+              disabled={!consented || busy || !token || failed}
             >
               {busy ? (
                 <>
@@ -118,6 +124,16 @@ export function InvitePage() {
                 </>
               )}
             </Button>
+
+            {failed && (
+              <div
+                role="alert"
+                className="rounded-xl border border-destructive/30 bg-destructive/5 p-4 text-center text-xs text-destructive space-y-1"
+              >
+                <p className="font-semibold">This invitation has expired or already been used.</p>
+                <p className="text-destructive/80">Contact the hiring team to request a new one.</p>
+              </div>
+            )}
 
             {!token && (
               <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-center text-xs text-destructive">

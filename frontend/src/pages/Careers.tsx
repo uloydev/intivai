@@ -1,6 +1,6 @@
 import { useRef, useState } from "react"
 import { useMutation, useQuery } from "@tanstack/react-query"
-import { Link } from "react-router-dom"
+import { Link, useNavigate } from "react-router-dom"
 import {
   Briefcase,
   MagnifyingGlass,
@@ -39,6 +39,7 @@ import { toast } from "sonner"
 
 
 export function CareersPage() {
+  const navigate = useNavigate()
   const [search, setSearch] = useState("")
   const [selectedSkill, setSelectedSkill] = useState<string>("all")
   const [selectedJob, setSelectedJob] = useState<PublicJob | null>(null)
@@ -51,7 +52,9 @@ export function CareersPage() {
   const [email, setEmail] = useState("")
   const [file, setFile] = useState<File | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
+  const [fileError, setFileError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
+  const [portalToken, setPortalToken] = useState<string | null>(null)
 
   // Query public active jobs from backend
   const { data: serverJobs, isLoading } = useQuery({
@@ -88,7 +91,10 @@ export function CareersPage() {
   const applyMutation = useMutation({
     mutationFn: async () => {
       if (!name || !email || !file) {
-        throw new Error("Please provide your name, email, and resume PDF")
+        throw new Error("Please provide your name, email, and resume")
+      }
+      if (!isSupportedResume(file)) {
+        throw new Error("Please upload a PDF or DOCX resume")
       }
       if (!selectedJob) {
         throw new Error("No job selected")
@@ -98,13 +104,27 @@ export function CareersPage() {
       form.append("email", email)
       form.append("file", file)
 
-      return await api.postForm<{ candidate_id: string }>(`/public/jobs/${selectedJob.id}/apply`, form)
+      return await api.postForm<{ candidate_id: string; portal_token?: string }>(
+        `/public/jobs/${selectedJob.id}/apply`,
+        form
+      )
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
       setSubmitting(false)
       setSubmitted(true)
+      setPortalToken(data.portal_token ?? null)
+      // Drop any stale identity from a previous applicant so the portal never
+      // silently opens the wrong account's dashboard; the portal token below
+      // (or a fresh OTP) establishes the new identity.
+      localStorage.removeItem("intivai_candidate_token")
+      localStorage.removeItem("intivai_candidate_email")
       localStorage.setItem("intivai_candidate_email", email.trim().toLowerCase())
       toast.success("Application successfully submitted and queued for AI screening!")
+      // Land the applicant directly on their own tracker when the backend
+      // minted a magic token at apply time (no OTP email round-trip needed).
+      if (data.portal_token) {
+        navigate(`/candidate/portal?token=${encodeURIComponent(data.portal_token)}`)
+      }
     },
     onError: (e) => {
       setSubmitting(false)
@@ -115,9 +135,11 @@ export function CareersPage() {
   function handleApplyClick(job: PublicJob) {
     setSelectedJob(job)
     setSubmitted(false)
+    setPortalToken(null)
     setName("")
     setEmail(localStorage.getItem("intivai_candidate_email") || "")
     setFile(null)
+    setFileError(null)
     setDetailModalOpen(false)
     setApplyModalOpen(true)
   }
@@ -132,13 +154,41 @@ export function CareersPage() {
     ? formatSalary(selectedJob.salary_min, selectedJob.salary_max, selectedJob.currency)
     : null
 
+  const CURRENCY_SYMBOLS: Record<string, string> = {
+    USD: "$",
+    EUR: "€",
+    GBP: "£",
+    JPY: "¥",
+    CNY: "¥",
+    KRW: "₩",
+    INR: "₹",
+    CAD: "C$",
+    AUD: "A$",
+    CHF: "Fr",
+    SGD: "S$",
+    AED: "د.إ",
+    BRL: "R$",
+  }
+
+  function currencySymbol(cur?: string): string {
+    return CURRENCY_SYMBOLS[(cur || "USD").toUpperCase()] ?? `${(cur || "USD").toUpperCase()} `
+  }
+
   function formatSalary(min?: number | null, max?: number | null, cur?: string) {
     if (!min && !max) return null
+    const sym = currencySymbol(cur)
     const c = cur || "USD"
-    if (min && max) return `$${(min / 1000).toFixed(0)}k – $${(max / 1000).toFixed(0)}k ${c}`
-    if (min) return `From $${(min / 1000).toFixed(0)}k ${c}`
-    if (max) return `Up to $${(max / 1000).toFixed(0)}k ${c}`
+    if (min && max) return `${sym}${(min / 1000).toFixed(0)}k – ${sym}${(max / 1000).toFixed(0)}k ${c}`
+    if (min) return `From ${sym}${(min / 1000).toFixed(0)}k ${c}`
+    if (max) return `Up to ${sym}${(max / 1000).toFixed(0)}k ${c}`
     return null
+  }
+
+  function isSupportedResume(f: File): boolean {
+    const mime = ["application/pdf", "application/msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"]
+    if (mime.includes(f.type)) return true
+    const ext = f.name.split(".").pop()?.toLowerCase()
+    return ext === "pdf" || ext === "docx"
   }
 
   return (
@@ -152,7 +202,7 @@ export function CareersPage() {
           Join High-Growth Engineering Teams
         </h1>
         <p className="text-sm sm:text-base text-muted-foreground leading-relaxed">
-          Browse verified technical openings with transparent salary ranges and detailed engineering requirements. You'll receive email updates as your application progresses.
+          Browse verified technical openings with transparent salary ranges and detailed engineering requirements. We'll email you with each outcome.
         </p>
 
         <div className="pt-2 flex items-center justify-center gap-3">
@@ -483,18 +533,31 @@ export function CareersPage() {
                 </div>
 
                 <div className="space-y-1.5">
-                  <Label htmlFor="app-file" className="text-xs font-semibold">Resume / CV (PDF format)</Label>
+                  <Label htmlFor="app-file" className="text-xs font-semibold">Resume / CV (PDF or DOCX)</Label>
                   <Input
                     id="app-file"
                     ref={fileRef}
                     type="file"
-                    accept="application/pdf"
-                    onChange={(e) => setFile(e.target.files?.[0] || null)}
+                    accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                    onChange={(e) => {
+                      const f = e.target.files?.[0] || null
+                      if (f && !isSupportedResume(f)) {
+                        setFile(null)
+                        setFileError("Unsupported file type. Please upload a PDF or DOCX resume.")
+                        return
+                      }
+                      setFile(f)
+                      setFileError(null)
+                    }}
                     className="bg-background/80 file:mr-2 file:rounded-md file:border-0 file:bg-primary/10 file:px-2 file:py-1 file:text-xs file:font-semibold file:text-primary"
                   />
-                  <p className="text-[11px] text-muted-foreground">
-                    PDF text and OCR will be processed to analyze your skills for this role.
-                  </p>
+                  {fileError ? (
+                    <p className="text-[11px] font-medium text-destructive">{fileError}</p>
+                  ) : (
+                    <p className="text-[11px] text-muted-foreground">
+                      PDF or DOCX accepted. PDF text and OCR will be processed to analyze your skills for this role.
+                    </p>
+                  )}
                 </div>
               </div>
 
@@ -508,7 +571,7 @@ export function CareersPage() {
                     setSubmitting(true)
                     applyMutation.mutate()
                   }}
-                  disabled={!name.trim() || !email.trim() || !file || submitting}
+                  disabled={!name.trim() || !email.trim() || !file || !!fileError || submitting}
                 >
                   <CloudArrowUp className="mr-1.5 h-4 w-4" weight="bold" />
                   {submitting ? "Analyzing & Submitting…" : "Submit Application"}
@@ -539,7 +602,7 @@ export function CareersPage() {
 
               <div className="pt-2 flex flex-col sm:flex-row gap-2 justify-center">
                 <Button asChild variant="gradient" className="shadow-md shadow-primary/20">
-                  <Link to="/candidate/portal">
+                  <Link to={portalToken ? `/candidate/portal?token=${encodeURIComponent(portalToken)}` : "/candidate/portal"}>
                     Track in Candidate Portal <ArrowRight className="ml-1.5 h-3.5 w-3.5" />
                   </Link>
                 </Button>

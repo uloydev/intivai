@@ -18,14 +18,16 @@ export const STAGE_LADDER: CandidateLifecycleStage[] = [
   "rejected",
 ]
 
+// Colors use the -600/dark:-400 light-theme pattern: -400 text is unreadable
+// on a light background (~1.6:1), -600 keeps it legible in light mode.
 export const STAGE_META: Record<CandidateLifecycleStage, StageMeta> = {
-  hired: { label: "Hired 🎉", color: "bg-emerald-500/10 text-emerald-500 border-emerald-500/30" },
-  offer_extended: { label: "Offer Extended", color: "bg-purple-500/10 text-purple-400 border-purple-500/30" },
-  interview_completed: { label: "Assessment Complete", color: "bg-blue-500/10 text-blue-400 border-blue-500/30" },
-  interview_invited: { label: "Interview Invited", color: "bg-cyan-500/10 text-cyan-400 border-cyan-500/30" },
-  screening_passed: { label: "Screening Passed", color: "bg-emerald-500/10 text-emerald-400 border-emerald-500/30" },
-  screening_failed: { label: "Rejected", color: "bg-rose-500/10 text-rose-400 border-rose-500/30" },
-  rejected: { label: "Rejected", color: "bg-rose-500/10 text-rose-400 border-rose-500/30" },
+  hired: { label: "Hired", color: "bg-accent/10 text-accent border-accent/30" },
+  offer_extended: { label: "Offer Extended", color: "bg-purple-500/10 text-purple-600 border-purple-500/30 dark:text-purple-400" },
+  interview_completed: { label: "Assessment Complete", color: "bg-blue-500/10 text-blue-600 border-blue-500/30 dark:text-blue-400" },
+  interview_invited: { label: "Interview Invited", color: "bg-cyan-500/10 text-cyan-700 border-cyan-500/30 dark:text-cyan-400" },
+  screening_passed: { label: "Screening Passed", color: "bg-accent/10 text-accent border-accent/30" },
+  screening_failed: { label: "Rejected", color: "bg-rose-500/10 text-rose-600 border-rose-500/30 dark:text-rose-400" },
+  rejected: { label: "Rejected", color: "bg-rose-500/10 text-rose-600 border-rose-500/30 dark:text-rose-400" },
   applied: { label: "Applied", color: "bg-muted text-muted-foreground border-border" },
 }
 

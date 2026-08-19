@@ -4,18 +4,38 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="Intivai — AI recruitment screening & intelligent interview platform. Semantic CV matching, token-streamed technical interviews, and bias-free candidate evaluations."
+    />
+    <meta property="og:title" content="Intivai — AI Interview Platform" />
+    <meta
+      property="og:description"
+      content="AI recruitment screening & intelligent interview platform. Semantic CV matching, token-streamed technical interviews, and bias-free candidate evaluations."
+    />
+    <meta property="og:type" content="website" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap"
+      rel="stylesheet"
+      media="print"
+      onload="this.media='all'"
+    />
     <script>
       // Apply the persisted theme before first paint to avoid dark-mode FOUC.
-      // Mirrors src/lib/theme.tsx: only an explicit stored "dark" enables dark mode.
+      // Mirrors src/lib/theme.tsx: an explicit stored value wins; otherwise the
+      // OS prefers-color-scheme decides on first visit.
       try {
-        if (localStorage.getItem("intivai_theme") === "dark") {
+        var stored = localStorage.getItem("intivai_theme")
+        if (stored === "dark" || (stored !== "light" && window.matchMedia("(prefers-color-scheme: dark)").matches)) {
           document.documentElement.classList.add("dark")
         }
       } catch (e) {
         console.error("Failed to read persisted theme", e)
       }
     </script>
-    <title>frontend</title>
+    <title>Intivai — AI Interview Platform</title>
   </head>
   <body>
     <div id="root"></div>

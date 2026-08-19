@@ -33,11 +33,10 @@ export function InterviewVoicePage() {
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
-  const isStartedRef = useRef(false)
-
-  useEffect(() => {
-    isStartedRef.current = isStarted
-  }, [isStarted])
+  // Tracks whether a real WebRTC session ever connected (the offer/answer
+  // exchange completed). Used to distinguish "call ended" from "nothing was
+  // actually recorded" when the socket closes.
+  const sessionActiveRef = useRef(false)
 
   // Unmount cleanup: navigating away must stop the mic, close the peer
   // connection and the socket (the old code leaked all three).
@@ -96,6 +95,7 @@ export function InterviewVoicePage() {
           const msg = JSON.parse(event.data)
           if (msg.type === "answer") {
             await pc.setRemoteDescription(new RTCSessionDescription({ type: "answer", sdp: msg.sdp }))
+            sessionActiveRef.current = true
             setStatus("Connected — AI Interview in progress")
             setIsStarted(true)
           } else if (msg.type === "caption") {
@@ -130,15 +130,25 @@ export function InterviewVoicePage() {
       }
 
       ws.onerror = () => {
-        setStatus("Voice service error (simulation fallback active)")
-        setIsStarted(true)
+        // Fail closed: the connection never authenticated — stop the mic and
+        // the peer connection and report honestly. Never fake an in-progress
+        // interview or start a fake progress clock.
+        streamRef.current?.getTracks().forEach((track) => track.stop())
+        pcRef.current?.close()
+        wsRef.current = null
+        setIsStarted(false)
+        setStatus("Couldn't connect — voice session unavailable")
+        toast.error("Couldn't connect to the voice session. Please try again.")
       }
 
       ws.onclose = () => {
         // Read the ref, not the render-closure value (always false here).
-        if (isStartedRef.current) {
-          setStatus("Call completed")
+        if (sessionActiveRef.current) {
+          setStatus("Call ended")
+        } else {
+          setStatus("Call ended — nothing was recorded")
         }
+        setIsStarted(false)
       }
     } catch {
       setStatus("Microphone permission denied or device not found")
@@ -169,8 +179,8 @@ export function InterviewVoicePage() {
       wsRef.current.close()
     }
     setIsStarted(false)
-    setStatus("Call ended")
-    toast.success("Interview session completed.")
+    setStatus(sessionActiveRef.current ? "Call ended" : "Call ended — nothing was recorded")
+    toast.success(sessionActiveRef.current ? "Interview session completed." : "Call ended — nothing was recorded.")
   }
 
   useEffect(() => {

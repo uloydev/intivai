@@ -59,11 +59,11 @@ export function DashboardPage() {
   const totalCVs = cvs?.length ?? 0
   const totalApps = apps?.length ?? 0
   const passedApps = apps?.filter((a) => a.passed_screening) ?? []
-  const passRate = totalApps > 0 ? Math.round((passedApps.length / totalApps) * 100) : 0
+  const passRate = totalApps > 0 ? Math.round((passedApps.length / totalApps) * 100) : null
   const completedInterviews = interviews?.filter((i) => i.status === "completed") ?? []
-  const strongHires = completedInterviews.filter(
-    (i) => i.evaluation?.recommendation === "proceed" || (i.evaluation?.overall_score ?? 0) >= 75
-  )
+  // Only the real AI verdict counts — never infer "strong hire" from a score
+  // heuristic that the product has not defined.
+  const strongHires = completedInterviews.filter((i) => i.evaluation?.recommendation === "proceed")
 
   return (
     <div className="space-y-8 animate-in fade-in duration-500">
@@ -151,7 +151,7 @@ export function DashboardPage() {
         {/* Metric 3: Screening Pass Rate */}
         <Card className="glass relative overflow-hidden border-border/60 transition-all hover:border-primary/40 hover:shadow-lg hover:shadow-primary/5">
           <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Screening Pass Rate</CardTitle>
+            <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Screening Pass Rate (all roles)</CardTitle>
             <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-500">
               <TrendUp className="h-4 w-4" weight="bold" />
             </div>
@@ -161,8 +161,12 @@ export function DashboardPage() {
               <Skeleton className="h-8 w-16" />
             ) : (
               <div className="flex items-baseline justify-between">
-                <span className="font-display text-3xl font-bold text-emerald-600 dark:text-emerald-400">{passRate}%</span>
-                <span className="text-xs font-medium text-muted-foreground">{passedApps.length}/{totalApps} passed</span>
+                <span className="font-display text-3xl font-bold text-emerald-600 dark:text-emerald-400">
+                  {passRate !== null ? `${passRate}%` : "—"}
+                </span>
+                {passRate !== null && (
+                  <span className="text-xs font-medium text-muted-foreground">{passedApps.length}/{totalApps} passed</span>
+                )}
               </div>
             )}
             <p className="mt-1 text-xs text-muted-foreground">Match threshold benchmark</p>
@@ -308,7 +312,7 @@ export function DashboardPage() {
                                 : "bg-destructive/10 text-destructive border-destructive/20"
                             }
                           >
-                            Score: {app.cv_score}
+                            {app.cv_score}% Match
                           </Badge>
                         ) : (
                           <Badge variant="secondary" className="text-xs">
@@ -317,7 +321,7 @@ export function DashboardPage() {
                         )}
                         {app.passed_screening && (
                           <Button asChild size="sm" variant="ghost" className="h-7 text-xs text-primary">
-                            <Link to="/interviews">Invite →</Link>
+                            <Link to={`/interviews?invite=${encodeURIComponent(app.candidate_id)}`}>Invite →</Link>
                           </Button>
                         )}
                       </div>
@@ -351,9 +355,6 @@ export function DashboardPage() {
                 <p className="text-xs text-muted-foreground">
                   AI interviewer generates adaptive questions and streams token-by-token evaluation.
                 </p>
-                <Button asChild variant="outline" size="sm" className="w-full text-xs mt-1">
-                  <Link to="/interviews">Manage Chat Sessions →</Link>
-                </Button>
               </div>
 
               <div className="rounded-xl border border-blue-500/20 bg-blue-500/5 p-3.5 space-y-2">
@@ -367,10 +368,11 @@ export function DashboardPage() {
                 <p className="text-xs text-muted-foreground">
                   Full duplex audio stream with Speech-to-Text and Edge synthesized voice output.
                 </p>
-                <Button asChild variant="outline" size="sm" className="w-full text-xs mt-1 border-blue-500/30 text-blue-600 dark:text-blue-400 hover:bg-blue-500/10">
-                  <Link to="/interviews">Voice Sessions →</Link>
-                </Button>
               </div>
+
+              <Button asChild variant="gradient" size="sm" className="w-full text-xs mt-1 shadow-md shadow-primary/20">
+                <Link to="/interviews">Manage Interview Sessions →</Link>
+              </Button>
             </CardContent>
           </Card>
 

@@ -15,12 +15,21 @@ export function RegisterPage() {
   const [slugTouched, setSlugTouched] = useState(false)
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
+  const [confirmPassword, setConfirmPassword] = useState("")
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault()
     setError(null)
+    if (password.length < 8) {
+      setError("Password must be at least 8 characters.")
+      return
+    }
+    if (password !== confirmPassword) {
+      setError("Passwords do not match.")
+      return
+    }
     setLoading(true)
     try {
       await api.post<RegisterResult>("/auth/register", {
@@ -87,6 +96,16 @@ export function RegisterPage() {
                   className="bg-background/80 font-mono text-xs"
                   required
                 />
+                {slug.trim() ? (
+                  <p className="text-[11px] text-muted-foreground">
+                    Workspace URL:{" "}
+                    <span className="font-mono font-medium text-foreground">intivai.app/{slug}</span>
+                  </p>
+                ) : (
+                  <p className="text-[11px] text-muted-foreground">
+                    Live preview of your workspace URL will appear here.
+                  </p>
+                )}
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="email" className="text-xs font-semibold">Admin Email</Label>
@@ -112,6 +131,22 @@ export function RegisterPage() {
                   minLength={8}
                   required
                 />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="confirm-password" className="text-xs font-semibold">Confirm Master Password</Label>
+                <Input
+                  id="confirm-password"
+                  type="password"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  placeholder="Re-enter your password"
+                  className="bg-background/80"
+                  minLength={8}
+                  required
+                />
+                {confirmPassword.length > 0 && password !== confirmPassword && (
+                  <p className="text-[11px] font-medium text-destructive">Passwords do not match.</p>
+                )}
               </div>
 
               {error && (

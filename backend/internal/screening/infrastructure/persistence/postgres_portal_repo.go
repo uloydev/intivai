@@ -2,7 +2,9 @@ package persistence
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"errors"
 	"time"
 
@@ -27,6 +29,19 @@ func (r *PostgresCandidatePortalRepo) CreateOTP(ctx context.Context, email, code
 		`INSERT INTO candidate_otps (id, email, code_hash, token, expires_at, created_at)
 		 VALUES (?, ?, ?, ?, ?, NOW())`,
 		uuid.New(), email, codeHash, token, expiresAt,
+	).Error
+}
+
+// CreateMagicToken — inserts a magic-token row with a random, un-usable
+// code_hash (the token is never sent, so no code exists). The hash of a fresh
+// uuid satisfies the NOT NULL code_hash column while being unguessable and
+// never verified.
+func (r *PostgresCandidatePortalRepo) CreateMagicToken(ctx context.Context, email, token string, expiresAt time.Time) error {
+	sum := sha256.Sum256([]byte(uuid.NewString()))
+	return r.pool.WithContext(ctx).Exec(
+		`INSERT INTO candidate_otps (id, email, code_hash, token, expires_at, created_at)
+		 VALUES (?, ?, ?, ?, ?, NOW())`,
+		uuid.New(), email, hex.EncodeToString(sum[:]), token, expiresAt,
 	).Error
 }
 

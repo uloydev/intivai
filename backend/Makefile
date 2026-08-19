@@ -6,7 +6,7 @@
 TEST_ENV := \
 	TEST_DATABASE_URL='postgres://intivai_app:intivai_app@localhost:5433/intivai?sslmode=disable' \
 	TEST_REDIS_ADDR='localhost:6380' \
-	TEST_MINIO_ENDPOINT='localhost:9002' TEST_MINIO_ACCESS='minioadmin' TEST_MINIO_SECRET='minioadmin'
+	TEST_MINIO_ENDPOINT='localhost:9002' TEST_MINIO_ACCESS='intivai' TEST_MINIO_SECRET='intivai123'
 
 # Dev compose invocation (base + dev overlay, --env-file .env). Used from
 # the repo root, so `cd ..` before every $(COMPOSE) call.

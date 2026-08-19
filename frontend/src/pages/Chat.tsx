@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react"
-import { useParams, useSearchParams } from "react-router-dom"
+import { Link, useParams, useSearchParams } from "react-router-dom"
 import {
   Sparkle,
   PaperPlaneRight,
@@ -37,6 +37,7 @@ export function ChatPage() {
   const [showSandbox, setShowSandbox] = useState(false)
   const pastedFlagRef = useRef(false)
   const scrollRef = useRef<HTMLDivElement>(null)
+  const answerRef = useRef<HTMLTextAreaElement>(null)
 
   // Authenticity & Pacing Telemetry Refs
   const questionDisplayedAtRef = useRef<number>(Date.now())
@@ -58,7 +59,7 @@ export function ChatPage() {
     onQuestion: resetPacing,
   })
 
-  const { bubbles, streaming, total, currentIdx, currentQuestionText, sessionRemainingSec, timeLimitSec, archetype, evaluation, reconnecting, expired, pendingAnswer } = session
+  const { bubbles, streaming, total, currentIdx, currentQuestionText, sessionRemainingSec, timeLimitSec, archetype, evaluation, reconnecting, disconnected, expired, pendingAnswer } = session
 
   const { trackPaste } = useProctoring({
     interviewId: id,
@@ -82,6 +83,15 @@ export function ChatPage() {
     }
   }, [bubbles, streaming, reduceMotion])
 
+  // Refocus the answer box whenever a fresh question arrives so the candidate
+  // can keep typing without reaching for the input again.
+  useEffect(() => {
+    if (!streaming && !pendingAnswer && !evaluation && !expired && !disconnected) {
+      answerRef.current?.focus()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentIdx])
+
   const collectPacingTelemetry = (): PacingTelemetry => {
     const now = Date.now()
     const typed = typedCharsCountRef.current
@@ -100,7 +110,7 @@ export function ChatPage() {
 
   const sendAnswer = () => {
     const trimmed = input.trim()
-    if (!trimmed || streaming || pendingAnswer || !!evaluation || expired) return
+    if (!trimmed || streaming || pendingAnswer || !!evaluation || expired || disconnected) return
     const sent = session.submitAnswer(trimmed, collectPacingTelemetry())
     setInput("")
     if (!sent) {
@@ -111,9 +121,9 @@ export function ChatPage() {
   }
 
   const handleTimerExpire = () => {
-    if (streaming || pendingAnswer || !!evaluation || expired) return
+    if (streaming || pendingAnswer || !!evaluation || expired || disconnected) return
     const trimmed = input.trim()
-    const submissionText = trimmed.length > 0 ? trimmed : "Candidate did not submit an answer within the allocated time limit."
+    const submissionText = trimmed.length > 0 ? trimmed : "My time for this question ran out — nothing was submitted."
     session.submitAnswer(submissionText, collectPacingTelemetry())
     setInput("")
     toast.info("Stage time limit elapsed. Response auto-submitted.")
@@ -138,8 +148,17 @@ export function ChatPage() {
               Intivai Live Assessment
             </h1>
             <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
-              <span>Real-Time AI Session</span>
+              <span
+                className={cn(
+                  "h-1.5 w-1.5 rounded-full",
+                  disconnected
+                    ? "bg-red-500"
+                    : reconnecting
+                    ? "bg-amber-400 animate-pulse"
+                    : "bg-emerald-500"
+                )}
+              />
+              <span>{disconnected ? "Connection Lost" : reconnecting ? "Reconnecting…" : "Real-Time AI Session"}</span>
             </div>
           </div>
         </div>
@@ -184,6 +203,23 @@ export function ChatPage() {
       {reconnecting && (
         <div className="bg-amber-500/10 border-b border-amber-500/20 px-4 py-2 text-center text-xs font-medium text-amber-600 dark:text-amber-400 flex items-center justify-center gap-2 animate-pulse">
           <ArrowClockwise className="h-4 w-4 animate-spin" /> Connection lost — resuming session…
+        </div>
+      )}
+      {disconnected && (
+        <div
+          role="alert"
+          className="bg-destructive/10 border-b border-destructive/20 px-4 py-2.5 text-center text-xs font-medium text-destructive flex flex-col sm:flex-row items-center justify-center gap-2"
+        >
+          <WarningCircle className="h-4 w-4" weight="fill" />
+          <span>Connection lost — answers are not being recorded.</span>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 text-[11px] text-destructive border-destructive/30 hover:bg-destructive/10 ml-1"
+            onClick={() => window.location.reload()}
+          >
+            Refresh to resume
+          </Button>
         </div>
       )}
 
@@ -335,17 +371,24 @@ export function ChatPage() {
             <div className="border-t border-border/80 bg-card/70 backdrop-blur-xl p-5 space-y-3">
               <div className="flex items-center gap-2 text-emerald-500 font-display font-bold text-sm">
                 <CheckCircle className="h-5 w-5" weight="fill" />
-                <span>Interview Complete — Report Synthesizing</span>
+                <span>Interview Complete</span>
               </div>
               <p className="text-xs text-muted-foreground leading-relaxed">
-                Thank you for completing the assessment. Your responses and coding submissions have been securely recorded and transmitted to the hiring team.
+                Your interview is complete — our team will review the results and reach out within a few business days.
               </p>
-              {evaluation.status === "complete" && (
+              {evaluation.overall !== undefined && evaluation.overall !== null && (
                 <div className="rounded-xl border border-border/50 bg-muted/30 p-3 text-xs text-muted-foreground flex items-center justify-between">
-                  <span>Recommendation: <strong className="text-foreground capitalize">{evaluation.recommendation ?? "Under Review"}</strong></span>
-                  <Badge className="bg-primary text-primary-foreground font-bold">Score: {evaluation.overall} / 100</Badge>
+                  <span>Session evaluation score</span>
+                  <Badge variant="secondary" className="font-mono font-semibold text-foreground">
+                    {Math.round(evaluation.overall)}/100
+                  </Badge>
                 </div>
               )}
+              <Button asChild variant="gradient" size="sm" className="shadow-md shadow-primary/20">
+                <Link to="/candidate/portal">
+                  Track your application in the Candidate Portal →
+                </Link>
+              </Button>
             </div>
           ) : (
             <div className="border-t border-border/60 bg-background/80 backdrop-blur-xl p-3.5">
@@ -355,6 +398,7 @@ export function ChatPage() {
               <div className="flex items-end gap-2.5">
                 <Textarea
                   id="chat-input"
+                  ref={answerRef}
                   value={input}
                   onChange={(e) => {
                     const next = e.target.value
@@ -391,7 +435,7 @@ export function ChatPage() {
                       : `Type your answer to Question ${currentIdx || 1}... (Press Enter to submit, Shift+Enter for new line)`
                   }
                   rows={2}
-                  disabled={streaming || pendingAnswer || !!evaluation || expired}
+                  disabled={streaming || pendingAnswer || !!evaluation || expired || disconnected}
                   className="min-h-[48px] resize-none bg-card rounded-xl border-border/60 text-xs sm:text-sm p-2.5 focus-visible:ring-primary"
                 />
                 {streaming ? (
@@ -412,7 +456,7 @@ export function ChatPage() {
                     className="h-[48px] w-[48px] rounded-xl shadow-md shadow-primary/20 shrink-0"
                     title="Submit answer (Enter)"
                     onClick={sendAnswer}
-                    disabled={!input.trim() || pendingAnswer || expired}
+                    disabled={!input.trim() || pendingAnswer || expired || disconnected}
                   >
                     <PaperPlaneRight className="h-5 w-5" weight="bold" />
                   </Button>

@@ -1,9 +1,11 @@
-import { CheckCircle, WarningCircle, XCircle } from "@phosphor-icons/react"
+import { CheckCircle, WarningCircle, XCircle, Question } from "@phosphor-icons/react"
 import { Badge } from "./badge"
 import { cn } from "@/lib/utils"
 
 // Shared AI recommendation pill. Colors follow the verdict: hire shades are
-// emerald, reject shades are destructive, anything unresolved is amber.
+// emerald, reject shades are destructive, anything unresolved is amber. A
+// missing/empty recommendation renders a neutral "No evaluation" pill — never
+// a fabricated positive verdict.
 export function RecommendationBadge({
   recommendation,
   className,
@@ -11,8 +13,17 @@ export function RecommendationBadge({
   recommendation?: string | null
   className?: string
 }) {
-  const normalized = (recommendation ?? "proceed").toLowerCase()
-  const label = (recommendation ?? "proceed").toUpperCase().replace("_", " ")
+  const normalized = (recommendation ?? "").trim().toLowerCase()
+
+  if (!normalized) {
+    return (
+      <Badge variant="secondary" className={cn("bg-muted text-muted-foreground border-border text-xs font-semibold gap-1 py-1 px-2.5", className)}>
+        <Question className="h-3.5 w-3.5" weight="bold" /> No evaluation
+      </Badge>
+    )
+  }
+
+  const label = recommendation!.toUpperCase().replace("_", " ")
 
   if (normalized === "proceed" || normalized === "strong_hire" || normalized === "hire") {
     return (

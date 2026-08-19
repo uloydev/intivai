@@ -228,8 +228,8 @@ func main() {
 		From:     cfg.SMTP.From,
 	}, logger)
 	emailWorker := notifapp.NewEmailWorker(mailClient, logger)
-	publicJobHandler := jobapi.NewPublicJobHandler(pool, jobRepo, candidateRepo, appRepo, store, queueClient)
 	portalRepo := scrrepo.NewPostgresCandidatePortalRepo(pool)
+	publicJobHandler := jobapi.NewPublicJobHandler(pool, jobRepo, candidateRepo, appRepo, store, queueClient, portalRepo)
 	candidatePortalHandler := scrapi.NewCandidatePortalHandler(portalRepo, tokens, queueClient, cfg.App.PublicURL)
 	// --- Sandbox sidecar (ADR-0002): the app talks to the sandbox executor
 	// over mTLS gRPC; it never executes code itself. Fail closed when the
@@ -381,6 +381,7 @@ func main() {
 
 	authed.Post("/orgs/:orgId/contexts", contextHandler.UploadContext)
 	authed.Get("/orgs/:orgId/contexts", contextHandler.ListContexts)
+	authed.Delete("/orgs/:orgId/contexts/:contextID", contextHandler.Delete)
 	authed.Put("/orgs/:orgId/prompt", contextHandler.SetPrompt)
 	authed.Get("/orgs/:orgId/prompt", contextHandler.GetPrompt)
 

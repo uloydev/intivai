@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
@@ -26,12 +27,13 @@ import (
 )
 
 type PublicJobHandler struct {
-	pool     *gorm.DB
-	jobRepo  *persistence.PostgresJobRepo
-	candRepo cvdomain.CandidateRepository
-	appRepo  scrdomain.ApplicationRepository
-	store    cvapp.ObjectStore
-	queue    *queue.Client
+	pool       *gorm.DB
+	jobRepo    *persistence.PostgresJobRepo
+	candRepo   cvdomain.CandidateRepository
+	appRepo    scrdomain.ApplicationRepository
+	store      cvapp.ObjectStore
+	queue      *queue.Client
+	portalRepo scrdomain.CandidatePortalRepository
 }
 
 func NewPublicJobHandler(
@@ -41,14 +43,16 @@ func NewPublicJobHandler(
 	appRepo scrdomain.ApplicationRepository,
 	store cvapp.ObjectStore,
 	q *queue.Client,
+	portalRepo scrdomain.CandidatePortalRepository,
 ) *PublicJobHandler {
 	return &PublicJobHandler{
-		pool:     pool,
-		jobRepo:  jobRepo,
-		candRepo: candRepo,
-		appRepo:  appRepo,
-		store:    store,
-		queue:    q,
+		pool:       pool,
+		jobRepo:    jobRepo,
+		candRepo:   candRepo,
+		appRepo:    appRepo,
+		store:      store,
+		queue:      q,
+		portalRepo: portalRepo,
 	}
 }
 
@@ -78,11 +82,18 @@ func (h *PublicJobHandler) GetPublicJob(c *fiber.Ctx) error {
 	return httpapi.OK(c, job)
 }
 
+// portalTokenTTL — a portal magic token minted at apply time stays valid for
+// 24h so the candidate can reach the tracker without an email round-trip.
+const portalTokenTTL = 24 * time.Hour
+
 type PublicApplyResponse struct {
 	CandidateID uuid.UUID `json:"candidate_id"`
 	JobID       uuid.UUID `json:"job_id"`
 	Status      string    `json:"status"`
 	Message     string    `json:"message"`
+	// PortalToken — one-time magic token for /candidate/portal?token=...,
+	// exchanged via POST /public/candidate/auth/verify. Empty if minting failed.
+	PortalToken string `json:"portal_token"`
 }
 
 // Apply handles POST /api/v1/public/jobs/:id/apply (multipart form)
@@ -185,11 +196,22 @@ func (h *PublicJobHandler) Apply(c *fiber.Ctx) error {
 		log.Warn().Err(err).Str("candidate_id", candidateID.String()).Msg("enqueue confirmation email failed")
 	}
 
+	// Mint a portal magic token so the success screen can land the candidate
+	// directly on their own tracker (no OTP email round-trip). Best-effort: a
+	// failure must not fail the already-committed application — the response
+	// simply carries an empty portal_token and the flow degrades to OTP login.
+	portalToken := uuid.NewString()
+	if err := h.portalRepo.CreateMagicToken(c.UserContext(), strings.ToLower(email), portalToken, time.Now().UTC().Add(portalTokenTTL)); err != nil {
+		log.Error().Err(err).Str("candidate_id", candidateID.String()).Str("email", email).Msg("mint portal magic token failed")
+		portalToken = ""
+	}
+
 	return httpapi.Created(c, PublicApplyResponse{
 		CandidateID: candidateID,
 		JobID:       jobID,
 		Status:      "submitted",
 		Message:     "Application received successfully and queued for AI screening",
+		PortalToken: portalToken,
 	})
 }
 

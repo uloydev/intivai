@@ -187,6 +187,25 @@ func (s *ContextService) ListContexts(ctx context.Context, actor application.Aut
 	return out, nil
 }
 
+// Delete removes one company-context row for the org. The stored object is
+// intentionally kept: objects are content-hash deduped per org, so the object
+// may back another version/row, and deleting it could orphan future lookups.
+func (s *ContextService) Delete(ctx context.Context, actor application.AuthContext, id uuid.UUID) error {
+	if err := application.Authorize(actor, iamdomain.RoleAdmin, iamdomain.RoleRecruiter); err != nil {
+		return err
+	}
+	return db.RunInTx(ctx, s.pool, actor.OrgID.String(), func(tctx context.Context) error {
+		// RLS scopes the read to the actor's org; ErrNotFound → 404.
+		if _, err := s.repo.GetContextByID(tctx, id); err != nil {
+			if errors.Is(err, ctxdomain.ErrNotFound) {
+				return sharederr.NewNotFoundError("context", id.String())
+			}
+			return err
+		}
+		return s.repo.DeleteContext(tctx, actor.OrgID, id)
+	})
+}
+
 // IndexWorker: index context content into the tenant's Mnemosyne bank.
 type IndexWorker struct {
 	pool   *gorm.DB

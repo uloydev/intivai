@@ -62,8 +62,10 @@ export function PipelineFunnel({
         pct: safeApplied > 0 ? Math.round((safeInterviewed / safeApplied) * 100) : 0,
         rateLabel: `${interviewRate}% Conversion from Screen`,
         icon: ChatCircleText,
-        color: "from-purple-500/20 to-purple-600/30 text-purple-500 border-purple-500/30",
+        color: "from-purple-500/20 to-purple-600/30 text-purple-600 border-purple-500/30 dark:text-purple-400",
         barColor: "bg-purple-500",
+        // Interview status filter — the funnel count comes from completed
+        // sessions, so the drill-down must land on the same exact filter.
         href: "/interviews?status=completed",
       },
       {
@@ -88,7 +90,7 @@ export function PipelineFunnel({
             <CardTitle className="font-display text-base font-bold text-foreground">
               Recruitment Pipeline Velocity
             </CardTitle>
-            <Badge variant="outline" className="border-primary/30 bg-primary/5 text-primary text-[10px] py-0.5">
+            <Badge variant="outline" className="border-primary/30 bg-primary/5 text-primary text-xs py-0.5">
               Head of HR Overview
             </Badge>
           </div>
@@ -96,7 +98,7 @@ export function PipelineFunnel({
             End-to-end talent conversion from inbound application to hiring recommendation.
           </CardDescription>
         </div>
-        <div className="flex items-center gap-2 text-xs font-semibold text-emerald-500">
+        <div className="flex items-center gap-2 text-xs font-semibold text-emerald-600 dark:text-emerald-400">
           <TrendUp className="h-4 w-4" weight="bold" />
           <span>Overall Yield: {overallYield}%</span>
         </div>
@@ -133,7 +135,7 @@ export function PipelineFunnel({
                 </div>
 
                 <div className="mt-3 space-y-1.5 border-t border-border/40 pt-2.5">
-                  <div className="flex items-center justify-between text-[11px]">
+                  <div className="flex items-center justify-between text-xs">
                     <span className="text-muted-foreground font-medium">{stage.rateLabel}</span>
                     <span className="font-mono font-bold text-foreground">{stage.pct}%</span>
                   </div>

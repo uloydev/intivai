@@ -13,19 +13,13 @@ interface ProctoringCardProps {
 // events reported over the WS/REST pipe, so the score is always
 // client-reported and can never be treated as verified.
 export function ProctoringCard({ summary, events }: ProctoringCardProps) {
-  const resolved = summary ?? {
-    integrity_score: 0,
-    risk_level: "low" as const,
-    tab_switch_count: 0,
-    total_away_duration_sec: 0,
-    paste_event_count: 0,
-    suspicious_paste_count: 0,
-    audio_anomaly_count: 0,
-    flags: [] as string[],
-  }
+  // No summary = no telemetry was reported. Never fabricate a 0/100 red score
+  // or a green "low risk" pill from defaults.
+  const hasTelemetry = Boolean(summary)
+  const resolved = summary
 
-  const isClean = resolved.integrity_score >= 85
-  const isMed = resolved.integrity_score >= 60 && resolved.integrity_score < 85
+  const isClean = (resolved?.integrity_score ?? 0) >= 85
+  const isMed = (resolved?.integrity_score ?? 0) >= 60 && (resolved?.integrity_score ?? 0) < 85
 
   return (
     <Card className="glass border-border/60 overflow-hidden shadow-sm">
@@ -35,7 +29,9 @@ export function ProctoringCard({ summary, events }: ProctoringCardProps) {
             <div
               className={cn(
                 "flex h-10 w-10 items-center justify-center rounded-xl font-bold",
-                isClean
+                !hasTelemetry
+                  ? "bg-muted text-muted-foreground"
+                  : isClean
                   ? "bg-emerald-500/10 text-emerald-500"
                   : isMed
                   ? "bg-amber-500/10 text-amber-500"
@@ -53,33 +49,39 @@ export function ProctoringCard({ summary, events }: ProctoringCardProps) {
           </div>
 
           <div className="flex flex-col items-end gap-1">
-            <div className="flex items-center gap-2.5">
-              <Badge
-                variant="outline"
-                className={cn(
-                  "font-mono text-xs px-2.5 py-1 font-bold",
-                  isClean
-                    ? "border-emerald-500/30 text-emerald-600 dark:text-emerald-400 bg-emerald-500/5"
-                    : isMed
-                    ? "border-amber-500/30 text-amber-600 dark:text-amber-400 bg-amber-500/5"
-                    : "border-destructive/30 text-destructive bg-destructive/5"
-                )}
-              >
-                Integrity: {resolved.integrity_score}/100
+            {hasTelemetry ? (
+              <div className="flex items-center gap-2.5">
+                <Badge
+                  variant="outline"
+                  className={cn(
+                    "font-mono text-xs px-2.5 py-1 font-bold",
+                    isClean
+                      ? "border-emerald-500/30 text-emerald-600 dark:text-emerald-400 bg-emerald-500/5"
+                      : isMed
+                      ? "border-amber-500/30 text-amber-600 dark:text-amber-400 bg-amber-500/5"
+                      : "border-destructive/30 text-destructive bg-destructive/5"
+                  )}
+                >
+                  Integrity: {resolved!.integrity_score}/100
+                </Badge>
+                <Badge
+                  className={cn(
+                    "text-[10px] font-bold uppercase tracking-wider",
+                    isClean
+                      ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
+                      : isMed
+                      ? "bg-amber-500/15 text-amber-600 dark:text-amber-400"
+                      : "bg-destructive/15 text-destructive"
+                  )}
+                >
+                  {resolved!.risk_level} Risk
+                </Badge>
+              </div>
+            ) : (
+              <Badge variant="secondary" className="text-xs font-semibold px-2.5 py-1 text-muted-foreground">
+                No telemetry recorded
               </Badge>
-              <Badge
-                className={cn(
-                  "text-[10px] font-bold uppercase tracking-wider",
-                  isClean
-                    ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
-                    : isMed
-                    ? "bg-amber-500/15 text-amber-600 dark:text-amber-400"
-                    : "bg-destructive/15 text-destructive"
-                )}
-              >
-                {resolved.risk_level} Risk
-              </Badge>
-            </div>
+            )}
             {summary && (
               <span className="text-[10px] font-medium text-muted-foreground">
                 Client-reported · unverified
@@ -89,46 +91,53 @@ export function ProctoringCard({ summary, events }: ProctoringCardProps) {
         </div>
 
         {/* Quick Metrics Grid */}
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <div className="rounded-xl border border-border/40 bg-muted/20 p-3">
-            <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider block">
-              Tab Switches
-            </span>
-            <span className="font-display text-lg font-bold text-foreground mt-0.5 block">
-              {resolved.tab_switch_count}
-            </span>
-          </div>
-          <div className="rounded-xl border border-border/40 bg-muted/20 p-3">
-            <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider block">
-              Time Out of Focus
-            </span>
-            <span className="font-display text-lg font-bold text-foreground mt-0.5 block">
-              {resolved.total_away_duration_sec}s
-            </span>
-          </div>
-          <div className="rounded-xl border border-border/40 bg-muted/20 p-3">
-            <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider block">
-              Clipboard Pastes
-            </span>
-            <span className="font-display text-lg font-bold text-foreground mt-0.5 block">
-              {resolved.paste_event_count}{" "}
-              <span className="text-xs font-normal text-muted-foreground">
-                ({resolved.suspicious_paste_count} large)
+        {hasTelemetry && resolved ? (
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <div className="rounded-xl border border-border/40 bg-muted/20 p-3">
+              <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider block">
+                Tab Switches
               </span>
-            </span>
+              <span className="font-display text-lg font-bold text-foreground mt-0.5 block">
+                {resolved.tab_switch_count}
+              </span>
+            </div>
+            <div className="rounded-xl border border-border/40 bg-muted/20 p-3">
+              <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider block">
+                Time Out of Focus
+              </span>
+              <span className="font-display text-lg font-bold text-foreground mt-0.5 block">
+                {resolved.total_away_duration_sec}s
+              </span>
+            </div>
+            <div className="rounded-xl border border-border/40 bg-muted/20 p-3">
+              <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider block">
+                Clipboard Pastes
+              </span>
+              <span className="font-display text-lg font-bold text-foreground mt-0.5 block">
+                {resolved.paste_event_count}{" "}
+                <span className="text-xs font-normal text-muted-foreground">
+                  ({resolved.suspicious_paste_count} large)
+                </span>
+              </span>
+            </div>
+            <div className="rounded-xl border border-border/40 bg-muted/20 p-3">
+              <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider block">
+                Audio Anomalies
+              </span>
+              <span className="font-display text-lg font-bold text-foreground mt-0.5 block">
+                {resolved.audio_anomaly_count}
+              </span>
+            </div>
           </div>
-          <div className="rounded-xl border border-border/40 bg-muted/20 p-3">
-            <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider block">
-              Audio Anomalies
-            </span>
-            <span className="font-display text-lg font-bold text-foreground mt-0.5 block">
-              {resolved.audio_anomaly_count}
-            </span>
+        ) : (
+          <div className="rounded-xl border border-border/40 bg-muted/30 p-3.5 flex items-center gap-2 text-xs text-muted-foreground">
+            <Info className="h-4 w-4 shrink-0" weight="fill" />
+            <span>No telemetry recorded — integrity signals are unavailable for this session.</span>
           </div>
-        </div>
+        )}
 
         {/* Flags / Audit Details */}
-        {resolved.flags && resolved.flags.length > 0 ? (
+        {hasTelemetry && resolved && resolved.flags && resolved.flags.length > 0 ? (
           <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-4 space-y-2">
             <p className="text-xs font-bold text-amber-600 dark:text-amber-400 flex items-center gap-1.5 uppercase tracking-wider">
               <WarningCircle className="h-4 w-4" weight="fill" /> Flagged Integrity Telemetry
@@ -142,17 +151,12 @@ export function ProctoringCard({ summary, events }: ProctoringCardProps) {
               ))}
             </ul>
           </div>
-        ) : resolved.integrity_score === 0 && (!events || events.length === 0) ? (
-          <div className="rounded-xl border border-muted-foreground/20 bg-muted/50 p-3.5 flex items-center gap-2 text-xs text-muted-foreground">
-            <Info className="h-4 w-4 shrink-0" weight="fill" />
-            <span>No telemetry data available for this session.</span>
-          </div>
-        ) : (
+        ) : hasTelemetry ? (
           <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-3.5 flex items-center gap-2 text-xs text-emerald-600 dark:text-emerald-400">
             <CheckCircle className="h-4 w-4 shrink-0" weight="fill" />
             <span>No integrity anomalies detected.</span>
           </div>
-        )}
+        ) : null}
 
         {/* Telemetry Event Stream */}
         {events && events.length > 0 && (

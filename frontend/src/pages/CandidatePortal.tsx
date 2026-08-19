@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useSearchParams, Link } from "react-router-dom"
 import { api, ApiError } from "@/lib/api"
@@ -13,6 +13,24 @@ import type {
 
 const TOKEN_KEY = "intivai_candidate_token"
 const EMAIL_KEY = "intivai_candidate_email"
+const OTP_DEFAULT_TTL_SEC = 600
+
+function applicationStatusLabel(status: string | null | undefined): string {
+  switch (status) {
+    case "applied":
+      return "Application received"
+    case "screening":
+    case "under_review":
+      return "Under review"
+    case "passed":
+      return "Screening passed"
+    case "rejected":
+      return "Application not proceeding"
+    default:
+      if (!status) return "Application received"
+      return status.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())
+  }
+}
 
 function SubmitButton({
   loading,
@@ -54,12 +72,16 @@ export function CandidatePortal() {
   )
   const [error, setError] = useState<string | null>(null)
   const [infoMsg, setInfoMsg] = useState<string | null>(null)
+  const [otpExpiresAt, setOtpExpiresAt] = useState<number | null>(null)
+  const [otpRemainingSec, setOtpRemainingSec] = useState(0)
+  const emptyAutoRefetchRef = useRef(false)
 
   const handleLogout = useCallback(() => {
     localStorage.removeItem(TOKEN_KEY)
     localStorage.removeItem(EMAIL_KEY)
     setStep("email")
     setOtpCode("")
+    setOtpExpiresAt(null)
     qc.removeQueries({ queryKey: ["candidate-applications"] })
   }, [qc])
 
@@ -93,8 +115,11 @@ export function CandidatePortal() {
   const sendOtp = useMutation({
     mutationFn: (emailValue: string) =>
       api.post<CandidateOTPResponse>("/public/candidate/auth/otp", { email: emailValue }),
-    onSuccess: (_data, emailValue) => {
+    onSuccess: (data, emailValue) => {
       setStep("otp")
+      setOtpCode("")
+      setError(null)
+      setOtpExpiresAt(Date.now() + (data.expires_in || OTP_DEFAULT_TTL_SEC) * 1000)
       setInfoMsg(`A 6-digit verification code has been dispatched to ${emailValue}.`)
     },
     onError: (err) => {
@@ -113,6 +138,7 @@ export function CandidatePortal() {
       localStorage.setItem(EMAIL_KEY, res.email)
       setEmail(res.email)
       setOtpCode("")
+      setOtpExpiresAt(null)
       setStep("dashboard")
       qc.invalidateQueries({ queryKey: ["candidate-applications", res.email] })
     },
@@ -127,6 +153,22 @@ export function CandidatePortal() {
     enabled: step === "dashboard",
   })
 
+  const applications = appsQuery.data ?? []
+
+  // Live OTP expiry countdown under the code input.
+  useEffect(() => {
+    if (!otpExpiresAt) {
+      setOtpRemainingSec(0)
+      return
+    }
+    const tick = () => setOtpRemainingSec(Math.max(0, Math.ceil((otpExpiresAt - Date.now()) / 1000)))
+    tick()
+    const t = setInterval(tick, 1000)
+    return () => clearInterval(t)
+  }, [otpExpiresAt])
+
+  const otpExpired = otpExpiresAt !== null && otpRemainingSec <= 0
+
   // Expired/revoked candidate token: the api layer already dropped the stored
   // token on 401 — bounce back to the email step.
   useEffect(() => {
@@ -134,6 +176,19 @@ export function CandidatePortal() {
       handleLogout()
     }
   }, [appsQuery.error, handleLogout])
+
+  // A just-completed apply may not be visible for a few seconds (async
+  // screening pipeline). Refetch once after 10s while the list is empty so we
+  // never imply the email has no applications in that window.
+  useEffect(() => {
+    if (step !== "dashboard" || applications.length > 0 || emptyAutoRefetchRef.current) return
+    emptyAutoRefetchRef.current = true
+    const t = setTimeout(() => {
+      appsQuery.refetch()
+    }, 10_000)
+    return () => clearTimeout(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, applications.length, appsQuery])
 
   function handleSendOTP(e?: React.FormEvent) {
     e?.preventDefault()
@@ -149,6 +204,10 @@ export function CandidatePortal() {
 
   function handleVerifyOTP(e: React.FormEvent) {
     e.preventDefault()
+    if (otpExpired) {
+      setError("Code expired — request a new one.")
+      return
+    }
     if (!otpCode.trim() || otpCode.length !== 6) {
       setError("Please enter the complete 6-digit verification code.")
       return
@@ -158,7 +217,11 @@ export function CandidatePortal() {
   }
 
   const authBusy = sendOtp.isPending || verify.isPending || magicVerify.isPending
-  const applications = appsQuery.data ?? []
+  const formatCountdown = (secs: number) => {
+    const mins = Math.floor(secs / 60)
+    const rem = secs % 60
+    return `${mins.toString().padStart(2, "0")}:${rem.toString().padStart(2, "0")}`
+  }
 
   return (
     <div className="min-h-[calc(100vh-4rem)] bg-background text-foreground py-12 px-4 sm:px-6 lg:px-8 relative overflow-hidden">
@@ -238,7 +301,7 @@ export function CandidatePortal() {
                       </label>
                       <button
                         type="button"
-                        onClick={() => { setStep("email"); setError(null); }}
+                        onClick={() => { setStep("email"); setOtpExpiresAt(null); setError(null); }}
                         className="text-xs text-primary hover:underline"
                       >
                         Change Email
@@ -255,16 +318,28 @@ export function CandidatePortal() {
                       placeholder="• • • • • •"
                       className="w-full h-14 rounded-xl text-center text-2xl tracking-[0.5em] font-mono bg-background/60"
                     />
-                    <p className="mt-2 text-xs text-muted-foreground text-center">
-                      Code expires in 10 minutes. Check your email.
-                    </p>
+                    {otpExpiresAt !== null ? (
+                      otpExpired ? (
+                        <p className="mt-2 text-xs text-destructive text-center">
+                          Code expired — request a new one.
+                        </p>
+                      ) : (
+                        <p className="mt-2 text-xs text-muted-foreground text-center">
+                          Code expires in <strong className="text-foreground font-mono">{formatCountdown(otpRemainingSec)}</strong>. Check your email.
+                        </p>
+                      )
+                    ) : (
+                      <p className="mt-2 text-xs text-muted-foreground text-center">
+                        Check your email for the verification code.
+                      </p>
+                    )}
                   </div>
 
                   <SubmitButton
                     loading={authBusy}
                     loadingLabel="Verifying..."
                     label="Access Candidate Portal →"
-                    disabled={otpCode.length !== 6}
+                    disabled={otpCode.length !== 6 || otpExpired}
                   />
 
                   <div className="text-center">
@@ -319,7 +394,7 @@ export function CandidatePortal() {
             </div>
 
             {/* Applications List */}
-            {appsQuery.isLoading || appsQuery.isFetching ? (
+            {appsQuery.isLoading && !appsQuery.data ? (
               <div className="p-12 text-center bg-card/60 border border-border rounded-2xl">
                 <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-4" />
                 <p className="text-muted-foreground text-sm">Retrieving your application history...</p>
@@ -341,6 +416,9 @@ export function CandidatePortal() {
                 <div>
                   <h3 className="text-lg font-semibold text-foreground">No Applications Found</h3>
                   <p className="text-sm text-muted-foreground mt-1">
+                    Applications may take a few minutes to appear while your profile is processed.
+                  </p>
+                  <p className="text-sm text-muted-foreground mt-1">
                     You haven't submitted any job applications under this email address yet.
                   </p>
                 </div>
@@ -352,6 +430,11 @@ export function CandidatePortal() {
               </div>
             ) : (
               <div className="space-y-6">
+                {appsQuery.isFetching && (
+                  <p className="text-xs text-muted-foreground text-center animate-pulse">
+                    Refreshing…
+                  </p>
+                )}
                 {applications.map((app) => {
                   const isCompleted = app.interview_status === "completed"
                   const hasInterviewTicket = Boolean(app.invitation_token)
@@ -398,13 +481,13 @@ export function CandidatePortal() {
                               </span>
                               {app.overall_score !== null && app.overall_score !== undefined && (
                                 <p className="text-xs text-muted-foreground mt-1">
-                                  Score: <strong className="text-foreground">{app.overall_score.toFixed(1)}/100</strong>
+                                  Score: <strong className="text-foreground">{Math.round(app.overall_score)}/100</strong>
                                 </p>
                               )}
                             </div>
                           ) : (
                             <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-muted text-muted-foreground border border-border">
-                              Status: {app.application_status}
+                              Status: {applicationStatusLabel(app.application_status)}
                             </span>
                           )}
                         </div>

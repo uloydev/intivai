@@ -125,7 +125,7 @@ export function CodeEditor({
               value={language}
               disabled={readOnly}
               onChange={(e) => onLanguageChange(e.target.value as SandboxLanguage)}
-              className="appearance-none bg-neutral-800 hover:bg-neutral-750 text-neutral-100 text-xs font-semibold px-3 py-1.5 pr-7 rounded border border-neutral-700 focus:outline-none focus:border-indigo-500 cursor-pointer"
+              className="appearance-none bg-neutral-800 hover:bg-neutral-700 text-neutral-100 text-xs font-semibold px-3 py-1.5 pr-7 rounded border border-neutral-700 focus:outline-none focus:border-indigo-500 cursor-pointer"
             >
               <option value="go">Go 1.26</option>
               <option value="python">Python 3.12</option>
@@ -170,7 +170,7 @@ export function CodeEditor({
                   : "bg-emerald-600 hover:bg-emerald-500 active:scale-95 shadow-emerald-950/50"
               )}
             >
-              <Play className={cn("w-3.5 h-3.5 fill-current", isRunning && "animate-spin")} />
+              <Play className={cn("w-3.5 h-3.5 fill-current", isRunning && "animate-spin motion-reduce:animate-none")} />
               <span>{isRunning ? "Running..." : "Run & Test"}</span>
             </button>
           )}

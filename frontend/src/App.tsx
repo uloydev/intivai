@@ -1,11 +1,13 @@
 import { BrowserRouter, Route, Routes } from "react-router-dom"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { Toaster } from "sonner"
 import React, { Suspense } from "react"
 import { AppShell } from "@/components/AppShell"
 import { ErrorBoundary } from "@/components/ErrorBoundary"
 import { RequireAuth } from "@/lib/require-auth"
 import { PublicLayout } from "@/components/PublicLayout"
+import { Toaster } from "@/components/ui/sonner"
+import { Card, CardContent } from "@/components/ui/card"
+import { Skeleton } from "@/components/ui/skeleton"
 
 const LandingPage = React.lazy(() => import("@/pages/Landing").then(m => ({ default: m.LandingPage })))
 const CareersPage = React.lazy(() => import("@/pages/Careers").then(m => ({ default: m.CareersPage })))
@@ -33,6 +35,21 @@ function NotFoundPage() {
   )
 }
 
+function RouteFallback() {
+  return (
+    <div className="flex min-h-screen w-full items-center justify-center bg-background p-4">
+      <Card className="glass w-80 space-y-4 p-6 text-center">
+        <CardContent className="space-y-3 p-0">
+          <Skeleton className="mx-auto h-8 w-8 rounded-full" />
+          <Skeleton className="mx-auto h-5 w-2/3" />
+          <Skeleton className="mx-auto h-4 w-full" />
+          <Skeleton className="mx-auto h-4 w-3/4" />
+        </CardContent>
+      </Card>
+    </div>
+  )
+}
+
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, refetchOnWindowFocus: false, staleTime: 30_000 } },
 })
@@ -42,7 +59,7 @@ export default function App() {
     <QueryClientProvider client={queryClient}>
       <ErrorBoundary>
         <BrowserRouter>
-          <Suspense fallback={<div className="flex h-screen w-full items-center justify-center text-sm text-muted-foreground">Loading...</div>}>
+          <Suspense fallback={<RouteFallback />}>
             <Routes>
               {/* Public Landing & Careers & Candidate Portal */}
               <Route element={<PublicLayout />}>

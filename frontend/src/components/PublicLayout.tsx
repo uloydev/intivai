@@ -1,4 +1,4 @@
-import React, { useState } from "react"
+import React, { useCallback, useEffect, useRef, useState } from "react"
 import { Link, Outlet, useLocation, useNavigate } from "react-router-dom"
 import {
   Briefcase,
@@ -55,9 +55,44 @@ export function PublicLayout() {
   const navigate = useNavigate()
   const authenticated = !!getToken()
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+  const [announcement, setAnnouncement] = useState("")
+  const mobileToggleRef = useRef<HTMLButtonElement>(null)
+  const mobileDrawerRef = useRef<HTMLDivElement>(null)
+  const wasOpenRef = useRef(false)
+
+  const openMenu = useCallback(() => {
+    setMobileMenuOpen(true)
+    setAnnouncement("Navigation menu opened")
+  }, [])
+
+  const closeMenu = useCallback(() => {
+    setMobileMenuOpen(false)
+    setAnnouncement("Navigation menu closed")
+  }, [])
+
+  // Escape-to-close while the drawer is open.
+  useEffect(() => {
+    if (!mobileMenuOpen) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") closeMenu()
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [mobileMenuOpen, closeMenu])
+
+  // Focus management: entering the drawer moves focus to its first focusable;
+  // closing returns focus to the toggle button (only when it was actually open).
+  useEffect(() => {
+    if (mobileMenuOpen) {
+      mobileDrawerRef.current?.querySelector<HTMLElement>("a, button")?.focus()
+    } else if (wasOpenRef.current) {
+      mobileToggleRef.current?.focus()
+    }
+    wasOpenRef.current = mobileMenuOpen
+  }, [mobileMenuOpen])
 
   const handleSectionClick = (sectionId: string, e: React.MouseEvent) => {
-    setMobileMenuOpen(false)
+    closeMenu()
     if (location.pathname === "/") {
       e.preventDefault()
       window.history.pushState(null, "", `/#${sectionId}`)
@@ -94,7 +129,7 @@ export function PublicLayout() {
         key={item.to}
         to={item.to}
         onClick={(e) => {
-          if (isMobile) setMobileMenuOpen(false)
+          if (isMobile) closeMenu()
           if (item.section) {
             handleSectionClick(item.section, e)
           } else if (item.to === "/" && location.pathname === "/") {
@@ -172,11 +207,14 @@ export function PublicLayout() {
 
           {/* Mobile Menu Toggle Button */}
           <Button
+            ref={mobileToggleRef}
             variant="ghost"
             size="icon"
             className="lg:hidden rounded-lg h-9 w-9 text-muted-foreground"
-            onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+            onClick={() => (mobileMenuOpen ? closeMenu() : openMenu())}
             aria-label="Toggle Navigation Menu"
+            aria-expanded={mobileMenuOpen}
+            aria-controls="mobile-nav-drawer"
           >
             {mobileMenuOpen ? <X className="h-5 w-5" /> : <List className="h-5 w-5" />}
           </Button>
@@ -185,7 +223,11 @@ export function PublicLayout() {
 
       {/* Mobile Navigation Drawer */}
       {mobileMenuOpen && (
-        <div className="lg:hidden border-b border-border/60 bg-background/95 backdrop-blur-xl px-6 py-5 space-y-4 animate-in slide-in-from-top-2 duration-200 z-40 sticky top-16">
+        <div
+          ref={mobileDrawerRef}
+          id="mobile-nav-drawer"
+          className="lg:hidden border-b border-border/60 bg-background/95 backdrop-blur-xl px-6 py-5 space-y-4 animate-in slide-in-from-top-2 duration-200 z-40 sticky top-16"
+        >
           <nav className="flex flex-col space-y-3 text-sm font-semibold">
             {NAV.map((item) => renderNavLink(item, "mobile"))}
           </nav>
@@ -193,19 +235,19 @@ export function PublicLayout() {
           <div className="pt-3 border-t border-border/50 flex flex-col gap-2">
             {authenticated ? (
               <Button asChild variant="gradient" className="w-full justify-center">
-                <Link to="/dashboard" onClick={() => setMobileMenuOpen(false)}>
+                <Link to="/dashboard" onClick={() => closeMenu()}>
                   Go to Workspace <ArrowRight className="ml-2 h-4 w-4" />
                 </Link>
               </Button>
             ) : (
               <div className="grid grid-cols-2 gap-2">
                 <Button asChild variant="outline" className="w-full">
-                  <Link to="/login" onClick={() => setMobileMenuOpen(false)}>
+                  <Link to="/login" onClick={() => closeMenu()}>
                     Sign In
                   </Link>
                 </Button>
                 <Button asChild variant="gradient" className="w-full shadow-md shadow-primary/20">
-                  <Link to="/register" onClick={() => setMobileMenuOpen(false)}>
+                  <Link to="/register" onClick={() => closeMenu()}>
                     Get Started
                   </Link>
                 </Button>
@@ -214,6 +256,11 @@ export function PublicLayout() {
           </div>
         </div>
       )}
+
+      {/* Screen-reader announcement of drawer open/close */}
+      <div className="sr-only" role="status" aria-live="polite">
+        {announcement}
+      </div>
 
       {/* Page Body */}
       <main className="flex-1">

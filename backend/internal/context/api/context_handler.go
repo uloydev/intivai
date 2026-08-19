@@ -116,3 +116,20 @@ func (h *ContextHandler) GetPrompt(c *fiber.Ctx) error {
 	}
 	return httpapi.OK(c, result)
 }
+
+// Delete handles DELETE /api/v1/orgs/:orgId/contexts/:contextID — removes one
+// company-context row (admin/recruiter only, tenant-pinned).
+func (h *ContextHandler) Delete(c *fiber.Ctx) error {
+	if _, err := h.orgFromPath(c); err != nil {
+		return httpapi.Error(c, err)
+	}
+	actor, _ := api.Actor(c)
+	ctxID, err := uuid.Parse(c.Params("contextID"))
+	if err != nil {
+		return httpapi.Error(c, sharederr.NewDomainError("BAD_REQUEST", "invalid context id"))
+	}
+	if err := h.svc.Delete(c.UserContext(), actor, ctxID); err != nil {
+		return httpapi.Error(c, err)
+	}
+	return httpapi.OK(c, fiber.Map{"message": "context deleted"})
+}

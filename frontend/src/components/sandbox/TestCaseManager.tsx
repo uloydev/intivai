@@ -46,14 +46,24 @@ export function TestCaseManager({ testCases, results, onUpdateTestCases }: TestC
   return (
     <div className="flex flex-col h-full bg-neutral-900 border border-neutral-800 rounded-lg overflow-hidden text-xs">
       {/* Test Cases Tab Bar */}
-      <div className="flex items-center gap-1 p-1.5 bg-neutral-950 border-b border-neutral-800 overflow-x-auto">
+      <div role="tablist" aria-label="Test cases" className="flex items-center gap-1 p-1.5 bg-neutral-950 border-b border-neutral-800 overflow-x-auto">
         {testCases.map((tc, idx) => {
           const res = results?.find((r) => r.test_case.id === tc.id)
           return (
-            <button
+            <div
               key={tc.id || idx}
+              role="tab"
+              tabIndex={0}
+              aria-selected={activeTab === idx}
+              aria-label={`Test case ${idx + 1}`}
               onClick={() => setActiveTab(idx)}
-              className={`flex items-center gap-1.5 px-2.5 py-1 rounded transition-colors ${
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault()
+                  setActiveTab(idx)
+                }
+              }}
+              className={`flex items-center gap-1.5 px-2.5 py-1 rounded transition-colors outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 ${
                 activeTab === idx
                   ? "bg-neutral-800 text-white font-medium shadow-sm"
                   : "text-neutral-400 hover:text-neutral-200 hover:bg-neutral-900"
@@ -79,7 +89,7 @@ export function TestCaseManager({ testCases, results, onUpdateTestCases }: TestC
                   <Trash2 className="w-3 h-3" />
                 </button>
               )}
-            </button>
+            </div>
           )
         })}
         <button
@@ -91,7 +101,6 @@ export function TestCaseManager({ testCases, results, onUpdateTestCases }: TestC
           <span>Add</span>
         </button>
       </div>
-
       {/* Test Case Editor Panel */}
       {currentCase && (
         <div className="p-3 flex-1 overflow-y-auto space-y-3">
@@ -135,7 +144,7 @@ export function TestCaseManager({ testCases, results, onUpdateTestCases }: TestC
                 {currentResult.actual_output || "(empty)"}
               </pre>
               {currentResult.error && (
-                <div className="text-rose-400 mt-1 font-mono text-[11px]">
+                <div className="text-rose-400 mt-1 font-mono text-xs">
                   {currentResult.error}
                 </div>
               )}

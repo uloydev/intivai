@@ -17,6 +17,8 @@ export function LoginPage() {
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
 
+  const showDemoLogin = import.meta.env.VITE_SHOW_DEMO_LOGIN === "true"
+
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault()
     setError(null)
@@ -51,18 +53,20 @@ export function LoginPage() {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4 pt-2">
-            {/* 1-click Demo Fill */}
-            <div className="rounded-xl border border-primary/20 bg-primary/5 p-3 flex items-center justify-between">
-              <div>
-                <p className="text-xs font-semibold flex items-center gap-1 text-primary">
-                  <Key className="h-3.5 w-3.5" /> Testing Demo Workspace?
-                </p>
-                <p className="text-[11px] text-muted-foreground">demo / admin@demo.io</p>
+            {/* 1-click Demo Fill — dev/demo only, gated by VITE_SHOW_DEMO_LOGIN */}
+            {showDemoLogin && (
+              <div className="rounded-xl border border-primary/20 bg-primary/5 p-3 flex items-center justify-between">
+                <div>
+                  <p className="text-xs font-semibold flex items-center gap-1 text-primary">
+                    <Key className="h-3.5 w-3.5" /> Testing Demo Workspace?
+                  </p>
+                  <p className="text-xs text-muted-foreground">demo / admin@demo.io</p>
+                </div>
+                <Button size="sm" variant="outline" className="h-7 text-xs border-primary/30 text-primary hover:bg-primary/10" onClick={fillDemo}>
+                  Auto-fill
+                </Button>
               </div>
-              <Button size="sm" variant="outline" className="h-7 text-xs border-primary/30 text-primary hover:bg-primary/10" onClick={fillDemo}>
-                Auto-fill
-              </Button>
-            </div>
+            )}
 
             <form onSubmit={onSubmit} className="space-y-3.5">
               <div className="space-y-1.5">
@@ -104,16 +108,21 @@ export function LoginPage() {
               </div>
 
               {error && (
-                <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-2.5 text-xs text-destructive">
+                <div role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 p-2.5 text-xs text-destructive">
                   {error}
                 </div>
               )}
 
               <Button type="submit" variant="gradient" className="w-full font-semibold shadow-md shadow-primary/20 mt-1" disabled={loading}>
-                {loading ? <SpinnerGap className="mr-2 h-4 w-4 animate-spin" /> : <ArrowRight className="mr-2 h-4 w-4" />}
+                {loading ? <SpinnerGap className="mr-2 h-4 w-4 animate-spin motion-reduce:animate-none" /> : <ArrowRight className="mr-2 h-4 w-4" />}
                 Sign In to Console
               </Button>
             </form>
+
+            <p className="text-center text-xs text-muted-foreground">
+              Forgot your password?{" "}
+              <span className="font-medium text-foreground">Contact your workspace administrator</span>
+            </p>
 
             <div className="border-t border-border/40 pt-3 text-center text-xs text-muted-foreground">
               New organization?{" "}

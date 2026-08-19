@@ -34,6 +34,9 @@ export function useChatSession({ id, ticket, onQuestion }: UseChatSessionOptions
   const evaluatedRef = useRef(false)
   const onQuestionRef = useRef(onQuestion)
   onQuestionRef.current = onQuestion
+  // Mirror of `disconnected` for the stable submitAnswer callback (state read
+  // inside a []-dep callback would be a stale closure).
+  const disconnectedRef = useRef(false)
 
   const [bubbles, setBubbles] = useState<ChatBubble[]>([])
   const [streaming, setStreaming] = useState(false)
@@ -45,8 +48,13 @@ export function useChatSession({ id, ticket, onQuestion }: UseChatSessionOptions
   const [archetype, setArchetype] = useState<"conversational" | "system_design" | "coding">("conversational")
   const [evaluation, setEvaluation] = useState<Extract<ChatFrame, { type: "evaluation" }> | null>(null)
   const [reconnecting, setReconnecting] = useState(false)
+  const [disconnected, setDisconnected] = useState(false)
   const [expired, setExpired] = useState(false)
   const [pendingAnswer, setPendingAnswer] = useState(false)
+
+  useEffect(() => {
+    disconnectedRef.current = disconnected
+  }, [disconnected])
 
   useEffect(() => {
     if (!id || !ticket) {
@@ -75,13 +83,17 @@ export function useChatSession({ id, ticket, onQuestion }: UseChatSessionOptions
             }
           }, delay)
         } else {
+          // Reconnect budget exhausted — enter a persistent disconnected state.
+          // Answers are not being recorded; the UI must disable input and
+          // offer a manual refresh (window.location.reload()) to resume.
           setReconnecting(false)
-          toast.error("Connection lost. Please refresh the page to resume your session.")
+          setDisconnected(true)
         }
       },
       onFrame: (frame: ChatFrame) => {
         if (frame.type === "interview.start") {
           setReconnecting(false)
+          setDisconnected(false)
           sessionIdRef.current = frame.session_id
           setTotal(frame.total_questions)
           if (frame.session_budget_sec) {
@@ -89,6 +101,7 @@ export function useChatSession({ id, ticket, onQuestion }: UseChatSessionOptions
           }
         } else if (frame.type === "question") {
           setReconnecting(false)
+          setDisconnected(false)
           setCurrentIdx(frame.idx)
           setCurrentQuestionText(frame.content)
           if (frame.time_limit_sec) setTimeLimitSec(frame.time_limit_sec)
@@ -159,6 +172,7 @@ export function useChatSession({ id, ticket, onQuestion }: UseChatSessionOptions
   // socket. Returns whether the frame was actually transmitted — consumers use
   // that to surface a "not sent" error without leaving the input disabled.
   const submitAnswer = useCallback((content: string, pacing?: PacingTelemetry): boolean => {
+    if (disconnectedRef.current) return false
     setPendingAnswer(true)
     setBubbles((prev) => [...prev, { id: crypto.randomUUID(), kind: "answer", content }])
     const sent = clientRef.current?.answer(content, pacing) ?? false
@@ -188,6 +202,7 @@ export function useChatSession({ id, ticket, onQuestion }: UseChatSessionOptions
     archetype,
     evaluation,
     reconnecting,
+    disconnected,
     expired,
     pendingAnswer,
     submitAnswer,

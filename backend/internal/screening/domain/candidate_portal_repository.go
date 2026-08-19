@@ -50,6 +50,11 @@ type CandidateApplicationView struct {
 // duplicate the lookup logic (AGENTS.md convention).
 type CandidatePortalRepository interface {
 	CreateOTP(ctx context.Context, email, codeHash, token string, expiresAt time.Time) error
+	// CreateMagicToken — inserts a portal magic-token row for a just-applied
+	// candidate (no email dispatch). The code hash is a random never-sent
+	// value: the row's only purpose is to let the returned token be exchanged
+	// for a candidate JWT (FindValidByToken), so no OTP code exists.
+	CreateMagicToken(ctx context.Context, email, token string, expiresAt time.Time) error
 	// LastRequestAt — most recent un-consumed request for the email (cooldown).
 	LastRequestAt(ctx context.Context, email string) (*time.Time, error)
 	// OTPCountSince — requests issued for the email since `since` (daily cap).

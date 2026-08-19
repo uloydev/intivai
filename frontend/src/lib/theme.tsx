@@ -7,7 +7,12 @@ const THEME_KEY = "intivai_theme"
 function initialTheme(): Theme {
   const stored = localStorage.getItem(THEME_KEY)
   if (stored === "dark" || stored === "light") return stored
-  return "light" // light is the default for the recruiter workflow
+  // First visit: respect the OS preference; default to dark only when the OS
+  // prefers dark, otherwise light. The manual toggle still overrides this.
+  if (typeof window !== "undefined" && window.matchMedia("(prefers-color-scheme: dark)").matches) {
+    return "dark"
+  }
+  return "light"
 }
 
 function applyThemeClass(theme: Theme) {

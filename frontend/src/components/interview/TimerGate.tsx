@@ -121,6 +121,11 @@ export function TimerGate({
     return "bg-emerald-500"
   }, [questionClock, questionPercent, graceClock])
 
+  // Session budget escalation: amber warning inside the last minute, then an
+  // explicit "time is up" state at 00:00 instead of an idle zero clock.
+  const sessionEnded = sessionClock <= 0
+  const sessionLow = !sessionEnded && sessionClock <= 60
+
   return (
     <div className="w-full space-y-2">
       <div className="flex flex-wrap items-center justify-between gap-3 text-xs">
@@ -183,6 +188,27 @@ export function TimerGate({
           </span>
         </div>
       )}
+
+      {/* Session Budget Warnings & End State */}
+      {sessionEnded ? (
+        <div
+          role="alert"
+          className="flex items-center gap-2 rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-1.5 text-xs text-rose-300 animate-in fade-in slide-in-from-top-1 duration-300"
+        >
+          <Hourglass className="h-4 w-4 text-rose-400" />
+          <span className="font-medium">Session time is up.</span>
+        </div>
+      ) : sessionLow ? (
+        <div
+          role="alert"
+          className="flex items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-xs text-amber-600 dark:text-amber-400 animate-in fade-in slide-in-from-top-1 duration-300"
+        >
+          <Warning className="h-4 w-4" />
+          <span className="font-medium">
+            Only {formatTime(sessionClock)} of session time remains — wrap up your answer.
+          </span>
+        </div>
+      ) : null}
     </div>
   )
 }

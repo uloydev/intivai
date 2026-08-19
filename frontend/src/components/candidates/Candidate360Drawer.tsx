@@ -22,6 +22,18 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
+import {
+  Dialog,
+  DialogContent,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { RecommendationBadge } from "@/components/ui/RecommendationBadge"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
@@ -33,6 +45,17 @@ const SCREENING_DIMENSIONS: Array<{ key: keyof ScreeningScoreBreakdown; label: s
   { key: "education", label: "Education" },
   { key: "certifications", label: "Certifications" },
 ]
+
+// Canonical screening weights (backend scoring engine defaults, scoring.go).
+// Job/org overrides are not exposed on the application DTO, so the defaults
+// are the honest display of how the weighted sum is composed.
+const SCREENING_WEIGHTS: Record<keyof ScreeningScoreBreakdown, number> = {
+  skills_match: 0.35,
+  experience_years: 0.2,
+  semantic_match: 0.25,
+  education: 0.1,
+  certifications: 0.1,
+}
 
 export interface Candidate360DrawerProps {
   application: Application | null
@@ -98,29 +121,43 @@ export function Candidate360Drawer({
     onError: (e) => toast.error(e instanceof Error ? e.message : "Failed to save decision"),
   })
 
-  if (!open || !application) return null
+  if (!application) return null
 
   const handleSaveDecision = () => {
     saveDecision.mutate()
   }
 
-  const inviteLink = inviteResult
-    ? chatInviteUrl(inviteResult.interview_id, inviteResult.invitation_token)
-    : application.interview_id
-    ? chatInviteUrl(application.interview_id)
+  // Fresh invite only counts when this session minted the token; an interview_id
+  // without a fresh token means the link expired / was regenerated elsewhere.
+  const freshInvite = inviteResult
+  const hasStaleInvite = !freshInvite && Boolean(application.interview_id)
+  const inviteLink = freshInvite
+    ? chatInviteUrl(freshInvite.interview_id, freshInvite.invitation_token)
     : ""
+
+  // Weighted total of the dimensions actually present in the breakdown.
+  const presentDims = SCREENING_DIMENSIONS.filter(({ key }) => application.score_breakdown?.[key] != null)
+  const weightedTotal = (() => {
+    if (presentDims.length === 0) return null
+    const weightSum = presentDims.reduce((acc, { key }) => acc + SCREENING_WEIGHTS[key], 0)
+    const total = presentDims.reduce((acc, { key }) => {
+      const v = application.score_breakdown?.[key]
+      return acc + (v == null ? 0 : v) * SCREENING_WEIGHTS[key]
+    }, 0)
+    return weightSum > 0 ? Math.round((total / weightSum) * 100) : null
+  })()
 
   // Stage badge derives from the authoritative application.stage (ADR-0001),
   // not the unsaved select draft — the header must never show a lie.
   const stageBadge = stageMeta(application.stage ?? "")
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-end bg-background/80 backdrop-blur-sm animate-in fade-in duration-300">
-      {/* Click outside to close backdrop */}
-      <div className="flex-1 cursor-pointer" onClick={onClose} />
-
-      {/* Slide-out Drawer Panel */}
-      <div className="relative flex h-full w-full max-w-2xl flex-col border-l border-border bg-card shadow-2xl animate-in slide-in-from-right duration-300">
+    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent
+        showCloseButton={false}
+        className="fixed inset-y-0 right-0 top-0 left-auto flex h-full w-full max-w-2xl translate-x-0 translate-y-0 flex-col gap-0 rounded-none border-l border-border bg-card p-0 shadow-2xl ring-0 data-open:animate-in data-open:fade-in-0 data-open:slide-in-from-right data-closed:animate-out data-closed:slide-out-to-right sm:max-w-2xl"
+        aria-label="Candidate 360 profile drawer"
+      >
         {/* Drawer Header */}
         <div className="flex items-start justify-between border-b border-border p-6">
           <div className="flex items-center gap-3.5">
@@ -129,9 +166,9 @@ export function Candidate360Drawer({
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h2 className="font-display text-xl font-bold text-foreground">
+                <DialogTitle className="font-display text-xl font-bold text-foreground">
                   {application.candidate_name || "Candidate Profile"}
-                </h2>
+                </DialogTitle>
                 <Badge variant="outline" className={cn("text-xs font-semibold", stageBadge.color)}>
                   {stageBadge.label}
                 </Badge>
@@ -150,17 +187,26 @@ export function Candidate360Drawer({
             </div>
           </div>
 
-          <Button variant="ghost" size="icon" onClick={onClose} className="rounded-full">
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={onClose}
+            className="rounded-full"
+            aria-label="Close candidate profile"
+          >
             <X className="h-4 w-4" />
           </Button>
         </div>
 
         {/* Tab Navigation */}
-        <div className="flex border-b border-border/80 px-6">
+        <div role="tablist" aria-label="Candidate 360 sections" className="flex border-b border-border/80 px-6">
           <button
+            role="tab"
+            aria-selected={activeTab === "cv"}
+            tabIndex={activeTab === "cv" ? 0 : -1}
             onClick={() => setActiveTab("cv")}
             className={cn(
-              "flex items-center gap-2 border-b-2 py-3 px-3 text-xs font-semibold transition-colors",
+              "flex items-center gap-2 border-b-2 py-3 px-3 text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60",
               activeTab === "cv"
                 ? "border-primary text-primary"
                 : "border-transparent text-muted-foreground hover:text-foreground"
@@ -171,9 +217,12 @@ export function Candidate360Drawer({
           </button>
 
           <button
+            role="tab"
+            aria-selected={activeTab === "assessment"}
+            tabIndex={activeTab === "assessment" ? 0 : -1}
             onClick={() => setActiveTab("assessment")}
             className={cn(
-              "flex items-center gap-2 border-b-2 py-3 px-3 text-xs font-semibold transition-colors",
+              "flex items-center gap-2 border-b-2 py-3 px-3 text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60",
               activeTab === "assessment"
                 ? "border-primary text-primary"
                 : "border-transparent text-muted-foreground hover:text-foreground"
@@ -184,9 +233,12 @@ export function Candidate360Drawer({
           </button>
 
           <button
+            role="tab"
+            aria-selected={activeTab === "decision"}
+            tabIndex={activeTab === "decision" ? 0 : -1}
             onClick={() => setActiveTab("decision")}
             className={cn(
-              "flex items-center gap-2 border-b-2 py-3 px-3 text-xs font-semibold transition-colors",
+              "flex items-center gap-2 border-b-2 py-3 px-3 text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60",
               activeTab === "decision"
                 ? "border-primary text-primary"
                 : "border-transparent text-muted-foreground hover:text-foreground"
@@ -213,7 +265,7 @@ export function Candidate360Drawer({
                       {application.cv_score != null ? `${application.cv_score}%` : "Pending"}
                     </span>
                     {application.passed_screening ? (
-                      <Badge className="bg-emerald-500/10 text-emerald-500 border-emerald-500/30 text-xs gap-1">
+                      <Badge className="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30 text-xs gap-1">
                         <CheckCircle className="h-3.5 w-3.5" weight="fill" /> Passed Threshold
                       </Badge>
                     ) : (
@@ -260,19 +312,34 @@ export function Candidate360Drawer({
               {application.score_breakdown &&
                 Object.keys(application.score_breakdown).length > 0 && (
                   <div className="space-y-3 rounded-xl border border-border/70 bg-muted/20 p-4">
-                    <div className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
-                      <Sparkle className="h-4 w-4 text-primary" weight="fill" />
-                      <span>AI Screening Recommendation</span>
+                    <div className="flex items-center justify-between gap-1.5">
+                      <div className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
+                        <Sparkle className="h-4 w-4 text-primary" weight="fill" />
+                        <span>AI Screening Recommendation</span>
+                      </div>
+                      <span className="text-[11px] text-muted-foreground">
+                        Overall = weighted sum of the dimensions below
+                      </span>
                     </div>
+                    {weightedTotal != null && (
+                      <div className="flex items-center justify-between rounded-lg border border-border/50 bg-background/60 px-3 py-2">
+                        <span className="text-xs font-medium text-muted-foreground">Weighted Overall</span>
+                        <span className="font-display text-base font-bold text-foreground">{weightedTotal}%</span>
+                      </div>
+                    )}
                     <div className="grid grid-cols-2 gap-2">
                       {SCREENING_DIMENSIONS.map(({ key, label }) => {
                         const value = application.score_breakdown?.[key]
                         if (value == null) return null
+                        const weight = SCREENING_WEIGHTS[key]
                         return (
-                          <div key={key} className="flex items-center justify-between rounded-lg bg-background/60 border border-border/50 px-2.5 py-1.5">
-                            <span className="text-[11px] text-muted-foreground">{label}</span>
-                            <span className="font-mono text-xs font-bold text-foreground">
-                              {Math.round(value * 100)}%
+                          <div key={key} className="flex items-center justify-between gap-2 rounded-lg bg-background/60 border border-border/50 px-2.5 py-1.5">
+                            <span className="text-xs text-muted-foreground">{label}</span>
+                            <span className="flex items-center gap-1.5">
+                              <span className="font-mono text-[11px] text-muted-foreground">×{Math.round(weight * 100)}%</span>
+                              <span className="font-mono text-xs font-bold text-foreground">
+                                {Math.round(value * 100)}%
+                              </span>
                             </span>
                           </div>
                         )
@@ -335,7 +402,7 @@ export function Candidate360Drawer({
                       Dispatch an interactive AI assessment session with real-time technical probing, live coding challenge, and stage timer gates.
                     </p>
 
-                    {inviteLink ? (
+                    {freshInvite ? (
                       <div className="space-y-2">
                         <Label className="text-xs font-medium">Active Candidate Invitation Link</Label>
                         <div className="flex items-center gap-2">
@@ -350,8 +417,28 @@ export function Candidate360Drawer({
                             variant="secondary"
                             onClick={() => copyText(inviteLink, "Candidate Invite Link")}
                             className="gap-1.5 text-xs"
+                            aria-label="Copy candidate invite link"
                           >
                             <Copy className="h-3.5 w-3.5" /> Copy
+                          </Button>
+                        </div>
+                      </div>
+                    ) : hasStaleInvite ? (
+                      <div className="space-y-2">
+                        <Label className="text-xs font-medium">Candidate Invitation</Label>
+                        <div className="flex items-center justify-between gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2">
+                          <span className="text-xs text-destructive line-through opacity-70">
+                            Invitation expired — regenerate
+                          </span>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => createInterview.mutate()}
+                            disabled={createInterview.isPending}
+                            className="gap-1.5 text-xs shrink-0"
+                          >
+                            <Sparkle className="h-3.5 w-3.5" weight="fill" />
+                            {createInterview.isPending ? "Generating..." : "Regenerate invitation"}
                           </Button>
                         </div>
                       </div>
@@ -381,26 +468,24 @@ export function Candidate360Drawer({
                 <Label htmlFor="stage-select" className="text-xs font-semibold">
                   Update Candidate Stage
                 </Label>
-                <select
-                  id="stage-select"
-                  value={currentStage}
-                  onChange={(e) => setCurrentStage(e.target.value as CandidateLifecycleStage)}
-                  className="w-full rounded-lg border border-border bg-card px-3 py-2 text-xs font-medium text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                <Select
+                  value={currentStage || undefined}
+                  onValueChange={(v) => setCurrentStage(v as CandidateLifecycleStage)}
                 >
-                  {currentStage === "" && (
-                    <option value="" disabled>
-                      — Undecided —
-                    </option>
-                  )}
-                  <option value="applied">Applied (Inbound)</option>
-                  <option value="screening_passed">Screening Passed (Qualified)</option>
-                  <option value="screening_failed">Screening Failed</option>
-                  <option value="interview_invited">Interview Invited / Scheduled</option>
-                  <option value="interview_completed">Interview Completed (Evaluation Ready)</option>
-                  <option value="offer_extended">Offer Extended</option>
-                  <option value="hired">Hired 🎉</option>
-                  <option value="rejected">Rejected / Archived</option>
-                </select>
+                  <SelectTrigger id="stage-select" className="w-full text-xs font-medium">
+                    <SelectValue placeholder="— Undecided —" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="applied">Applied (Inbound)</SelectItem>
+                    <SelectItem value="screening_passed">Screening Passed (Qualified)</SelectItem>
+                    <SelectItem value="screening_failed">Screening Failed</SelectItem>
+                    <SelectItem value="interview_invited">Interview Invited / Scheduled</SelectItem>
+                    <SelectItem value="interview_completed">Interview Completed (Evaluation Ready)</SelectItem>
+                    <SelectItem value="offer_extended">Offer Extended</SelectItem>
+                    <SelectItem value="hired">Hired</SelectItem>
+                    <SelectItem value="rejected">Rejected / Archived</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
 
               {/* Recruiter Evaluation Feedback Notes */}
@@ -429,7 +514,7 @@ export function Candidate360Drawer({
             </div>
           )}
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   )
 }
