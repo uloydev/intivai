@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/intivai/backend/internal/cv/application"
 	"github.com/intivai/backend/internal/iam/api"
+	scrdomain "github.com/intivai/backend/internal/screening/domain"
 	sharederr "github.com/intivai/backend/internal/shared/errors"
 	"github.com/intivai/backend/internal/shared/httpapi"
 )
@@ -136,7 +137,7 @@ func (h *CVHandler) ConfirmProfile(c *fiber.Ctx) error {
 		return httpapi.Error(c, sharederr.NewDomainError("BAD_REQUEST", "token is required"))
 	}
 
-	var req map[string]interface{}
+	var req scrdomain.ResumeData
 	if err := c.BodyParser(&req); err != nil {
 		return httpapi.Error(c, sharederr.NewDomainError("BAD_REQUEST", "invalid json payload"))
 	}

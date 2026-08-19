@@ -102,7 +102,7 @@ func (s *SandboxService) SaveCodingSession(ctx context.Context, orgID string, in
 	if raw, err := json.Marshal(session.FinalResult); err == nil {
 		_ = json.Unmarshal(raw, &finalRes)
 	}
-	var aiReview *ivdomain.AICodeReview
+	var aiReview *ivdomain.CodeReview
 	if raw, err := json.Marshal(session.AICodeReview); err == nil {
 		_ = json.Unmarshal(raw, &aiReview)
 	}

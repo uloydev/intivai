@@ -28,9 +28,6 @@ import (
 	"github.com/rs/zerolog"
 )
 
-// Read deadline per candidate frame (Research §2: PerQuestionTimeout = 3 min).
-// Stricter than the domain idle rule — a silent candidate disconnects at 3
-// minutes; the 5-minute idle/expiry path still guards server-side state.
 // errorFrame maps a domain error to a WS error frame with its machine
 // readable code (FE can distinguish CONSENT_REQUIRED from INTERVIEW_EXPIRED).
 func errorFrame(err error) ivdomain.ErrorMessage {
@@ -42,6 +39,9 @@ func errorFrame(err error) ivdomain.ErrorMessage {
 	return frame
 }
 
+// readDeadline — per candidate frame (Research §2: PerQuestionTimeout = 3 min).
+// Stricter than the domain idle rule — a silent candidate disconnects at 3
+// minutes; the 5-minute idle/expiry path still guards server-side state.
 const readDeadline = ivdomain.PerQuestionTimeout
 
 // Server heartbeat (Research §2): ping every 30s; drop the socket when the
@@ -50,6 +50,58 @@ const (
 	heartbeatInterval = 30 * time.Second
 	pongWait          = 10 * time.Second
 )
+
+// wsWriter serializes all outbound frames through one writer goroutine
+// (gorilla/websocket allows a single concurrent writer), so the read loop,
+// the LLM stream goroutine and the code-run goroutine can all call send safely.
+type wsWriter struct {
+	ch      chan any
+	done    chan struct{}
+	mu      sync.Mutex
+	closed  bool
+	connCtx context.Context
+}
+
+func newWSWriter(conn *fiberws.Conn, connCtx context.Context) *wsWriter {
+	w := &wsWriter{ch: make(chan any, 64), done: make(chan struct{}), connCtx: connCtx}
+	go func() {
+		defer close(w.done)
+		for frame := range w.ch {
+			if err := conn.WriteJSON(frame); err != nil {
+				return
+			}
+		}
+	}()
+	return w
+}
+
+func (w *wsWriter) send(frame any) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.closed || w.connCtx.Err() != nil {
+		return
+	}
+	select {
+	case w.ch <- frame:
+	case <-w.connCtx.Done():
+	}
+}
+
+// sendError sends the error frame for a domain error (machine-readable code).
+func (w *wsWriter) sendError(err error) {
+	w.send(errorFrame(err))
+}
+
+// close flushes buffered frames, then stops the writer goroutine.
+func (w *wsWriter) close() {
+	w.mu.Lock()
+	if !w.closed {
+		w.closed = true
+		close(w.ch)
+	}
+	w.mu.Unlock()
+	<-w.done
+}
 
 // turnState serializes the "next question" dispatch between the streaming
 // goroutine and the interrupt path — exactly one sends it. onSent fires with
@@ -80,6 +132,115 @@ func (t *turnState) sendQuestionOnce(send func(any)) {
 			t.onSent(t.next)
 		}
 	}
+}
+
+// chatSession bundles the per-connection state shared between the WS read
+// loop and the streaming goroutine (history, current turn, archetype gate).
+type chatSession struct {
+	ctx         context.Context
+	w           *wsWriter
+	orgID       string
+	interviewID uuid.UUID
+	sessionID   string
+	prompt      string
+
+	historyMu    sync.Mutex
+	history      []gensvc.ContextMessage
+	lastQuestion *ivdomain.Question
+	archetype    string
+	onQuestion   func(*ivdomain.Question)
+
+	turn         *turnState
+	streamCancel context.CancelFunc
+}
+
+// handleInterrupt cancels the in-flight LLM stream and dispatches the next
+// question exactly once (the stream goroutine suppresses it on cancellation).
+func (s *chatSession) handleInterrupt() {
+	if s.streamCancel != nil {
+		s.streamCancel() // stops the LLM stream mid-response
+		s.streamCancel = nil
+	}
+	s.w.send(ivdomain.ResponseMessage{Type: ivdomain.MsgResponse, Content: "Interrupted."})
+	// The stream goroutine suppresses the next question when its ctx is
+	// canceled; send it here exactly once instead. If the stream already
+	// completed normally, questionSent guards the double-send.
+	if s.turn != nil {
+		s.turn.sendQuestionOnce(s.w.send)
+	}
+	s.turn = nil
+}
+
+// handleTelemetry records a proctoring telemetry frame (tab_switch, paste,
+// focus loss, window resize, audio anomaly) as a ProctoringEvent.
+func (s *chatSession) handleTelemetry(h *ChatHandler, m ivdomain.TelemetryMessage) {
+	var evTime time.Time
+	if m.Timestamp != "" {
+		evTime, _ = time.Parse(time.RFC3339, m.Timestamp)
+	}
+	if evTime.IsZero() {
+		evTime = time.Now()
+	}
+	event := ivdomain.ProctoringEvent{
+		Type:        ivdomain.ProctoringEventType(m.EventType),
+		Timestamp:   evTime,
+		QuestionIdx: m.QuestionIdx,
+		Details:     m.Details,
+	}
+	_ = h.svc.RecordTelemetry(s.ctx, s.orgID, s.interviewID, event)
+}
+
+// handleCodeRun runs a code.run frame off the read loop (gated on the current
+// question being a coding archetype).
+func (s *chatSession) handleCodeRun(h *ChatHandler, m ivdomain.CodeRunMessage) {
+	// Gate: code execution is only allowed while a coding question is active
+	// (design decision).
+	s.historyMu.Lock()
+	arch := s.archetype
+	s.historyMu.Unlock()
+	if arch != ivdomain.ArchetypeCoding {
+		s.w.send(ivdomain.CodeResultMessage{
+			Type:  ivdomain.MsgCodeResult,
+			Error: "code execution is only allowed on coding challenges",
+		})
+		return
+	}
+	// Execute off the read loop: a slow run must not block heartbeat/interrupt
+	// frames or trip the read deadline. Cap test cases + total wall time (each
+	// case already has a per-case timeout; N cases × timeout must stay bounded).
+	go h.runCode(s.ctx, s.w.send, s.orgID, s.interviewID, m)
+}
+
+// handlePacing advances the interview with the answer and its pacing
+// telemetry (keystroke/paste authenticity signals) — the pacing-aware half of
+// the answer flow, kept separate so the pacing contract stays visible.
+func (s *chatSession) handlePacing(h *ChatHandler, m ivdomain.AnswerMessage) (*ivdomain.Question, error) {
+	return h.svc.AnswerAndAdvanceWithPacing(s.ctx, s.orgID, s.interviewID, m.Content, m.PacingTelemetry)
+}
+
+// handleAnswer records the answer, then streams the LLM follow-up and the next
+// question. Returns false to close the connection (an answer rejection is
+// fatal for the read loop).
+func (s *chatSession) handleAnswer(h *ChatHandler, m ivdomain.AnswerMessage) bool {
+	next, err := s.handlePacing(h, m)
+	if err != nil {
+		s.w.sendError(err)
+		return false
+	}
+	s.historyMu.Lock()
+	if s.lastQuestion != nil {
+		s.history = append(s.history,
+			gensvc.ContextMessage{Role: gensvc.RoleAssistant, Content: s.lastQuestion.Content},
+			gensvc.ContextMessage{Role: gensvc.RoleUser, Content: m.Content},
+		)
+	}
+	s.historyMu.Unlock()
+	remSec := h.svc.SessionRemaining(s.ctx, s.orgID, s.interviewID)
+	s.turn = &turnState{next: next, remainingSec: remSec, onSent: s.onQuestion}
+	streamCtx, cancelStream := context.WithCancel(s.ctx)
+	s.streamCancel = cancelStream
+	go h.streamAndRespond(streamCtx, s, m.Content, next, s.turn)
+	return true
 }
 
 type ChatHandler struct {
@@ -284,41 +445,11 @@ func (h *ChatHandler) Chat(origins []string) fiber.Handler {
 			_ = h.sessions.Release(context.Background(), interviewID.String(), sessionID)
 		}()
 
-		// Single writer: all frames go through this goroutine.
-		writeCh := make(chan any, 64)
-		writerDone := make(chan struct{})
-		var writeMu sync.Mutex
-		var writeClosed bool
-
-		go func() {
-			defer close(writerDone)
-			for frame := range writeCh {
-				if err := conn.WriteJSON(frame); err != nil {
-					return
-				}
-			}
-		}()
-		defer func() {
-			writeMu.Lock()
-			writeClosed = true
-			close(writeCh)
-			writeMu.Unlock()
-			<-writerDone
-		}()
-		send := func(frame any) {
-			writeMu.Lock()
-			defer writeMu.Unlock()
-			if writeClosed || connCtx.Err() != nil {
-				return
-			}
-			select {
-			case writeCh <- frame:
-			case <-connCtx.Done():
-			}
-		}
+		w := newWSWriter(conn, connCtx)
+		defer w.close()
 
 		if err := h.svc.StartInterview(connCtx, orgID, interviewID); err != nil {
-			send(errorFrame(err))
+			w.sendError(err)
 			return
 		}
 		// Compose the prompt ONCE per connection (version pinned at connect).
@@ -326,21 +457,28 @@ func (h *ChatHandler) Chat(origins []string) fiber.Handler {
 		// History window seeded from the persisted transcript (resume support);
 		// appended in-session for the current connection. Guarded by historyMu:
 		// the read loop appends while the stream goroutine reads the window.
-		var historyMu sync.Mutex
 		history, err := h.svc.RecentContext(connCtx, orgID, interviewID)
 		if err != nil {
 			history = nil
 		}
-		var lastQuestion *ivdomain.Question
-		var currentArchetype string
-		questionSent := func(q *ivdomain.Question) {
-			historyMu.Lock()
-			lastQuestion = q
-			arch, _ := ivdomain.DetermineQuestionArchetype(*q)
-			currentArchetype = arch
-			historyMu.Unlock()
+
+		s := &chatSession{
+			ctx:         connCtx,
+			w:           w,
+			orgID:       orgID,
+			interviewID: interviewID,
+			sessionID:   sessionID,
+			prompt:      prompt,
+			history:     history,
 		}
-		h.sendStartAndQuestion(connCtx, send, sessionID, orgID, interviewID, questionSent)
+		s.onQuestion = func(q *ivdomain.Question) {
+			s.historyMu.Lock()
+			s.lastQuestion = q
+			arch, _ := ivdomain.DetermineQuestionArchetype(*q)
+			s.archetype = arch
+			s.historyMu.Unlock()
+		}
+		h.sendStartAndQuestion(s)
 
 		// Heartbeat: ping every 30s, drop the socket if the client never pongs.
 		pongCh := make(chan struct{}, 1)
@@ -379,101 +517,42 @@ func (h *ChatHandler) Chat(origins []string) fiber.Handler {
 			}
 		}()
 
-		var streamCancel context.CancelFunc
-		var turn *turnState
-
 		for {
 			_ = conn.SetReadDeadline(time.Now().Add(readDeadline))
 			_, raw, err := conn.ReadMessage()
 			if err != nil {
 				var netErr net.Error
 				if errors.As(err, &netErr) && netErr.Timeout() {
-					send(ivdomain.ErrorMessage{Type: ivdomain.MsgError, Message: "question timeout"})
+					w.send(ivdomain.ErrorMessage{Type: ivdomain.MsgError, Message: "question timeout"})
 				}
 				return
 			}
 			msg, err := ivdomain.ParseClientMessage(raw)
 			if err != nil {
-				send(ivdomain.ErrorMessage{Type: ivdomain.MsgError, Message: "invalid message"})
+				w.send(ivdomain.ErrorMessage{Type: ivdomain.MsgError, Message: "invalid message"})
 				continue
 			}
 			switch m := msg.(type) {
 			case ivdomain.PingMessage:
-				send(map[string]string{"type": ivdomain.MsgPong})
+				w.send(map[string]string{"type": ivdomain.MsgPong})
 			case ivdomain.ResumeMessage:
 				if m.SessionID != sessionID {
-					send(ivdomain.ErrorMessage{Type: ivdomain.MsgError, Message: "session mismatch"})
+					w.send(ivdomain.ErrorMessage{Type: ivdomain.MsgError, Message: "session mismatch"})
 					continue
 				}
-				h.sendStartAndQuestion(connCtx, send, sessionID, orgID, interviewID, questionSent)
+				h.sendStartAndQuestion(s)
 			case ivdomain.InterruptMessage:
-				if streamCancel != nil {
-					streamCancel() // stops the LLM stream mid-response
-					streamCancel = nil
-				}
-				send(ivdomain.ResponseMessage{Type: ivdomain.MsgResponse, Content: "Interrupted."})
-				// The stream goroutine suppresses the next question when its
-				// ctx is canceled; send it here exactly once instead. If the
-				// stream already completed normally, questionSent guards the
-				// double-send.
-				if turn != nil {
-					turn.sendQuestionOnce(send)
-				}
-				turn = nil
+				s.handleInterrupt()
 			case ivdomain.TelemetryMessage:
-				var evTime time.Time
-				if m.Timestamp != "" {
-					evTime, _ = time.Parse(time.RFC3339, m.Timestamp)
-				}
-				if evTime.IsZero() {
-					evTime = time.Now()
-				}
-				event := ivdomain.ProctoringEvent{
-					Type:        ivdomain.ProctoringEventType(m.EventType),
-					Timestamp:   evTime,
-					QuestionIdx: m.QuestionIdx,
-					Details:     m.Details,
-				}
-				_ = h.svc.RecordTelemetry(connCtx, orgID, interviewID, event)
+				s.handleTelemetry(h, m)
 			case ivdomain.CodeChangeMessage:
 				h.svc.TouchInterview(connCtx, orgID, interviewID)
 			case ivdomain.CodeRunMessage:
-				// Gate: code execution is only allowed while a coding
-				// question is active (design decision).
-				historyMu.Lock()
-				arch := currentArchetype
-				historyMu.Unlock()
-				if arch != ivdomain.ArchetypeCoding {
-					send(ivdomain.CodeResultMessage{
-						Type:  ivdomain.MsgCodeResult,
-						Error: "code execution is only allowed on coding challenges",
-					})
-					continue
-				}
-				// Execute off the read loop: a slow run must not block
-				// heartbeat/interrupt frames or trip the read deadline.
-				// Cap test cases + total wall time (each case already has a
-				// per-case timeout; N cases × timeout must stay bounded).
-				go h.runCode(connCtx, send, orgID, interviewID, m)
+				s.handleCodeRun(h, m)
 			case ivdomain.AnswerMessage:
-				next, err := h.svc.AnswerAndAdvanceWithPacing(connCtx, orgID, interviewID, m.Content, m.PacingTelemetry)
-				if err != nil {
-					send(errorFrame(err))
+				if !s.handleAnswer(h, m) {
 					return
 				}
-				historyMu.Lock()
-				if lastQuestion != nil {
-					history = append(history,
-						gensvc.ContextMessage{Role: gensvc.RoleAssistant, Content: lastQuestion.Content},
-						gensvc.ContextMessage{Role: gensvc.RoleUser, Content: m.Content},
-					)
-				}
-				historyMu.Unlock()
-				remSec := h.svc.SessionRemaining(connCtx, orgID, interviewID)
-				turn = &turnState{next: next, remainingSec: remSec, onSent: questionSent}
-				streamCtx, cancelStream := context.WithCancel(connCtx)
-				streamCancel = cancelStream
-				go h.streamAndRespond(streamCtx, send, prompt, m.Content, next, turn, &history, &historyMu, orgID, interviewID)
 			}
 		}
 	}, fiberws.Config{Origins: origins})
@@ -569,21 +648,21 @@ func (h *ChatHandler) composePromptOnce(ctx context.Context, orgID string) strin
 	return prompt
 }
 
-func (h *ChatHandler) sendStartAndQuestion(ctx context.Context, send func(any), sessionID, orgID string, interviewID uuid.UUID, onSent func(*ivdomain.Question)) {
-	next, total, status, err := h.svc.CurrentState(ctx, orgID, interviewID)
+func (h *ChatHandler) sendStartAndQuestion(s *chatSession) {
+	next, total, status, err := h.svc.CurrentState(s.ctx, s.orgID, s.interviewID)
 	if err != nil {
 		return
 	}
-	remSec := h.svc.SessionRemaining(ctx, orgID, interviewID)
-	send(ivdomain.InterviewStartMessage{
+	remSec := h.svc.SessionRemaining(s.ctx, s.orgID, s.interviewID)
+	s.w.send(ivdomain.InterviewStartMessage{
 		Type:             ivdomain.MsgStart,
-		SessionID:        sessionID,
+		SessionID:        s.sessionID,
 		TotalQuestions:   total,
 		SessionBudgetSec: int(ivdomain.MaxInterviewDuration.Seconds()),
 	})
 	if status == ivdomain.StatusInProgress && next != nil {
 		arch, limit := ivdomain.DetermineQuestionArchetype(*next)
-		send(ivdomain.QuestionMessage{
+		s.w.send(ivdomain.QuestionMessage{
 			Type:                ivdomain.MsgQuestion,
 			Content:             next.Content,
 			Idx:                 next.Idx,
@@ -591,8 +670,8 @@ func (h *ChatHandler) sendStartAndQuestion(ctx context.Context, send func(any), 
 			TimeLimitSec:        limit,
 			SessionRemainingSec: remSec,
 		})
-		if onSent != nil {
-			onSent(next)
+		if s.onQuestion != nil {
+			s.onQuestion(next)
 		}
 	}
 }
@@ -603,11 +682,11 @@ func (h *ChatHandler) sendStartAndQuestion(ctx context.Context, send func(any), 
 // History is trimmed to the sliding window (last 10 Q&A); the total message
 // budget (8K tokens) is enforced before streaming — overruns degrade to an
 // error frame and the interview keeps moving.
-func (h *ChatHandler) streamAndRespond(ctx context.Context, send func(any), prompt, answer string, next *ivdomain.Question, turn *turnState, history *[]gensvc.ContextMessage, historyMu *sync.Mutex, orgID string, interviewID uuid.UUID) {
-	msgs := []gensvc.ContextMessage{{Role: gensvc.RoleSystem, Content: prompt}}
-	historyMu.Lock()
-	historySnapshot := gensvc.TrimContext(*history, gensvc.DefaultContextWindow)
-	historyMu.Unlock()
+func (h *ChatHandler) streamAndRespond(ctx context.Context, s *chatSession, answer string, next *ivdomain.Question, turn *turnState) {
+	msgs := []gensvc.ContextMessage{{Role: gensvc.RoleSystem, Content: s.prompt}}
+	s.historyMu.Lock()
+	historySnapshot := gensvc.TrimContext(s.history, gensvc.DefaultContextWindow)
+	s.historyMu.Unlock()
 	msgs = append(msgs, historySnapshot...)
 
 	if next != nil {
@@ -630,32 +709,32 @@ func (h *ChatHandler) streamAndRespond(ctx context.Context, send func(any), prom
 	}
 	if gensvc.ExceedsBudget(msgs, gensvc.DefaultTokenBudget, h.llm.CountTokens) {
 		h.log.Warn().Int("messages", len(msgs)).Msg("context budget exceeded")
-		send(ivdomain.ErrorMessage{Type: ivdomain.MsgError, Message: "context budget exceeded"})
-		turn.sendQuestionOnce(send)
+		s.w.send(ivdomain.ErrorMessage{Type: ivdomain.MsgError, Message: "context budget exceeded"})
+		turn.sendQuestionOnce(s.w.send)
 		return
 	}
 
-	ch, err := h.llm.ChatStream(ctx, llm.ChatRequest{OrgID: orgID, Messages: chatMsgs})
+	ch, err := h.llm.ChatStream(ctx, llm.ChatRequest{OrgID: s.orgID, Messages: chatMsgs})
 	if err != nil {
 		h.log.Error().Err(err).Msg("chat stream failed")
-		send(ivdomain.ErrorMessage{Type: ivdomain.MsgError, Message: "llm unavailable"})
+		s.w.send(ivdomain.ErrorMessage{Type: ivdomain.MsgError, Message: "llm unavailable"})
 		// The answer was recorded — keep the interview moving by dispatching
 		// the next question (same recovery as interrupt).
-		turn.sendQuestionOnce(send)
+		turn.sendQuestionOnce(s.w.send)
 		return
 	}
 	var final strings.Builder
 	for token := range ch {
 		final.WriteString(token)
-		send(ivdomain.TokenMessage{Type: ivdomain.MsgToken, Content: token})
+		s.w.send(ivdomain.TokenMessage{Type: ivdomain.MsgToken, Content: token})
 	}
 	if ctx.Err() != nil {
 		return // interrupted: response/next question suppressed
 	}
-	send(ivdomain.ResponseMessage{Type: ivdomain.MsgResponse, Content: final.String()})
-	turn.sendQuestionOnce(send)
+	s.w.send(ivdomain.ResponseMessage{Type: ivdomain.MsgResponse, Content: final.String()})
+	turn.sendQuestionOnce(s.w.send)
 	if next == nil {
-		h.sendEvaluation(ctx, send, orgID, interviewID)
+		h.sendEvaluation(ctx, s.w.send, s.orgID, s.interviewID)
 	}
 }
 

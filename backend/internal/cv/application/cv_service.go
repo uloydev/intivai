@@ -12,8 +12,10 @@ import (
 	"github.com/intivai/backend/internal/cv/domain"
 	"github.com/intivai/backend/internal/iam/application"
 	iamdomain "github.com/intivai/backend/internal/iam/domain"
+	scrapp "github.com/intivai/backend/internal/screening/application"
 	scrdomain "github.com/intivai/backend/internal/screening/domain"
 	"github.com/intivai/backend/internal/shared/errors"
+	"github.com/rs/zerolog/log"
 )
 
 const TaskParseCV = "parse_cv"
@@ -39,8 +41,8 @@ type CVService struct {
 	queue   Enqueuer
 }
 
-func NewCVService(repo domain.CandidateRepository, appRepo scrdomain.ApplicationRepository, store ObjectStore, q Enqueuer) *CVService {
-	return &CVService{repo: repo, appRepo: appRepo, store: store, queue: q}
+func NewCVService(repo domain.CandidateRepository, appRepo scrdomain.ApplicationRepository, store ObjectStore, queueClient Enqueuer) *CVService {
+	return &CVService{repo: repo, appRepo: appRepo, store: store, queue: queueClient}
 }
 
 func (s *CVService) Upload(ctx context.Context, actor application.AuthContext, name, email string, file []byte, contentType string) (*CVResult, error) {
@@ -276,18 +278,17 @@ func (s *CVService) ConfirmProfile(ctx context.Context, token string, structured
 		return err
 	}
 
-	// Enqueue TaskScoreCV
+	// Enqueue TaskScoreCV — typed payload + consts + bounded retries (a
+	// failed enqueue must not silently strand the candidate's score).
 	apps, err := s.appRepo.ByCandidate(ctx, candidate.OrgID, candidate.ID)
 	if err == nil {
 		for _, app := range apps {
-			type scoreCVPayload struct {
-				OrgID         string `json:"org_id"`
-				ApplicationID string `json:"application_id"`
-			}
-			_, _ = s.queue.Enqueue(ctx, "score_cv", scoreCVPayload{
+			if _, err := s.queue.Enqueue(ctx, scrapp.TaskScoreCV, scrapp.ScoreCVPayload{
 				OrgID:         candidate.OrgID.String(),
 				ApplicationID: app.ID.String(),
-			})
+			}, asynq.MaxRetry(5)); err != nil {
+				log.Warn().Err(err).Str("application_id", app.ID.String()).Msg("enqueue score_cv failed")
+			}
 		}
 	}
 	return nil

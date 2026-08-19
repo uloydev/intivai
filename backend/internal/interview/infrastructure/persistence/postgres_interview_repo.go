@@ -5,12 +5,18 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"strings"
 
 	"github.com/google/uuid"
 	ivdomain "github.com/intivai/backend/internal/interview/domain"
 	"github.com/intivai/backend/pkg/db"
 	"gorm.io/gorm"
 )
+
+// interviewColumns is the column list for the interviews table. GetByID and
+// ByApplication use it unqualified; ListByOrg qualifies it with the iv. alias
+// for the applications join.
+const interviewColumns = `id, application_id, status, transcript, last_question_idx, context_version, evaluation, consent_given, proctoring_events, proctoring_summary, coding_sessions, started_at, completed_at, expires_at, created_at`
 
 type PostgresInterviewRepo struct {
 	pool *gorm.DB
@@ -20,7 +26,7 @@ func NewPostgresInterviewRepo(pool *gorm.DB) *PostgresInterviewRepo {
 	return &PostgresInterviewRepo{pool: pool}
 }
 
-func (r *PostgresInterviewRepo) q(ctx context.Context) (*gorm.DB, error) {
+func (r *PostgresInterviewRepo) tx(ctx context.Context) (*gorm.DB, error) {
 	tx, ok := db.TxFrom(ctx)
 	if !ok {
 		return nil, db.ErrNoTx
@@ -29,15 +35,12 @@ func (r *PostgresInterviewRepo) q(ctx context.Context) (*gorm.DB, error) {
 }
 
 func (r *PostgresInterviewRepo) Create(ctx context.Context, iv *ivdomain.Interview) error {
-	q, err := r.q(ctx)
+	tx, err := r.tx(ctx)
 	if err != nil {
 		return err
 	}
-	raw, _ := json.Marshal(transcript{Questions: iv.Questions, Answers: iv.Answers})
-	rawEvents, _ := json.Marshal(iv.ProctoringEvents)
-	rawSummary, _ := json.Marshal(iv.ProctoringSummary)
-	rawSessions, _ := json.Marshal(iv.CodingSessions)
-	return db.WrapError(q.WithContext(ctx).Exec(
+	raw, rawEvents, rawSummary, rawSessions := marshalInterview(iv)
+	return db.WrapError(tx.WithContext(ctx).Exec(
 		`INSERT INTO interviews (id, application_id, type, status, transcript, last_question_idx,
 		 context_version, proctoring_events, proctoring_summary, coding_sessions,
 		 started_at, completed_at, expires_at, created_at)
@@ -48,28 +51,22 @@ func (r *PostgresInterviewRepo) Create(ctx context.Context, iv *ivdomain.Intervi
 }
 
 func (r *PostgresInterviewRepo) GetByID(ctx context.Context, id uuid.UUID) (*ivdomain.Interview, error) {
-	q, err := r.q(ctx)
+	tx, err := r.tx(ctx)
 	if err != nil {
 		return nil, err
 	}
-	row := q.Raw(
-		`SELECT id, application_id, status, transcript, last_question_idx, context_version,
-		 evaluation, consent_given, proctoring_events, proctoring_summary, coding_sessions,
-		 started_at, completed_at, expires_at, created_at
-		 FROM interviews WHERE id = $1`, id).Row()
+	row := tx.Raw(
+		`SELECT `+interviewColumns+` FROM interviews WHERE id = $1`, id).Row()
 	return scanInterview(row)
 }
 
 func (r *PostgresInterviewRepo) Update(ctx context.Context, iv *ivdomain.Interview) error {
-	q, err := r.q(ctx)
+	tx, err := r.tx(ctx)
 	if err != nil {
 		return err
 	}
-	raw, _ := json.Marshal(transcript{Questions: iv.Questions, Answers: iv.Answers})
-	rawEvents, _ := json.Marshal(iv.ProctoringEvents)
-	rawSummary, _ := json.Marshal(iv.ProctoringSummary)
-	rawSessions, _ := json.Marshal(iv.CodingSessions)
-	return db.WrapError(q.WithContext(ctx).Exec(
+	raw, rawEvents, rawSummary, rawSessions := marshalInterview(iv)
+	return db.WrapError(tx.WithContext(ctx).Exec(
 		`UPDATE interviews SET status = $1, transcript = $2, last_question_idx = $3,
 		 proctoring_events = $4, proctoring_summary = $5, coding_sessions = $6,
 		 started_at = $7, completed_at = $8, expires_at = $9, updated_at = NOW() WHERE id = $10`,
@@ -82,12 +79,12 @@ func (r *PostgresInterviewRepo) Update(ctx context.Context, iv *ivdomain.Intervi
 // races the transcript the way a full read-modify-write Update() would
 // (keystroke Touch() and answer commits run concurrently).
 func (r *PostgresInterviewRepo) RecordProctoringEvent(ctx context.Context, id uuid.UUID, event ivdomain.ProctoringEvent) error {
-	q, err := r.q(ctx)
+	tx, err := r.tx(ctx)
 	if err != nil {
 		return err
 	}
 	var rawEvents []byte
-	row := q.Raw(
+	row := tx.Raw(
 		`SELECT COALESCE(proctoring_events, '[]'::jsonb) FROM interviews WHERE id = $1`, id).Row()
 	if err := row.Scan(&rawEvents); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -108,7 +105,7 @@ func (r *PostgresInterviewRepo) RecordProctoringEvent(ctx context.Context, id uu
 		events = events[len(events)-maxStoredEvents:]
 	}
 	raw, _ := json.Marshal(events)
-	return q.WithContext(ctx).Exec(
+	return tx.WithContext(ctx).Exec(
 		`UPDATE interviews SET
 		   proctoring_events = $1,
 		   proctoring_summary = $2,
@@ -119,22 +116,22 @@ func (r *PostgresInterviewRepo) RecordProctoringEvent(ctx context.Context, id uu
 
 // Touch refreshes updated_at + expires_at only — never rewrites transcript.
 func (r *PostgresInterviewRepo) Touch(ctx context.Context, id uuid.UUID) error {
-	q, err := r.q(ctx)
+	tx, err := r.tx(ctx)
 	if err != nil {
 		return err
 	}
-	return q.WithContext(ctx).Exec(
+	return tx.WithContext(ctx).Exec(
 		`UPDATE interviews SET updated_at = NOW() WHERE id = $1`, id).Error
 }
 
 // RecordCodingSession appends one snapshot to coding_sessions JSONB.
 func (r *PostgresInterviewRepo) RecordCodingSession(ctx context.Context, id uuid.UUID, session ivdomain.CodingSession) error {
-	q, err := r.q(ctx)
+	tx, err := r.tx(ctx)
 	if err != nil {
 		return err
 	}
 	raw, _ := json.Marshal(session)
-	return q.WithContext(ctx).Exec(
+	return tx.WithContext(ctx).Exec(
 		`UPDATE interviews SET
 		   coding_sessions = COALESCE(coding_sessions, '[]'::jsonb) || $1::jsonb,
 		   updated_at = NOW()
@@ -146,11 +143,11 @@ func (r *PostgresInterviewRepo) RecordCodingSession(ctx context.Context, id uuid
 // the inline WS evaluation and the async worker can race; first writer wins
 // (atomic WHERE guard, not read-then-write).
 func (r *PostgresInterviewRepo) SaveEvaluation(ctx context.Context, id uuid.UUID, report []byte) error {
-	q, err := r.q(ctx)
+	tx, err := r.tx(ctx)
 	if err != nil {
 		return err
 	}
-	res := q.WithContext(ctx).Exec(
+	res := tx.WithContext(ctx).Exec(
 		`UPDATE interviews SET evaluation = $1, updated_at = NOW() WHERE id = $2 AND evaluation IS NULL`,
 		report, id)
 	if res.Error != nil {
@@ -163,24 +160,21 @@ func (r *PostgresInterviewRepo) SaveEvaluation(ctx context.Context, id uuid.UUID
 }
 
 func (r *PostgresInterviewRepo) SetConsent(ctx context.Context, id uuid.UUID) error {
-	q, err := r.q(ctx)
+	tx, err := r.tx(ctx)
 	if err != nil {
 		return err
 	}
-	return db.WrapError(q.WithContext(ctx).Exec(
+	return db.WrapError(tx.WithContext(ctx).Exec(
 		`UPDATE interviews SET consent_given = true, updated_at = NOW() WHERE id = $1`, id).Error)
 }
 
 func (r *PostgresInterviewRepo) ByApplication(ctx context.Context, applicationID uuid.UUID) ([]*ivdomain.Interview, error) {
-	q, err := r.q(ctx)
+	tx, err := r.tx(ctx)
 	if err != nil {
 		return nil, err
 	}
-	rows, err := q.Raw(
-		`SELECT id, application_id, status, transcript, last_question_idx, context_version,
-		 evaluation, consent_given, proctoring_events, proctoring_summary, coding_sessions,
-		 started_at, completed_at, expires_at, created_at
-		 FROM interviews WHERE application_id = $1 ORDER BY created_at DESC`, applicationID).Rows()
+	rows, err := tx.Raw(
+		`SELECT `+interviewColumns+` FROM interviews WHERE application_id = $1 ORDER BY created_at DESC`, applicationID).Rows()
 	if err != nil {
 		return nil, err
 	}
@@ -199,14 +193,12 @@ func (r *PostgresInterviewRepo) ByApplication(ctx context.Context, applicationID
 // ListByOrg — interviews of one org, newest first. RLS applies through the
 // applications join (interviews have no org_id column).
 func (r *PostgresInterviewRepo) ListByOrg(ctx context.Context, orgID uuid.UUID) ([]*ivdomain.Interview, error) {
-	q, err := r.q(ctx)
+	tx, err := r.tx(ctx)
 	if err != nil {
 		return nil, err
 	}
-	rows, err := q.Raw(
-		`SELECT iv.id, iv.application_id, iv.status, iv.transcript, iv.last_question_idx,
-		 iv.context_version, iv.evaluation, iv.consent_given, iv.proctoring_events, iv.proctoring_summary,
-		 iv.coding_sessions, iv.started_at, iv.completed_at, iv.expires_at, iv.created_at
+	rows, err := tx.Raw(
+		`SELECT iv.`+strings.ReplaceAll(interviewColumns, ", ", ", iv.")+`
 		 FROM interviews iv
 		 JOIN applications a ON a.id = iv.application_id
 		 WHERE a.org_id = $1
@@ -229,6 +221,16 @@ func (r *PostgresInterviewRepo) ListByOrg(ctx context.Context, orgID uuid.UUID) 
 type transcript struct {
 	Questions []ivdomain.Question `json:"questions"`
 	Answers   []ivdomain.Answer   `json:"answers"`
+}
+
+// marshalInterview encodes the JSONB columns shared by Create and Update
+// (transcript, proctoring events/summary, coding sessions).
+func marshalInterview(iv *ivdomain.Interview) (rawTranscript, rawEvents, rawSummary, rawSessions []byte) {
+	raw, _ := json.Marshal(transcript{Questions: iv.Questions, Answers: iv.Answers})
+	rawEvents, _ = json.Marshal(iv.ProctoringEvents)
+	rawSummary, _ = json.Marshal(iv.ProctoringSummary)
+	rawSessions, _ = json.Marshal(iv.CodingSessions)
+	return raw, rawEvents, rawSummary, rawSessions
 }
 
 type rowScanner interface {

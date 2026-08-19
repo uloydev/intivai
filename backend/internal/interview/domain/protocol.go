@@ -159,7 +159,11 @@ type ExecutionResult struct {
 	Error       string       `json:"error,omitempty"`
 }
 
-type AICodeReview struct {
+// CodeReview — the WS frame view of an AI code review. Deliberately NOT the
+// sandbox domain's AICodeReview (which carries complexity/quality analysis):
+// this is the wire shape the chat client renders, and the two evolve
+// independently across the gRPC/WS boundaries.
+type CodeReview struct {
 	Score           float64  `json:"score"`
 	Strengths       []string `json:"strengths,omitempty"`
 	Weaknesses      []string `json:"weaknesses,omitempty"`
@@ -182,7 +186,7 @@ type CodingSession struct {
 	Language     string           `json:"language"`
 	Code         string           `json:"code"`
 	FinalResult  *ExecutionResult `json:"final_result,omitempty"`
-	AICodeReview *AICodeReview    `json:"ai_code_review,omitempty"`
+	AICodeReview *CodeReview      `json:"ai_code_review,omitempty"`
 	SubmittedAt  string           `json:"submitted_at"`
 }
 

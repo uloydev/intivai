@@ -120,12 +120,8 @@ Output JSON exactly matching the following schema:
 	}
 
 	return db.RunInTx(ctx, w.pool, p.OrgID, func(txCtx context.Context) error {
-		// Re-fetch to avoid lost updates
-		j, txErr := w.repo.GetByID(txCtx, id)
-		if txErr != nil {
-			return txErr
-		}
-		j.Rubric = b
-		return w.repo.Update(txCtx, j)
+		// Column-scoped write: the full-row Update() would clobber any
+		// recruiter edit made while the LLM call was running.
+		return w.repo.UpdateRubric(txCtx, id, b)
 	})
 }

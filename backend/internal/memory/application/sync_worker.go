@@ -21,24 +21,14 @@ type SyncPayload struct {
 	Importance float64 `json:"importance"`
 }
 
-// SyncWorker skeleton (Phase 1): per-tenant Mnemosyne bank writes.
-// M2 wires real producers (ParseCV/ExtractCV/IndexContext) into these handlers.
+// SyncWorker writes per-tenant Mnemosyne bank entries. Producers (CV extract,
+// context index) enqueue TaskSyncMnemosyne; the handler below is the only sink.
 type SyncWorker struct {
 	factory domain.BankFactory
 }
 
 func NewSyncWorker(factory domain.BankFactory) *SyncWorker {
 	return &SyncWorker{factory: factory}
-}
-
-// SyncCandidate remembers a candidate profile into the tenant bank.
-func (s *SyncWorker) SyncCandidate(ctx context.Context, orgID, candidateID, summary string) error {
-	return s.factory.ForBank(orgID).Remember(ctx, "candidate_profile", summary, 0.9)
-}
-
-// SyncContext indexes company context into the tenant bank.
-func (s *SyncWorker) SyncContext(ctx context.Context, orgID, contextType, summary string) error {
-	return s.factory.ForBank(orgID).Remember(ctx, "company_context_"+contextType, summary, 0.8)
 }
 
 // Register adds the sync_mnemosyne handler to the shared asynq mux.

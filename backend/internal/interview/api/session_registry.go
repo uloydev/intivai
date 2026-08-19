@@ -64,6 +64,10 @@ func (r *MemorySessionRegistry) Touch(_ context.Context, key, sessionID string) 
 }
 
 const (
+	// activeSessionPlaceholder marks the Redis key holder when no concrete
+	// session ID is supplied (pre-session clients still occupy the lock).
+	activeSessionPlaceholder = "active"
+
 	redisSessionPrefix = "intivai:session:"
 	// acquireLua: claim the key, OR refresh the TTL when the SAME session
 	// re-acquires (reconnect / resume) — a long-lived connection must not
@@ -111,7 +115,7 @@ func (r *RedisSessionRegistry) TryAcquire(ctx context.Context, key, sessionID st
 	redisKey := redisSessionPrefix + key
 	val := sessionID
 	if val == "" {
-		val = "active"
+		val = activeSessionPlaceholder
 	}
 	res, err := r.client.Eval(ctx, acquireLuaScript, []string{redisKey}, val, r.ttl.Milliseconds()).Result()
 	if err != nil {

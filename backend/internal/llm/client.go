@@ -27,10 +27,18 @@ func NewClient(primary, fallback Provider, ledger TokenLedger, maxRetries int) *
 // OnRetry registers a hook (metrics/logging).
 func (c *Client) OnRetry(fn func(attempt int, err error)) { c.onRetry = fn }
 
+// Budget pre-charges: conservative token estimates reserved on the ledger
+// before a call and trued up against real usage afterwards (Chat only).
+const (
+	chatBudgetEstimate          = 500
+	chatStreamBudgetEstimate    = 1500
+	structuredOutputBudgetGuess = 800
+)
+
 func (c *Client) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, error) {
 	if c.ledger != nil && req.OrgID != "" {
 		// Pre-flight check with a fixed estimate (e.g., 500) just to fail fast if totally out of budget.
-		if err := c.ledger.CheckAndRecord(ctx, req.OrgID, 500); err != nil {
+		if err := c.ledger.CheckAndRecord(ctx, req.OrgID, chatBudgetEstimate); err != nil {
 			return nil, err
 		}
 	}
@@ -69,7 +77,7 @@ func (c *Client) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, erro
 	if c.ledger != nil && req.OrgID != "" {
 		// Post-flight true-up: we pre-charged 500, so we record the difference
 		total := resp.Usage.PromptTokens + resp.Usage.CompletionTokens
-		diff := total - 500
+		diff := total - chatBudgetEstimate
 		if diff > 0 {
 			_ = c.ledger.CheckAndRecord(context.Background(), req.OrgID, diff)
 		}
@@ -80,7 +88,7 @@ func (c *Client) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, erro
 
 func (c *Client) ChatStream(ctx context.Context, req ChatRequest) (<-chan string, error) {
 	if c.ledger != nil && req.OrgID != "" {
-		if err := c.ledger.CheckAndRecord(ctx, req.OrgID, 1500); err != nil {
+		if err := c.ledger.CheckAndRecord(ctx, req.OrgID, chatStreamBudgetEstimate); err != nil {
 			return nil, err
 		}
 	}
@@ -97,7 +105,7 @@ func (c *Client) ChatStream(ctx context.Context, req ChatRequest) (<-chan string
 
 func (c *Client) StructuredOutput(ctx context.Context, req StructuredRequest) (any, error) {
 	if c.ledger != nil && req.OrgID != "" {
-		if err := c.ledger.CheckAndRecord(ctx, req.OrgID, 800); err != nil {
+		if err := c.ledger.CheckAndRecord(ctx, req.OrgID, structuredOutputBudgetGuess); err != nil {
 			return nil, err
 		}
 	}

@@ -2,14 +2,16 @@ package application
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/hibiken/asynq"
 	"github.com/intivai/backend/internal/iam/application"
 	iamdomain "github.com/intivai/backend/internal/iam/domain"
 	jobdomain "github.com/intivai/backend/internal/job/domain"
-	"github.com/intivai/backend/internal/shared/errors"
+	sharederr "github.com/intivai/backend/internal/shared/errors"
 	"github.com/intivai/backend/pkg/queue"
 )
 
@@ -83,8 +85,8 @@ type JobService struct {
 	q    *queue.Client
 }
 
-func NewJobService(repo jobdomain.JobRepository, q *queue.Client) *JobService {
-	return &JobService{repo: repo, q: q}
+func NewJobService(repo jobdomain.JobRepository, queueClient *queue.Client) *JobService {
+	return &JobService{repo: repo, q: queueClient}
 }
 
 func (s *JobService) Create(ctx context.Context, actor application.AuthContext, cmd CreateJobCommand) (*JobResult, error) {
@@ -126,10 +128,8 @@ func (s *JobService) Create(ctx context.Context, actor application.AuthContext, 
 		return nil, err
 	}
 
-	if s.q != nil {
-		if _, err := s.q.Enqueue(ctx, TaskGenerateRubric, GenerateRubricPayload{JobID: job.ID.String(), OrgID: job.OrgID.String()}); err != nil {
-			return nil, err
-		}
+	if err := s.enqueueRubric(ctx, job.OrgID, job.ID); err != nil {
+		return nil, err
 	}
 
 	return toResult(job), nil
@@ -140,14 +140,14 @@ func (s *JobService) Update(ctx context.Context, actor application.AuthContext, 
 		return nil, err
 	}
 	job, err := s.repo.GetByID(ctx, cmd.JobID)
-	if err == jobdomain.ErrNotFound {
-		return nil, errors.NewNotFoundError("job", cmd.JobID.String())
+	if errors.Is(err, jobdomain.ErrNotFound) {
+		return nil, sharederr.NewNotFoundError("job", cmd.JobID.String())
 	}
 	if err != nil {
 		return nil, err
 	}
 	if job.OrgID != actor.OrgID {
-		return nil, errors.NewDomainError("FORBIDDEN", "job belongs to another org")
+		return nil, sharederr.NewDomainError("FORBIDDEN", "job belongs to another org")
 	}
 	if cmd.Title != nil {
 		job.Title = strings.TrimSpace(*cmd.Title)
@@ -209,10 +209,8 @@ func (s *JobService) Update(ctx context.Context, actor application.AuthContext, 
 		return nil, err
 	}
 
-	if s.q != nil {
-		if _, err := s.q.Enqueue(ctx, TaskGenerateRubric, GenerateRubricPayload{JobID: job.ID.String(), OrgID: job.OrgID.String()}); err != nil {
-			return nil, err
-		}
+	if err := s.enqueueRubric(ctx, job.OrgID, job.ID); err != nil {
+		return nil, err
 	}
 
 	return toResult(job), nil
@@ -220,14 +218,14 @@ func (s *JobService) Update(ctx context.Context, actor application.AuthContext, 
 
 func (s *JobService) Get(ctx context.Context, actor application.AuthContext, id uuid.UUID) (*JobResult, error) {
 	job, err := s.repo.GetByID(ctx, id)
-	if err == jobdomain.ErrNotFound {
-		return nil, errors.NewNotFoundError("job", id.String())
+	if errors.Is(err, jobdomain.ErrNotFound) {
+		return nil, sharederr.NewNotFoundError("job", id.String())
 	}
 	if err != nil {
 		return nil, err
 	}
 	if job.OrgID != actor.OrgID {
-		return nil, errors.NewDomainError("FORBIDDEN", "job belongs to another org")
+		return nil, sharederr.NewDomainError("FORBIDDEN", "job belongs to another org")
 	}
 	return toResult(job), nil
 }
@@ -268,4 +266,14 @@ func toResult(j *jobdomain.Job) *JobResult {
 		Rubric:            string(j.Rubric),
 		CreatedAt:         j.CreatedAt,
 	}
+}
+
+// enqueueRubric — async rubric generation for a job (bounded retries; a
+// failed enqueue must not fail the job create/update itself).
+func (s *JobService) enqueueRubric(ctx context.Context, orgID, jobID uuid.UUID) error {
+	if s.q == nil {
+		return nil
+	}
+	_, err := s.q.Enqueue(ctx, TaskGenerateRubric, GenerateRubricPayload{JobID: jobID.String(), OrgID: orgID.String()}, asynq.MaxRetry(5))
+	return err
 }
