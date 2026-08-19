@@ -17,6 +17,7 @@ type Mailer interface {
 	SendInterviewInvitation(ctx context.Context, to, name, jobTitle, inviteURL string) error
 	SendScorecardReady(ctx context.Context, to, candidateName, jobTitle string, score float64, recommendation, reportURL string) error
 	SendCandidateLoginOTP(ctx context.Context, to, otpCode, magicLink string) error
+	SendCandidateReview(ctx context.Context, to, candidateName, inviteURL string) error
 }
 
 type Config struct {
@@ -103,13 +104,23 @@ func (m *SMTPMailer) SendEmail(ctx context.Context, to, subject, htmlBody, textB
 }
 
 const shell = `<!DOCTYPE html>
-<html>
-<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
-  <div style="background: {{.BannerBg}}; padding: 24px; border-radius: 12px; text-align: center; color: white;">
-    <h1 style="margin: 0; font-size: 24px;">{{.BannerTitle}}</h1>
-  </div>
-  <div style="padding: 24px; background: #fafafa; border-radius: 12px; margin-top: 16px; border: 1px solid #eaeaea;">
-    {{.Body}}
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{.BannerTitle}}</title>
+</head>
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; line-height: 1.6; color: #1e293b; background-color: #f8fafc; margin: 0; padding: 24px;">
+  <div style="max-width: 580px; margin: 0 auto; background: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05); border: 1px solid #e2e8f0;">
+    <div style="background: {{.BannerBg}}; padding: 28px 24px; text-align: center; color: #ffffff;">
+      <h1 style="margin: 0; font-size: 22px; font-weight: 700; letter-spacing: -0.025em; color: #ffffff;">{{.BannerTitle}}</h1>
+    </div>
+    <div style="padding: 28px 24px; font-size: 15px; color: #334155;">
+      {{.Body}}
+    </div>
+    <div style="padding: 16px 24px; background: #f8fafc; border-top: 1px solid #f1f5f9; text-align: center; font-size: 12px; color: #94a3b8;">
+      &copy; Intivai AI Platform. Automated Notification.
+    </div>
   </div>
 </body>
 </html>`
@@ -118,7 +129,11 @@ var shellTmpl = template.Must(template.New("shell").Parse(shell))
 
 func renderShell(bannerBg, bannerTitle, body string) (string, error) {
 	var sb strings.Builder
-	err := shellTmpl.Execute(&sb, map[string]string{"BannerBg": bannerBg, "BannerTitle": bannerTitle, "Body": body})
+	err := shellTmpl.Execute(&sb, map[string]any{
+		"BannerBg":    template.CSS(bannerBg),
+		"BannerTitle": bannerTitle,
+		"Body":        template.HTML(body),
+	})
 	if err != nil {
 		return "", err
 	}
@@ -222,5 +237,28 @@ func (m *SMTPMailer) SendCandidateLoginOTP(ctx context.Context, to, otpCode, mag
 	}
 
 	text := fmt.Sprintf("Your Intivai Candidate Portal Login Code is: %s\n\nOr click this magic link to log in directly: %s\n\nThis code expires in 10 minutes.", otpCode, magicLink)
+	return m.SendEmail(ctx, to, subject, html, text)
+}
+
+func (m *SMTPMailer) SendCandidateReview(ctx context.Context, to, candidateName, inviteURL string) error {
+	subject := sanitizeHeader("Review Your Intivai AI Profile")
+	body := `
+    <h2 style="margin-top: 0; color: #111;">Hello {{.CandidateName}},</h2>
+    <p>Your AI-extracted profile is ready for review.</p>
+    <div style="text-align: center; margin: 30px 0;">
+      <a href="{{.InviteURL}}" style="background: #4f46e5; color: white; padding: 12px 28px; text-decoration: none; border-radius: 8px; font-weight: bold; display: inline-block;">Review Profile</a>
+    </div>
+    <p style="font-size: 13px; color: #666;">Please review your profile to proceed with the application.</p>`
+
+	var sb strings.Builder
+	if err := template.Must(template.New("body").Parse(body)).Execute(&sb, map[string]string{"CandidateName": candidateName, "InviteURL": inviteURL}); err != nil {
+		return err
+	}
+	html, err := renderShell("linear-gradient(135deg, #4f46e5 0%, #3b82f6 100%)", "Profile Review", sb.String())
+	if err != nil {
+		return err
+	}
+
+	text := fmt.Sprintf("Hello %s,\n\nYour AI-extracted profile is ready for review.\n\nReview your profile here: %s\n\nThank you!", candidateName, inviteURL)
 	return m.SendEmail(ctx, to, subject, html, text)
 }
