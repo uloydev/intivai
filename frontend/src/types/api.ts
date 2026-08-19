@@ -66,7 +66,8 @@ export interface CandidateApplicationItem {
   candidate_name: string
   candidate_email: string
   cv_score?: number | null
-  passed_screening?: boolean | null
+  passed_screening?: boolean
+  cv_status: string | null
   application_status: string
   applied_at: string
   interview_id?: string | null
@@ -148,6 +149,7 @@ export interface Application {
   stage?: CandidateLifecycleStage
   cv_score?: number
   passed_screening?: boolean
+  cv_status?: string | null
   years_experience?: number
   matched_skills?: string[]
   missing_skills?: string[]

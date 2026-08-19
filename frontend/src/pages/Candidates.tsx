@@ -30,11 +30,37 @@ import { cn } from "@/lib/utils"
 
 function scorePill(app: Application) {
   if (app.cv_score == null) {
-    return (
-      <Badge variant="secondary" className="bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20 animate-pulse text-xs">
-        Scoring…
-      </Badge>
-    )
+    // cv_score is null until the pipeline produces one — the pill must say
+    // WHY, not guess "scoring" (pending_review blocks scoring entirely).
+    switch (app.cv_status) {
+      case "pending_review":
+        return (
+          <Badge variant="secondary" className="bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20 text-xs">
+            Pending review
+          </Badge>
+        )
+      case "failed_ocr":
+      case "failed_extract":
+        return (
+          <Badge variant="destructive" className="font-semibold text-xs gap-1">
+            <XCircle className="h-3 w-3" weight="fill" /> Extraction failed
+          </Badge>
+        )
+      case "new":
+      case "parsing":
+      case "extracting":
+        return (
+          <Badge variant="secondary" className="bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20 animate-pulse text-xs">
+            Scoring…
+          </Badge>
+        )
+      default:
+        return (
+          <Badge variant="secondary" className="text-xs">
+            Not scored
+          </Badge>
+        )
+    }
   }
   if (app.passed_screening) {
     return (

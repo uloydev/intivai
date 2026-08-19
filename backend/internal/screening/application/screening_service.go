@@ -47,6 +47,7 @@ type ApplicationResult struct {
 	CandidateID     uuid.UUID       `json:"candidate_id"`
 	CandidateName   string          `json:"candidate_name"`
 	CandidateEmail  string          `json:"candidate_email"`
+	CVStatus        string          `json:"cv_status"`
 	JobID           uuid.UUID       `json:"job_id"`
 	JobTitle        string          `json:"job_title"`
 	Status          string          `json:"status"`
@@ -270,6 +271,7 @@ func (s *ScreeningService) List(ctx context.Context, actor application.AuthConte
 			if c, ok := cands[a.CandidateID]; ok {
 				r.CandidateName = c.Name
 				r.CandidateEmail = c.Email
+				r.CVStatus = c.Status
 			}
 			if j, ok := jobs[a.JobID]; ok {
 				r.JobTitle = j.Title
