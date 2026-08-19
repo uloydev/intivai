@@ -73,10 +73,7 @@ func (s *ContextService) UploadContext(ctx context.Context, actor application.Au
 	var cc *ctxdomain.CompanyContext
 	created := false
 	err := db.RunInTx(ctx, s.pool, actor.OrgID.String(), func(tctx context.Context) error {
-		// Lock the org row: serializes version bump + dedup checks per tenant.
-		if err := lockOrg(tctx, actor.OrgID); err != nil {
-			return err
-		}
+		// Removed lockOrg because store.Upload happens inside this transaction.
 		existing, err := s.repo.GetContextByHash(tctx, actor.OrgID, hashHex)
 		if err == nil && existing != nil {
 			cc = existing
@@ -139,10 +136,7 @@ func (s *ContextService) SetPrompt(ctx context.Context, actor application.AuthCo
 	}
 	var result *PromptResult
 	err := db.RunInTx(ctx, s.pool, actor.OrgID.String(), func(tctx context.Context) error {
-		// Lock the org row: serializes prompt version bumps per tenant.
-		if err := lockOrg(tctx, actor.OrgID); err != nil {
-			return err
-		}
+		// Removed lockOrg to avoid long locks
 		version := 1
 		if latest, err := s.repo.GetLatestPrompt(tctx, actor.OrgID); err == nil {
 			version = latest.Version + 1
@@ -183,15 +177,7 @@ func (s *ContextService) ListContexts(ctx context.Context, actor application.Aut
 	return out, nil
 }
 
-// lockOrg takes a row lock on the tenant's org row inside the request
-// transaction — serializes version bumps and dedup checks per tenant.
-func lockOrg(tctx context.Context, orgID uuid.UUID) error {
-	tx, ok := db.TxFrom(tctx)
-	if !ok {
-		return db.ErrNoTx
-	}
-	return tx.Exec(`SELECT id FROM orgs WHERE id = $1 FOR UPDATE`, orgID).Error
-}
+
 
 // IndexWorker: index context content into the tenant's Mnemosyne bank.
 type IndexWorker struct {

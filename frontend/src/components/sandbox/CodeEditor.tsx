@@ -103,10 +103,14 @@ export function CodeEditor({
     }
   }
 
-  const handleCopy = () => {
-    navigator.clipboard.writeText(code)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(code)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch (e) {
+      alert("Failed to copy to clipboard")
+    }
   }
 
   return (

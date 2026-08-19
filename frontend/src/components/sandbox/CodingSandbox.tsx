@@ -2,7 +2,8 @@ import { useState } from "react"
 import { CodeEditor, STARTER_TEMPLATES } from "./CodeEditor"
 import { TerminalConsole } from "./TerminalConsole"
 import { TestCaseManager } from "./TestCaseManager"
-import { Sparkles, X, Activity, Layers } from "lucide-react"
+import { Sparkles, Activity, Layers } from "lucide-react"
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import type { SandboxLanguage, SandboxTestCase, SandboxExecutionResult, AICodeReview } from "@/types/api"
 
 interface CodingSandboxProps {
@@ -155,86 +156,82 @@ export function CodingSandbox({
       </div>
 
       {/* AI Code Review Modal */}
-      {showReviewModal && aiReview && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-neutral-900 border border-purple-900/60 rounded-xl max-w-lg w-full p-5 shadow-2xl space-y-4">
-            <div className="flex items-center justify-between border-b border-neutral-800 pb-3">
-              <div className="flex items-center gap-2">
-                <div className="p-1.5 rounded-lg bg-purple-950 border border-purple-800 text-purple-400">
-                  <Sparkles className="w-5 h-5" />
+      <Dialog open={showReviewModal && !!aiReview} onOpenChange={setShowReviewModal}>
+        <DialogContent className="bg-neutral-900 border-purple-900/60 max-w-lg w-full p-5 shadow-2xl">
+          {aiReview && (
+            <div className="space-y-4">
+              <DialogHeader className="border-b border-neutral-800 pb-3">
+                <div className="flex items-center gap-2">
+                  <div className="p-1.5 rounded-lg bg-purple-950 border border-purple-800 text-purple-400">
+                    <Sparkles className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <DialogTitle className="font-bold text-neutral-100 text-sm">AI Algorithmic Code Review</DialogTitle>
+                    <p className="text-xs text-neutral-400 mt-1">Quality & complexity inspection</p>
+                  </div>
                 </div>
-                <div>
-                  <h3 className="font-bold text-neutral-100 text-sm">AI Algorithmic Code Review</h3>
-                  <p className="text-xs text-neutral-400">Quality & complexity inspection</p>
+              </DialogHeader>
+
+              <div className="grid grid-cols-3 gap-2 text-center">
+                <div className="bg-neutral-950 p-2.5 rounded-lg border border-neutral-800">
+                  <div className="text-[10px] text-neutral-400 flex items-center justify-center gap-1">
+                    <Activity className="w-3 h-3 text-indigo-400" />
+                    Time Complexity
+                  </div>
+                  <div className="font-mono font-bold text-indigo-400 mt-1">{aiReview.time_complexity}</div>
+                </div>
+                <div className="bg-neutral-950 p-2.5 rounded-lg border border-neutral-800">
+                  <div className="text-[10px] text-neutral-400 flex items-center justify-center gap-1">
+                    <Layers className="w-3 h-3 text-emerald-400" />
+                    Space Complexity
+                  </div>
+                  <div className="font-mono font-bold text-emerald-400 mt-1">{aiReview.space_complexity}</div>
+                </div>
+                <div className="bg-neutral-950 p-2.5 rounded-lg border border-neutral-800">
+                  <div className="text-[10px] text-neutral-400">Quality Score</div>
+                  <div className="font-bold text-purple-400 text-lg mt-0.5">{aiReview.quality_score}/100</div>
                 </div>
               </div>
+
+              <div>
+                <div className="text-xs font-semibold text-neutral-300 mb-1">Summary</div>
+                <p className="text-xs text-neutral-400 bg-neutral-950 p-2.5 rounded border border-neutral-800 leading-relaxed">
+                  {aiReview.summary}
+                </p>
+              </div>
+
+              {aiReview.strengths?.length > 0 && (
+                <div>
+                  <div className="text-xs font-semibold text-emerald-400 mb-1">Strengths</div>
+                  <ul className="text-xs text-neutral-300 space-y-1 list-disc list-inside bg-emerald-950/20 p-2.5 rounded border border-emerald-900/40">
+                    {aiReview.strengths.map((s, idx) => (
+                      <li key={idx}>{s}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {aiReview.improvements?.length > 0 && (
+                <div>
+                  <div className="text-xs font-semibold text-amber-400 mb-1">Suggested Improvements</div>
+                  <ul className="text-xs text-neutral-300 space-y-1 list-disc list-inside bg-amber-950/20 p-2.5 rounded border border-amber-900/40">
+                    {aiReview.improvements.map((s, idx) => (
+                      <li key={idx}>{s}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
               <button
                 onClick={() => setShowReviewModal(false)}
-                className="text-neutral-400 hover:text-neutral-200 p-1"
+                className="w-full py-2 bg-neutral-800 hover:bg-neutral-750 text-neutral-100 rounded-lg text-xs font-semibold transition-colors mt-2"
               >
-                <X className="w-4 h-4" />
+                Close Review
               </button>
             </div>
-
-            <div className="grid grid-cols-3 gap-2 text-center">
-              <div className="bg-neutral-950 p-2.5 rounded-lg border border-neutral-800">
-                <div className="text-[10px] text-neutral-400 flex items-center justify-center gap-1">
-                  <Activity className="w-3 h-3 text-indigo-400" />
-                  Time Complexity
-                </div>
-                <div className="font-mono font-bold text-indigo-400 mt-1">{aiReview.time_complexity}</div>
-              </div>
-              <div className="bg-neutral-950 p-2.5 rounded-lg border border-neutral-800">
-                <div className="text-[10px] text-neutral-400 flex items-center justify-center gap-1">
-                  <Layers className="w-3 h-3 text-emerald-400" />
-                  Space Complexity
-                </div>
-                <div className="font-mono font-bold text-emerald-400 mt-1">{aiReview.space_complexity}</div>
-              </div>
-              <div className="bg-neutral-950 p-2.5 rounded-lg border border-neutral-800">
-                <div className="text-[10px] text-neutral-400">Quality Score</div>
-                <div className="font-bold text-purple-400 text-lg mt-0.5">{aiReview.quality_score}/100</div>
-              </div>
-            </div>
-
-            <div>
-              <div className="text-xs font-semibold text-neutral-300 mb-1">Summary</div>
-              <p className="text-xs text-neutral-400 bg-neutral-950 p-2.5 rounded border border-neutral-800 leading-relaxed">
-                {aiReview.summary}
-              </p>
-            </div>
-
-            {aiReview.strengths?.length > 0 && (
-              <div>
-                <div className="text-xs font-semibold text-emerald-400 mb-1">Strengths</div>
-                <ul className="text-xs text-neutral-300 space-y-1 list-disc list-inside bg-emerald-950/20 p-2.5 rounded border border-emerald-900/40">
-                  {aiReview.strengths.map((s, idx) => (
-                    <li key={idx}>{s}</li>
-                  ))}
-                </ul>
-              </div>
-            )}
-
-            {aiReview.improvements?.length > 0 && (
-              <div>
-                <div className="text-xs font-semibold text-amber-400 mb-1">Suggested Improvements</div>
-                <ul className="text-xs text-neutral-300 space-y-1 list-disc list-inside bg-amber-950/20 p-2.5 rounded border border-amber-900/40">
-                  {aiReview.improvements.map((s, idx) => (
-                    <li key={idx}>{s}</li>
-                  ))}
-                </ul>
-              </div>
-            )}
-
-            <button
-              onClick={() => setShowReviewModal(false)}
-              className="w-full py-2 bg-neutral-800 hover:bg-neutral-750 text-neutral-100 rounded-lg text-xs font-semibold transition-colors"
-            >
-              Close Review
-            </button>
-          </div>
-        </div>
-      )}
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 
 	_ "modernc.org/sqlite" // pure-Go SQLite driver (no CGO, single binary)
 
@@ -17,38 +18,61 @@ import (
 // Embeddings via fastembed (bge-small, 384 dims) land in M2; the storage
 // schema and Recall/Reflect/QueryGraph surface are ready now.
 type NativeMemory struct {
-	orgID string
-	path  string
-	db    *sql.DB
+	orgID   string
+	path    string
+	db      *sql.DB
+	factory *NativeFactory
 }
 
-// NativeFactory opens one SQLite bank file per tenant under dataDir/banks/<org_id>/mnemosyne.db
 type NativeFactory struct {
 	dataDir string
+	mu      sync.Mutex
+	dbs     map[string]*sql.DB
 }
 
 func NewNativeFactory(dataDir string) *NativeFactory {
-	return &NativeFactory{dataDir: dataDir}
+	return &NativeFactory{dataDir: dataDir, dbs: make(map[string]*sql.DB)}
+}
+
+func (f *NativeFactory) getDB(orgID string, path string) (*sql.DB, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	if db, ok := f.dbs[orgID]; ok {
+		return db, nil
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return nil, fmt.Errorf("create bank dir: %w", err)
+	}
+	dsn := path + "?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)"
+	db, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		return nil, fmt.Errorf("open sqlite: %w", err)
+	}
+	db.SetMaxOpenConns(1)
+	if _, err := db.Exec(schema); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("init sqlite schema: %w", err)
+	}
+	f.dbs[orgID] = db
+	return db, nil
 }
 
 func (f *NativeFactory) ForBank(orgID string) memdomain.MemoryBank {
-	return &NativeMemory{orgID: orgID, path: filepath.Join(f.dataDir, "banks", orgID, "mnemosyne.db")}
+	return &NativeMemory{
+		orgID:   orgID,
+		path:    filepath.Join(f.dataDir, "banks", orgID, "mnemosyne.db"),
+		factory: f,
+	}
 }
 
 func (m *NativeMemory) open() error {
 	if m.db != nil {
 		return nil
 	}
-	if err := os.MkdirAll(filepath.Dir(m.path), 0o755); err != nil {
-		return fmt.Errorf("create bank dir: %w", err)
-	}
-	db, err := sql.Open("sqlite", m.path)
+	db, err := m.factory.getDB(m.orgID, m.path)
 	if err != nil {
-		return fmt.Errorf("open sqlite: %w", err)
-	}
-	if _, err := db.Exec(schema); err != nil {
-		_ = db.Close()
-		return fmt.Errorf("init sqlite schema: %w", err)
+		return err
 	}
 	m.db = db
 	return nil
@@ -131,9 +155,8 @@ func (m *NativeMemory) Stats(ctx context.Context) (memdomain.MemoryStats, error)
 }
 
 func (m *NativeMemory) Close() error {
-	if m.db != nil {
-		return m.db.Close()
-	}
+	// Let the factory manage the lifetime. We just drop the local reference.
+	m.db = nil
 	return nil
 }
 
