@@ -19,7 +19,7 @@ func NewPostgresCandidateRepo(pool *gorm.DB) *PostgresCandidateRepo {
 	return &PostgresCandidateRepo{pool: pool}
 }
 
-func (r *PostgresCandidateRepo) q(ctx context.Context) (*gorm.DB, error) {
+func (r *PostgresCandidateRepo) tx(ctx context.Context) (*gorm.DB, error) {
 	tx, ok := db.TxFrom(ctx)
 	if !ok {
 		return nil, db.ErrNoTx
@@ -28,7 +28,7 @@ func (r *PostgresCandidateRepo) q(ctx context.Context) (*gorm.DB, error) {
 }
 
 func (r *PostgresCandidateRepo) Create(ctx context.Context, c *cvdomain.Candidate) error {
-	q, err := r.q(ctx)
+	q, err := r.tx(ctx)
 	if err != nil {
 		return err
 	}
@@ -40,7 +40,7 @@ func (r *PostgresCandidateRepo) Create(ctx context.Context, c *cvdomain.Candidat
 }
 
 func (r *PostgresCandidateRepo) GetByID(ctx context.Context, id uuid.UUID) (*cvdomain.Candidate, error) {
-	q, err := r.q(ctx)
+	q, err := r.tx(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -51,7 +51,7 @@ func (r *PostgresCandidateRepo) GetByID(ctx context.Context, id uuid.UUID) (*cvd
 }
 
 func (r *PostgresCandidateRepo) GetByReviewToken(ctx context.Context, token string) (*cvdomain.Candidate, error) {
-	q, err := r.q(ctx)
+	q, err := r.tx(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -62,7 +62,7 @@ func (r *PostgresCandidateRepo) GetByReviewToken(ctx context.Context, token stri
 }
 
 func (r *PostgresCandidateRepo) List(ctx context.Context, orgID uuid.UUID) ([]*cvdomain.Candidate, error) {
-	q, err := r.q(ctx)
+	q, err := r.tx(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -85,7 +85,7 @@ func (r *PostgresCandidateRepo) List(ctx context.Context, orgID uuid.UUID) ([]*c
 }
 
 func (r *PostgresCandidateRepo) Update(ctx context.Context, c *cvdomain.Candidate) error {
-	q, err := r.q(ctx)
+	q, err := r.tx(ctx)
 	if err != nil {
 		return err
 	}
@@ -98,7 +98,7 @@ func (r *PostgresCandidateRepo) Update(ctx context.Context, c *cvdomain.Candidat
 }
 
 func (r *PostgresCandidateRepo) Delete(ctx context.Context, id uuid.UUID) error {
-	q, err := r.q(ctx)
+	q, err := r.tx(ctx)
 	if err != nil {
 		return err
 	}
@@ -142,4 +142,31 @@ func scanCandidate(row rowScanner) (*cvdomain.Candidate, error) {
 		c.CVStructured = structured
 	}
 	return &c, nil
+}
+
+// ListByIDs — batched candidate fetch for list enrichment (RLS-scoped).
+func (r *PostgresCandidateRepo) ListByIDs(ctx context.Context, orgID uuid.UUID, ids []uuid.UUID) (map[uuid.UUID]*cvdomain.Candidate, error) {
+	tx, err := r.tx(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if len(ids) == 0 {
+		return map[uuid.UUID]*cvdomain.Candidate{}, nil
+	}
+	rows, err := tx.WithContext(ctx).Raw(
+		`SELECT id, org_id, name, email, COALESCE(cv_path, ''), status, created_at FROM candidates
+		 WHERE org_id = $1 AND id = ANY($2)`, orgID, ids).Rows()
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	out := map[uuid.UUID]*cvdomain.Candidate{}
+	for rows.Next() {
+		var c cvdomain.Candidate
+		if err := rows.Scan(&c.ID, &c.OrgID, &c.Name, &c.Email, &c.CVPath, &c.Status, &c.CreatedAt); err != nil {
+			return nil, err
+		}
+		out[c.ID] = &c
+	}
+	return out, rows.Err()
 }
