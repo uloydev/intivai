@@ -29,40 +29,51 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
 import { toast } from "sonner"
 
 const POLL_STATUSES = new Set(["new", "parsing", "extracting", "pending_review"])
-const QUEUE_STATUSES = new Set(["new", "pending_review"])
 
 function statusBadge(status: string) {
-  if (status === "parsed" || status === "extracted") {
+  if (status === "parsing" || status === "extracting") {
+    // Transient pipeline work — static amber badge; the query refetchInterval
+    // polls, so an infinite pulsing spinner would be misleading.
+    return (
+      <Badge variant="secondary" className="bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20 gap-1">
+        <ArrowClockwise className="h-3 w-3 animate-spin motion-reduce:animate-none" /> Processing
+      </Badge>
+    )
+  }
+  if (status === "new") {
+    return (
+      <Badge variant="secondary" className="bg-sky-500/10 text-sky-600 dark:text-sky-400 border-sky-500/20 gap-1">
+        <Clock className="h-3 w-3" /> In queue
+      </Badge>
+    )
+  }
+  if (status === "extracted" || status === "parsed" || status === "pending_review") {
     return (
       <Badge className="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20 gap-1">
-        <CheckCircle className="h-3 w-3" weight="fill" /> {status}
+        <CheckCircle className="h-3 w-3" weight="fill" /> Profile ready
       </Badge>
     )
   }
   if (status === "failed_ocr" || status === "failed_extract" || status === "failed_parse") {
     return (
       <Badge variant="destructive" className="gap-1">
-        <XCircle className="h-3 w-3" weight="fill" /> {status}
-      </Badge>
-    )
-  }
-  if (QUEUE_STATUSES.has(status)) {
-    // Queued states can sit for a while (extraction backlog, candidate
-    // review) — a static badge instead of an infinite pulsing spinner.
-    return (
-      <Badge variant="secondary" className="bg-sky-500/10 text-sky-600 dark:text-sky-400 border-sky-500/20 gap-1">
-        <Clock className="h-3 w-3" /> {status === "pending_review" ? "Pending review" : "In queue"}
+        <XCircle className="h-3 w-3" weight="fill" /> Needs attention
       </Badge>
     )
   }
   return (
-    <Badge variant="secondary" className="bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20 animate-pulse gap-1">
-      <ArrowClockwise className="h-3 w-3 animate-spin" /> {status}…
-    </Badge>
+    <Badge variant="secondary" className="text-xs">{status}</Badge>
   )
 }
 
@@ -210,15 +221,21 @@ export function CVsPage() {
                 PDF documents will be automatically parsed via poppler/tesseract and vectorized.
               </CardDescription>
             </div>
-            <div className="flex bg-muted p-1 rounded-lg">
+            <div role="tablist" aria-label="Upload mode" className="flex bg-muted p-1 rounded-lg">
               <button
-                className={`px-3 py-1 text-xs font-semibold rounded-md transition-colors ${uploadMode === "single" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"}`}
+                role="tab"
+                aria-selected={uploadMode === "single"}
+                tabIndex={uploadMode === "single" ? 0 : -1}
+                className={`px-3 py-1 text-xs font-semibold rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 ${uploadMode === "single" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"}`}
                 onClick={() => setUploadMode("single")}
               >
                 Single Candidate
               </button>
               <button
-                className={`px-3 py-1 text-xs font-semibold rounded-md transition-colors ${uploadMode === "bulk" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"}`}
+                role="tab"
+                aria-selected={uploadMode === "bulk"}
+                tabIndex={uploadMode === "bulk" ? 0 : -1}
+                className={`px-3 py-1 text-xs font-semibold rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 ${uploadMode === "bulk" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"}`}
                 onClick={() => setUploadMode("bulk")}
               >
                 Bulk Upload
@@ -230,21 +247,21 @@ export function CVsPage() {
           {uploadMode === "single" ? (
             <div className="grid gap-4 md:grid-cols-12 animate-in fade-in zoom-in-95">
               <div className="space-y-1.5 md:col-span-3">
-                <Label htmlFor="cv-name" className="text-xs font-semibold">Candidate Full Name</Label>
+                <Label htmlFor="cv-name" className="text-xs font-semibold">Candidate Full Name (optional)</Label>
                 <Input
                   id="cv-name"
-                  placeholder="e.g. Alex Morgan"
+                  placeholder="optional — extracted from CV"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   className="bg-background/80"
                 />
               </div>
               <div className="space-y-1.5 md:col-span-3">
-                <Label htmlFor="cv-email" className="text-xs font-semibold">Candidate Email</Label>
+                <Label htmlFor="cv-email" className="text-xs font-semibold">Candidate Email (optional)</Label>
                 <Input
                   id="cv-email"
                   type="email"
-                  placeholder="alex@example.com"
+                  placeholder="optional — extracted from CV"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   className="bg-background/80"
@@ -271,7 +288,7 @@ export function CVsPage() {
                     setUploading(true)
                     upload.mutate()
                   }}
-                  disabled={uploading || !name.trim() || !email.trim() || (!selectedFile && !fileRef.current?.files?.[0])}
+                  disabled={uploading || (!selectedFile && !fileRef.current?.files?.[0])}
                 >
                   <CloudArrowUp className="mr-1.5 h-4 w-4" weight="bold" />
                   {uploading ? "Ingesting…" : "Ingest CV"}
@@ -413,6 +430,7 @@ export function CVsPage() {
                     size="sm"
                     className="h-8 w-8 p-0 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
                     title="Delete Candidate"
+                    aria-label={`Delete resume for ${cv.name}`}
                     onClick={() => {
                       if (window.confirm(`Delete resume for ${cv.name}?`)) {
                         deleteCV.mutate(cv.id)
@@ -444,19 +462,18 @@ export function CVsPage() {
           <div className="space-y-4 py-2">
             <div className="space-y-2">
               <Label htmlFor="screen-job" className="text-xs font-semibold">Target Job Role</Label>
-              <select
-                id="screen-job"
-                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-primary"
-                value={selectedJobId}
-                onChange={(e) => setSelectedJobId(e.target.value)}
-              >
-                <option value="">-- Choose an open job --</option>
-                {jobs?.map((j) => (
-                  <option key={j.id} value={j.id}>
-                    {j.title} ({j.min_experience}+ yrs exp)
-                  </option>
-                ))}
-              </select>
+              <Select value={selectedJobId || undefined} onValueChange={setSelectedJobId}>
+                <SelectTrigger id="screen-job" className="w-full text-sm bg-background/80">
+                  <SelectValue placeholder="-- Choose an open job --" />
+                </SelectTrigger>
+                <SelectContent>
+                  {jobs?.map((j) => (
+                    <SelectItem key={j.id} value={j.id}>
+                      {j.title} ({j.min_experience}+ yrs exp)
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
           </div>
 

@@ -10,6 +10,7 @@ import {
   ShieldCheck,
   Lightning,
   TreeStructure,
+  Trash,
 } from "@phosphor-icons/react"
 import { api } from "@/lib/api"
 import { getSession } from "@/lib/auth"
@@ -50,6 +51,25 @@ export function CompanyContextPage() {
   const [contextText, setContextText] = useState("")
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const promptTouchedRef = useRef(false)
+  const dirtyRef = useRef(false)
+
+  // Unsaved-changes guard: warn before unload and before discarding edits via
+  // a tab switch. Reset the flag only after a successful save/upload.
+  useEffect(() => {
+    const handler = (e: BeforeUnloadEvent) => {
+      if (!dirtyRef.current) return
+      e.preventDefault()
+      e.returnValue = ""
+    }
+    window.addEventListener("beforeunload", handler)
+    return () => window.removeEventListener("beforeunload", handler)
+  }, [])
+
+  const switchTab = (tab: "prompt" | "knowledge") => {
+    if (tab === activeTab) return
+    if (dirtyRef.current && !window.confirm("You have unsaved changes. Discard them and switch tabs?")) return
+    setActiveTab(tab)
+  }
 
   // Fetch Tenant Prompt — the textarea is DERIVED from query data; syncing
   // state inside queryFn would overwrite a prompt the user just edited on
@@ -85,6 +105,8 @@ export function CompanyContextPage() {
       }),
     onSuccess: (res) => {
       qc.invalidateQueries({ queryKey: ["tenant-prompt", orgId] })
+      dirtyRef.current = false
+      promptTouchedRef.current = false
       toast.success(`AI system prompt updated (Version ${res.version})`)
     },
     onError: (e) => toast.error(e instanceof Error ? e.message : "Failed to update prompt"),
@@ -107,9 +129,20 @@ export function CompanyContextPage() {
       qc.invalidateQueries({ queryKey: ["company-contexts", orgId] })
       setContextText("")
       setSelectedFile(null)
+      dirtyRef.current = false
       toast.success(`Company context vectorized and synced (Version ${res.version})`)
     },
     onError: (e) => toast.error(e instanceof Error ? e.message : "Upload failed"),
+  })
+
+  // Delete one vectorized context artifact (tenant-pinned, admin/recruiter).
+  const deleteContext = useMutation({
+    mutationFn: (id: string) => api.delete(`/orgs/${orgId}/contexts/${id}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["company-contexts", orgId] })
+      toast.success("Company context deleted")
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : "Delete failed"),
   })
 
   return (
@@ -132,10 +165,13 @@ export function CompanyContextPage() {
       </div>
 
       {/* Tabs */}
-      <div className="flex border-b border-border">
+      <div role="tablist" aria-label="Company intelligence sections" className="flex border-b border-border">
         <button
-          onClick={() => setActiveTab("prompt")}
-          className={`flex items-center gap-2 border-b-2 py-2.5 px-4 text-xs font-semibold transition-colors ${
+          role="tab"
+          aria-selected={activeTab === "prompt"}
+          tabIndex={activeTab === "prompt" ? 0 : -1}
+          onClick={() => switchTab("prompt")}
+          className={`flex items-center gap-2 border-b-2 py-2.5 px-4 text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 ${
             activeTab === "prompt"
               ? "border-primary text-primary"
               : "border-transparent text-muted-foreground hover:text-foreground"
@@ -145,8 +181,11 @@ export function CompanyContextPage() {
           <span>AI Persona & Prompt Rails</span>
         </button>
         <button
-          onClick={() => setActiveTab("knowledge")}
-          className={`flex items-center gap-2 border-b-2 py-2.5 px-4 text-xs font-semibold transition-colors ${
+          role="tab"
+          aria-selected={activeTab === "knowledge"}
+          tabIndex={activeTab === "knowledge" ? 0 : -1}
+          onClick={() => switchTab("knowledge")}
+          className={`flex items-center gap-2 border-b-2 py-2.5 px-4 text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 ${
             activeTab === "knowledge"
               ? "border-primary text-primary"
               : "border-transparent text-muted-foreground hover:text-foreground"
@@ -173,7 +212,7 @@ export function CompanyContextPage() {
                 </CardDescription>
               </div>
               {promptData && (
-                <Badge variant="secondary" className="text-[10px]">
+                <Badge variant="secondary" className="text-xs">
                   Version {promptData.version || 1}
                 </Badge>
               )}
@@ -188,14 +227,15 @@ export function CompanyContextPage() {
                     value={promptText || promptData?.system_prompt || ""}
                     onChange={(e) => {
                       promptTouchedRef.current = true
+                      dirtyRef.current = true
                       setPromptText(e.target.value)
                     }}
                     placeholder="Enter custom AI interviewer instructions, evaluation standards, or persona rails..."
                     rows={9}
                     className="font-mono text-xs leading-relaxed bg-background/60 focus-visible:ring-primary p-3"
                   />
-                  <div className="flex items-center justify-between text-[11px] text-muted-foreground pt-1">
-                    <span className="flex items-center gap-1 text-emerald-500">
+                  <div className="flex items-center justify-between text-xs text-muted-foreground pt-1">
+                    <span className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400">
                       <ShieldCheck className="h-3.5 w-3.5" /> Injection Rails Protected
                     </span>
                     <span>{(promptText || promptData?.system_prompt || "").length} characters</span>
@@ -220,7 +260,7 @@ export function CompanyContextPage() {
             <Card className="glass border-border/60 shadow-sm">
               <CardHeader className="pb-3">
                 <CardTitle className="font-display text-sm font-bold flex items-center gap-1.5">
-                  <Lightning className="h-4 w-4 text-amber-500" weight="fill" />
+                  <Lightning className="h-4 w-4 text-amber-600 dark:text-amber-400" weight="fill" />
                   Interviewer Persona Presets
                 </CardTitle>
                 <CardDescription className="text-xs">
@@ -229,21 +269,31 @@ export function CompanyContextPage() {
               </CardHeader>
               <CardContent className="space-y-2.5">
                 {PROMPT_PRESETS.map((preset, idx) => (
-                  <div
+                  <button
+                    type="button"
                     key={idx}
                     onClick={() => {
+                      if (
+                        promptTouchedRef.current &&
+                        !window.confirm(
+                          `Replace the current prompt with the "${preset.name}" template? Unsaved edits will be lost.`
+                        )
+                      ) {
+                        return
+                      }
                       setPromptText(preset.prompt)
+                      dirtyRef.current = true
                       toast.info(`Loaded "${preset.name}" preset template`)
                     }}
-                    className="group cursor-pointer rounded-xl border border-border/60 bg-background/50 p-3 transition-all hover:border-primary/40 hover:bg-card hover:shadow-sm"
+                    className="group w-full text-left cursor-pointer rounded-xl border border-border/60 bg-background/50 p-3 transition-all hover:border-primary/40 hover:bg-card hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
                   >
                     <p className="font-display text-xs font-bold text-foreground group-hover:text-primary transition-colors">
                       {preset.name}
                     </p>
-                    <p className="text-[11px] text-muted-foreground line-clamp-2 mt-1 leading-relaxed">
+                    <p className="text-xs text-muted-foreground line-clamp-2 mt-1 leading-relaxed">
                       {preset.prompt}
                     </p>
-                  </div>
+                  </button>
                 ))}
               </CardContent>
             </Card>
@@ -270,7 +320,10 @@ export function CompanyContextPage() {
                 <Label className="text-xs font-semibold">Paste Text or Documentation</Label>
                 <Textarea
                   value={contextText}
-                  onChange={(e) => setContextText(e.target.value)}
+                  onChange={(e) => {
+                    dirtyRef.current = true
+                    setContextText(e.target.value)
+                  }}
                   placeholder="e.g. Our engineering stack relies on Go microservices with PostgreSQL RLS. We value pragmatic simplicity, clean concurrency, and high test coverage..."
                   rows={6}
                   className="text-xs bg-background/60 leading-relaxed p-3"
@@ -317,7 +370,7 @@ export function CompanyContextPage() {
                 <div className="rounded-xl border border-dashed border-border p-8 text-center space-y-2">
                   <Brain className="mx-auto h-8 w-8 text-muted-foreground/40" />
                   <p className="text-xs font-medium text-foreground">No custom company context ingested yet</p>
-                  <p className="text-[11px] text-muted-foreground max-w-sm mx-auto">
+                  <p className="text-xs text-muted-foreground max-w-sm mx-auto">
                     The interviewer uses standard domain knowledge. Ingest your company engineering context on the left to customize probing.
                   </p>
                 </div>
@@ -337,19 +390,40 @@ export function CompanyContextPage() {
                             <span className="font-display text-xs font-bold text-foreground">
                               Company Context Version {ctx.version}
                             </span>
-                            <Badge variant="outline" className="text-[10px] uppercase">
+                            <Badge variant="outline" className="text-xs uppercase">
                               {ctx.type}
                             </Badge>
                           </div>
-                          <p className="font-mono text-[10px] text-muted-foreground truncate max-w-md mt-0.5">
+                          <p className="font-mono text-xs text-muted-foreground truncate max-w-md mt-0.5">
                             Hash: {ctx.content_hash}
                           </p>
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                        <CheckCircle className="h-3.5 w-3.5 text-emerald-500" weight="fill" />
-                        <span>Indexed</span>
+                      <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                          <CheckCircle className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" weight="fill" />
+                          <span>Indexed</span>
+                        </div>
+                        <Button
+                          variant="ghost"
+                          size="icon-sm"
+                          className="text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                          aria-label={`Delete company context version ${ctx.version}`}
+                          title="Delete context"
+                          onClick={() => {
+                            if (
+                              window.confirm(
+                                `Delete company context version ${ctx.version}? This permanently removes it from the memory bank.`
+                              )
+                            ) {
+                              deleteContext.mutate(ctx.id)
+                            }
+                          }}
+                          disabled={deleteContext.isPending}
+                        >
+                          <Trash className="h-4 w-4" />
+                        </Button>
                       </div>
                     </div>
                   ))}

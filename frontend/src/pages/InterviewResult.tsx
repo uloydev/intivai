@@ -1,3 +1,4 @@
+import { useState } from "react"
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query"
 import { useParams, Link } from "react-router-dom"
 import {
@@ -25,6 +26,7 @@ import { toast } from "sonner"
 export function InterviewResultPage() {
   const { id } = useParams<{ id: string }>()
   const qc = useQueryClient()
+  const [exporting, setExporting] = useState(false)
   const { data: detail, isLoading, error } = useQuery({
     queryKey: ["interview", id],
     queryFn: () => api.get<InterviewDetail>(`/interviews/${id}`),
@@ -65,6 +67,7 @@ export function InterviewResultPage() {
   }
 
   const evalReport = detail.evaluation
+  const dimensionCount = evalReport ? Object.keys(evalReport.dimensions).length : 0
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
@@ -121,8 +124,10 @@ export function InterviewResultPage() {
             variant="outline"
             size="sm"
             className="text-xs gap-1.5"
+            disabled={exporting}
             onClick={async () => {
               try {
+                setExporting(true)
                 toast.info("Generating Maroto evaluation PDF…")
                 const blob = await api.getBlob(`/interviews/${id}/report/pdf`)
                 const url = window.URL.createObjectURL(blob)
@@ -134,24 +139,29 @@ export function InterviewResultPage() {
                 toast.success("Scorecard PDF downloaded successfully")
               } catch (err) {
                 toast.error(err instanceof Error ? err.message : "Failed to download PDF report")
+              } finally {
+                setExporting(false)
               }
             }}
           >
-            <DownloadSimple className="h-3.5 w-3.5" /> Export PDF
+            <DownloadSimple className="h-3.5 w-3.5" /> {exporting ? "Generating…" : "Export PDF"}
           </Button>
         </div>
       </div>
 
       {/* Executive Scorecard Header */}
       {evalReport ? (
-        <Card className="glass border-primary/20 bg-gradient-to-br from-card via-card to-primary/5 shadow-md">
+        <Card
+          className="glass border-primary/20 bg-gradient-to-br from-card via-card to-primary/5 shadow-md"
+          aria-live="polite"
+        >
           <CardContent className="p-6">
             <div className="flex flex-col gap-6 md:flex-row md:items-center md:justify-between border-b border-border/50 pb-6">
               <div className="flex items-center gap-5">
                 <div className="flex h-20 w-20 shrink-0 flex-col items-center justify-center rounded-2xl bg-primary/10 border border-primary/20 text-primary">
-                  <span className="text-[10px] uppercase font-bold tracking-wider">Score</span>
+                  <span className="text-xs uppercase font-bold tracking-wider">Score</span>
                   <span className="font-display text-3xl font-extrabold">{evalReport.overall_score}</span>
-                  <span className="text-[9px] text-muted-foreground">/ 100</span>
+                  <span className="text-xs text-muted-foreground">/ 100</span>
                 </div>
                 <div className="space-y-1.5">
                   <div className="flex items-center gap-2">
@@ -159,16 +169,18 @@ export function InterviewResultPage() {
                     <RecommendationBadge recommendation={evalReport.recommendation} />
                   </div>
                   <p className="text-xs text-muted-foreground leading-relaxed max-w-xl">
-                    Automated synthesis derived from {detail.questions.length} dynamically generated competence probes, evaluating factual depth, communication clarity, and problem-solving patterns.
+                    Weighted across {dimensionCount} dimensions — automated synthesis derived from {detail.questions.length} dynamically generated competence probes, evaluating factual depth, communication clarity, and problem-solving patterns.
                   </p>
                 </div>
               </div>
             </div>
 
-            {/* 4 Dimension Bars */}
+            {/* Dimension Bars */}
             <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
               {Object.entries(evalReport.dimensions).map(([name, dim]) => {
                 const score = dim.score
+                const weightPct = Math.round(dim.weight * 100)
+                const weightedPts = Math.round(dim.score * dim.weight)
                 return (
                   <div key={name} className="rounded-xl border border-border/50 bg-background/60 p-3.5 space-y-1.5">
                     <div className="flex items-center justify-between">
@@ -183,6 +195,12 @@ export function InterviewResultPage() {
                         className="h-full rounded-full bg-primary transition-all duration-500"
                         style={{ width: `${Math.min(score, 100)}%` }}
                       />
+                    </div>
+                    <div className="flex items-center justify-between font-mono text-xs text-muted-foreground">
+                      <span>Weight {weightPct}%</span>
+                      <span title={`${score}% × ${weightPct}% weight`}>
+                        {weightedPts}/{weightPct} pts
+                      </span>
                     </div>
                   </div>
                 )
@@ -200,7 +218,7 @@ export function InterviewResultPage() {
                     <ul className="space-y-1 text-xs text-foreground/90 pl-1">
                       {evalReport.strengths.map((s, idx) => (
                         <li key={idx} className="flex items-start gap-1.5">
-                          <span className="text-emerald-500 font-bold">•</span>
+                          <span className="text-emerald-600 dark:text-emerald-400 font-bold">•</span>
                           <span>{s}</span>
                         </li>
                       ))}
@@ -215,7 +233,7 @@ export function InterviewResultPage() {
                     <ul className="space-y-1 text-xs text-foreground/90 pl-1">
                       {evalReport.weaknesses.map((w, idx) => (
                         <li key={idx} className="flex items-start gap-1.5">
-                          <span className="text-amber-500 font-bold">•</span>
+                          <span className="text-amber-600 dark:text-amber-400 font-bold">•</span>
                           <span>{w}</span>
                         </li>
                       ))}
@@ -231,14 +249,14 @@ export function InterviewResultPage() {
                 <span className="text-xs font-bold uppercase tracking-wider text-foreground flex items-center gap-1.5">
                   <User className="h-4 w-4 text-primary" /> Recruiter Decision & Hiring Action
                 </span>
-                <Badge variant="outline" className="text-[10px]">Hiring Committee</Badge>
+                <Badge variant="outline" className="text-xs">Hiring Committee</Badge>
               </div>
 
               <div className="grid gap-3 sm:grid-cols-3">
                 <Button
                   variant="outline"
                   size="sm"
-                  className="text-xs text-emerald-500 border-emerald-500/30 hover:bg-emerald-500/10 font-bold gap-1"
+                  className="text-xs text-emerald-600 dark:text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/10 font-bold gap-1"
                   onClick={() => decision.mutate("offer_extended")}
                   disabled={decision.isPending || !detail?.application_id}
                 >
@@ -258,7 +276,15 @@ export function InterviewResultPage() {
                   variant="outline"
                   size="sm"
                   className="text-xs text-destructive border-destructive/30 hover:bg-destructive/10 font-semibold gap-1"
-                  onClick={() => decision.mutate("rejected")}
+                  onClick={() => {
+                    if (
+                      window.confirm(
+                        `Reject ${detail.candidate?.name ?? "candidate"} for ${detail.job?.title ?? "this role"}? This closes the application.`
+                      )
+                    ) {
+                      decision.mutate("rejected")
+                    }
+                  }}
                   disabled={decision.isPending || !detail?.application_id}
                 >
                   <XCircle className="h-3.5 w-3.5" weight="fill" /> Reject Candidate
@@ -269,7 +295,7 @@ export function InterviewResultPage() {
         </Card>
       ) : (
         <Card className="glass border-border/60 p-8 text-center space-y-2">
-          <Sparkle className="mx-auto h-8 w-8 text-primary animate-pulse" />
+          <Sparkle className="mx-auto h-8 w-8 text-primary" />
           <p className="font-display font-semibold text-base">Evaluation Synthesis Pending</p>
           <p className="text-xs text-muted-foreground max-w-md mx-auto">
             The interview has concluded. The LLM evaluation worker is currently processing transcripts against the grading rubric.
@@ -286,7 +312,7 @@ export function InterviewResultPage() {
           <div className="p-6 space-y-4">
             <div className="flex items-center justify-between border-b border-border/50 pb-3">
               <div className="flex items-center gap-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-500/10 text-indigo-500 font-bold">
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 font-bold">
                   <Code2 className="h-5 w-5" />
                 </div>
                 <div>
@@ -296,7 +322,7 @@ export function InterviewResultPage() {
                   </p>
                 </div>
               </div>
-              <Badge variant="outline" className="text-xs font-mono border-indigo-500/30 text-indigo-400 bg-indigo-500/5">
+              <Badge variant="outline" className="text-xs font-mono border-indigo-500/30 text-indigo-600 dark:text-indigo-400 bg-indigo-500/5">
                 {detail.coding_sessions.length} Submission{detail.coding_sessions.length > 1 ? "s" : ""}
               </Badge>
             </div>
@@ -312,7 +338,7 @@ export function InterviewResultPage() {
                       <span className="text-xs text-neutral-400">Question {session.question_idx || idx + 1}</span>
                     </div>
                     {session.submitted_at && (
-                      <span className="text-[11px] text-neutral-500 font-mono">
+                      <span className="text-xs text-neutral-500 font-mono">
                         {new Date(session.submitted_at).toLocaleTimeString()}
                       </span>
                     )}
@@ -335,19 +361,19 @@ export function InterviewResultPage() {
                   {session.ai_code_review && (
                     <div className="grid grid-cols-3 gap-2 bg-neutral-900/60 p-3 rounded-lg border border-neutral-800 text-xs">
                       <div className="text-center">
-                        <div className="text-[10px] text-neutral-400">Time Complexity</div>
+                        <div className="text-xs text-neutral-400">Time Complexity</div>
                         <div className="font-mono font-bold text-indigo-400 mt-0.5">
                           {session.ai_code_review.time_complexity || "—"}
                         </div>
                       </div>
                       <div className="text-center">
-                        <div className="text-[10px] text-neutral-400">Space Complexity</div>
+                        <div className="text-xs text-neutral-400">Space Complexity</div>
                         <div className="font-mono font-bold text-emerald-400 mt-0.5">
                           {session.ai_code_review.space_complexity || "—"}
                         </div>
                       </div>
                       <div className="text-center">
-                        <div className="text-[10px] text-neutral-400">Quality Score</div>
+                        <div className="text-xs text-neutral-400">Quality Score</div>
                         <div className="font-bold text-purple-400 mt-0.5">
                           {session.ai_code_review.quality_score != null
                             ? `${session.ai_code_review.quality_score}/100`
@@ -399,7 +425,7 @@ export function InterviewResultPage() {
                   <CardContent className="p-4 space-y-3">
                     {/* Candidate Answer */}
                     <div className="rounded-xl bg-background/80 border border-border/40 p-3 text-xs leading-relaxed space-y-1">
-                      <div className="flex items-center gap-1.5 text-muted-foreground font-semibold text-[11px]">
+                      <div className="flex items-center gap-1.5 text-muted-foreground font-semibold text-xs">
                         <User className="h-3.5 w-3.5" /> Candidate Response:
                       </div>
                       <p className="text-foreground pl-5">{answer.content}</p>
@@ -408,7 +434,7 @@ export function InterviewResultPage() {
                     {/* AI Evaluator Rationale */}
                     {perQ?.rationale && (
                       <div className="rounded-xl bg-primary/5 border border-primary/15 p-3 text-xs space-y-1">
-                        <div className="flex items-center gap-1.5 text-primary font-semibold text-[11px]">
+                        <div className="flex items-center gap-1.5 text-primary font-semibold text-xs">
                           <Sparkle className="h-3.5 w-3.5" weight="fill" /> AI Evaluator Rationale:
                         </div>
                         <p className="text-muted-foreground pl-5">{perQ.rationale}</p>

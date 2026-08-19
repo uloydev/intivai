@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { useParams, useSearchParams } from "react-router-dom"
 import {
@@ -8,6 +8,9 @@ import {
   XCircle,
   Briefcase,
   Eye,
+  CaretUp,
+  CaretDown,
+  CaretUpDown,
 } from "@phosphor-icons/react"
 import { api } from "@/lib/api"
 import { stageMeta } from "@/lib/stages"
@@ -17,6 +20,13 @@ import { toast } from "sonner"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
   Table,
@@ -27,6 +37,11 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { cn } from "@/lib/utils"
+
+const PAGE_SIZE = 50
+
+type SortKey = "score" | "date"
+type SortDir = "asc" | "desc"
 
 function scorePill(app: Application) {
   if (app.cv_score == null) {
@@ -50,7 +65,7 @@ function scorePill(app: Application) {
       case "parsing":
       case "extracting":
         return (
-          <Badge variant="secondary" className="bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20 animate-pulse text-xs">
+          <Badge variant="secondary" className="bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20 text-xs">
             Scoring…
           </Badge>
         )
@@ -81,7 +96,7 @@ function stagePill(app: Application) {
   const meta = stageMeta(app.stage ?? "")
   const isCompleted = app.stage === "interview_completed"
   return (
-    <Badge className={cn("text-[11px]", meta.color)}>
+    <Badge className={cn("text-xs", meta.color)}>
       {meta.label}
       {isCompleted ? ` (${app.interview_score ?? "-"}/100)` : ""}
     </Badge>
@@ -111,6 +126,9 @@ export function CandidatesPage() {
   const [search, setSearch] = useState("")
   const [selectedApp, setSelectedApp] = useState<Application | null>(null)
   const [drawerOpen, setDrawerOpen] = useState(false)
+  const [page, setPage] = useState(1)
+  const [sortKey, setSortKey] = useState<SortKey>("score")
+  const [sortDir, setSortDir] = useState<SortDir>("desc")
 
   // Open drawer if candidate_id or routeId is provided
   useEffect(() => {
@@ -177,6 +195,68 @@ export function CandidatesPage() {
     return matchesSearch && matchesJob && matchesStatus
   })
 
+  const sortedApps = useMemo(() => {
+    const list = [...filteredApps]
+    list.sort((a, b) => {
+      let cmp = 0
+      if (sortKey === "score") {
+        const av = a.cv_score ?? -1
+        const bv = b.cv_score ?? -1
+        cmp = av === bv ? 0 : av < bv ? -1 : 1
+      } else {
+        const at = a.applied_at ? new Date(a.applied_at).getTime() : -1
+        const bt = b.applied_at ? new Date(b.applied_at).getTime() : -1
+        cmp = at === bt ? 0 : at < bt ? -1 : 1
+      }
+      return sortDir === "desc" ? -cmp : cmp
+    })
+    return list
+  }, [filteredApps, sortKey, sortDir])
+
+  // Reset pagination whenever the filter/sort window changes.
+  useEffect(() => {
+    setPage(1)
+  }, [search, selectedJob, statusFilter])
+
+  const pageCount = Math.max(1, Math.ceil(sortedApps.length / PAGE_SIZE))
+  const safePage = Math.min(page, pageCount)
+  const pageApps = sortedApps.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE)
+
+  const toggleSort = (key: SortKey) => {
+    if (sortKey === key) {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"))
+    } else {
+      setSortKey(key)
+      setSortDir(key === "score" ? "desc" : "desc")
+    }
+  }
+
+  const SortIcon = ({ active }: { active: boolean }) => {
+    if (!active) return <CaretUpDown className="h-3.5 w-3.5 opacity-50" />
+    return sortDir === "asc" ? <CaretUp className="h-3.5 w-3.5" /> : <CaretDown className="h-3.5 w-3.5" />
+  }
+
+  const sortableHead = (label: string, key: SortKey, className?: string) => (
+    <TableHead
+      className={className}
+      aria-sort={
+        sortKey === key ? (sortDir === "asc" ? "ascending" : "descending") : "none"
+      }
+    >
+      <button
+        type="button"
+        onClick={() => toggleSort(key)}
+        className={cn(
+          "inline-flex items-center gap-1 rounded font-semibold uppercase tracking-wider transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60",
+          sortKey === key ? "text-foreground" : "text-muted-foreground hover:text-foreground"
+        )}
+      >
+        {label}
+        <SortIcon active={sortKey === key} />
+      </button>
+    </TableHead>
+  )
+
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
       {/* Header */}
@@ -201,18 +281,19 @@ export function CandidatesPage() {
               className="pl-9 bg-background/80"
             />
           </div>
-          <select
-            className="rounded-md border border-input bg-background px-3 py-2 text-xs shadow-sm focus:outline-none focus:ring-1 focus:ring-primary shrink-0"
-            value={selectedJob}
-            onChange={(e) => handleJobChange(e.target.value)}
-          >
-            <option value="all">All Roles</option>
-            {jobs?.map((j) => (
-              <option key={j.id} value={j.id}>
-                {j.title}
-              </option>
-            ))}
-          </select>
+          <Select value={selectedJob} onValueChange={handleJobChange}>
+            <SelectTrigger className="w-full sm:w-56 h-8 text-xs bg-background/80 shrink-0">
+              <SelectValue placeholder="All Roles" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Roles</SelectItem>
+              {jobs?.map((j) => (
+                <SelectItem key={j.id} value={j.id}>
+                  {j.title}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
 
         <div className="flex flex-wrap items-center gap-1.5 shrink-0">
@@ -235,7 +316,7 @@ export function CandidatesPage() {
           <Button
             variant={statusFilter === "interview_completed" ? "secondary" : "ghost"}
             size="sm"
-            className="text-xs h-8 text-blue-500"
+            className="text-xs h-8 text-blue-600 dark:text-blue-400"
             onClick={() => handleStageChange("interview_completed")}
           >
             Evaluated ({apps?.filter((a) => a.interview_score != null).length ?? 0})
@@ -273,13 +354,14 @@ export function CandidatesPage() {
               <TableRow className="bg-muted/40">
                 <TableHead>Candidate Profile</TableHead>
                 <TableHead>Target Role</TableHead>
-                <TableHead>CV Match</TableHead>
+                {sortableHead("CV Match", "score")}
+                {sortableHead("Applied", "date")}
                 <TableHead>Talent Lifecycle Stage</TableHead>
                 <TableHead className="text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filteredApps.map((app) => (
+              {pageApps.map((app) => (
                 <TableRow
                   key={app.id}
                   tabIndex={0}
@@ -315,6 +397,11 @@ export function CandidatesPage() {
                     </div>
                   </TableCell>
                   <TableCell>{scorePill(app)}</TableCell>
+                  <TableCell>
+                    <span className="text-xs text-muted-foreground">
+                      {app.applied_at ? new Date(app.applied_at).toLocaleDateString() : "—"}
+                    </span>
+                  </TableCell>
                   <TableCell>{stagePill(app)}</TableCell>
                   <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
                     <Button
@@ -333,6 +420,38 @@ export function CandidatesPage() {
               ))}
             </TableBody>
           </Table>
+
+          {/* Pagination footer */}
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between border-t border-border/60 px-4 py-3">
+            <p className="text-xs text-muted-foreground">
+              {sortedApps.length === 0
+                ? "0 candidates"
+                : `Showing ${(safePage - 1) * PAGE_SIZE + 1}–${Math.min(safePage * PAGE_SIZE, sortedApps.length)} of ${sortedApps.length} candidates`}
+            </p>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 text-xs"
+                disabled={safePage <= 1}
+                onClick={() => setPage(safePage - 1)}
+              >
+                ← Prev
+              </Button>
+              <span className="text-xs text-muted-foreground">
+                Page {safePage} of {pageCount}
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 text-xs"
+                disabled={safePage >= pageCount}
+                onClick={() => setPage(safePage + 1)}
+              >
+                Next →
+              </Button>
+            </div>
+          </div>
         </div>
       )}
 

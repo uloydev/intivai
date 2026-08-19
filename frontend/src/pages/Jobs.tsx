@@ -66,10 +66,6 @@ export function JobsPage() {
   // Assessment Stage Pipeline state
   const [enableScreening, setEnableScreening] = useState(true)
   const [passThreshold, setPassThreshold] = useState(70)
-  const [enableTechnical, setEnableTechnical] = useState(true)
-  const [enableSandbox, setEnableSandbox] = useState(true)
-  const [enableVoice, setEnableVoice] = useState(true)
-  const [questionCount, setQuestionCount] = useState(3)
 
   const minExpNum = Number.parseInt(minExp || "0", 10)
   const minExpValid = Number.isFinite(minExpNum) && minExpNum >= 0
@@ -246,11 +242,11 @@ export function JobsPage() {
                         {job.status}
                       </Badge>
                       {job.is_published ? (
-                        <Badge variant="outline" className="text-[10px] bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20">
+                        <Badge variant="outline" title="Published = visible on the careers board; Active = accepting applicants" className="text-xs bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20">
                           Published
                         </Badge>
                       ) : (
-                        <Badge variant="outline" className="text-[10px] text-muted-foreground">
+                        <Badge variant="outline" title="Published = visible on the careers board; Active = accepting applicants" className="text-xs text-muted-foreground">
                           Internal
                         </Badge>
                       )}
@@ -462,81 +458,43 @@ export function JobsPage() {
                 )}
               </div>
 
-              {/* Stage 2: Technical Probing */}
+              {/* The assessment pipeline is fixed for every interview — these
+                  descriptions replace the old configurable toggles, which were
+                  never persisted to the backend. */}
               <div className="rounded-xl border border-border/80 bg-background/60 p-3.5 space-y-2">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      id="stage-technical"
-                      checked={enableTechnical}
-                      onChange={(e) => setEnableTechnical(e.target.checked)}
-                      className="rounded border-border text-primary focus:ring-primary h-4 w-4"
-                    />
-                    <Label htmlFor="stage-technical" className="text-xs font-bold cursor-pointer">
-                      Stage 2: Adaptive AI Technical & Architecture Interview
-                    </Label>
-                  </div>
-                  <Badge variant="outline" className="text-[10px]">WebSocket Streaming</Badge>
+                <div className="flex items-center gap-2">
+                  <Badge variant="outline" className="text-[10px]">Stage 1</Badge>
+                  <span className="text-xs font-bold">AI CV Screening</span>
+                  <span className="ml-auto text-[11px] text-muted-foreground">Automatic, on submission</span>
                 </div>
-                {enableTechnical && (
-                  <div className="pl-6 pt-1 flex items-center justify-between text-xs border-t border-border/40">
-                    <span className="text-muted-foreground">Question Count:</span>
-                    <select
-                      value={questionCount}
-                      onChange={(e) => setQuestionCount(Number(e.target.value))}
-                      className="rounded-md border border-border bg-card px-2 py-1 text-xs font-medium"
-                    >
-                      <option value={3}>3 Probes (Standard Screen)</option>
-                      <option value={5}>5 Probes (In-Depth Technical)</option>
-                      <option value={8}>8 Probes (Comprehensive Senior)</option>
-                    </select>
-                  </div>
-                )}
+                <p className="text-[11px] text-muted-foreground">Semantic extraction + weighted match against the rubric below.</p>
               </div>
 
-              {/* Stage 3: Coding Sandbox */}
               <div className="rounded-xl border border-border/80 bg-background/60 p-3.5 space-y-2">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      id="stage-sandbox"
-                      checked={enableSandbox}
-                      onChange={(e) => setEnableSandbox(e.target.checked)}
-                      className="rounded border-border text-primary focus:ring-primary h-4 w-4"
-                    />
-                    <Label htmlFor="stage-sandbox" className="text-xs font-bold cursor-pointer">
-                      Stage 3: Live Coding Sandbox Challenge
-                    </Label>
-                  </div>
-                  <Badge variant="outline" className="text-[10px]">Isolated Go / Python / TS</Badge>
+                <div className="flex items-center gap-2">
+                  <Badge variant="outline" className="text-[10px]">Stage 2</Badge>
+                  <span className="text-xs font-bold">Adaptive AI Technical & Architecture Interview</span>
+                  <span className="ml-auto text-[11px] text-muted-foreground">WebSocket streaming</span>
                 </div>
-                <p className="pl-6 text-[11px] text-muted-foreground">
-                  Candidate writes code and runs automated test suites inside the secure browser sandbox.
-                </p>
+                <p className="text-[11px] text-muted-foreground">Adaptive question depth (3–8 probes) driven by answer quality.</p>
               </div>
 
-              {/* Stage 4: Voice Interview */}
               <div className="rounded-xl border border-border/80 bg-background/60 p-3.5 space-y-2">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      id="stage-voice"
-                      checked={enableVoice}
-                      onChange={(e) => setEnableVoice(e.target.checked)}
-                      className="rounded border-border text-primary focus:ring-primary h-4 w-4"
-                    />
-                    <Label htmlFor="stage-voice" className="text-xs font-bold cursor-pointer">
-                      Stage 4: AI Voice Phone Screen Simulation
-                    </Label>
-                  </div>
-                  <Badge variant="outline" className="text-[10px]">WebRTC Audio</Badge>
+                <div className="flex items-center gap-2">
+                  <Badge variant="outline" className="text-[10px]">Stage 3</Badge>
+                  <span className="text-xs font-bold">Live Coding Sandbox Challenge</span>
+                  <span className="ml-auto text-[11px] text-muted-foreground">Go / Python / TS</span>
                 </div>
-                <p className="pl-6 text-[11px] text-muted-foreground">
-                  Full-duplex conversational audio interview with instant Whisper speech-to-text.
-                </p>
+                <p className="text-[11px] text-muted-foreground">Candidate writes code and runs automated test suites in the isolated sandbox.</p>
+              </div>
+
+              <div className="rounded-xl border border-dashed border-border/80 bg-background/40 p-3.5 space-y-2">
+                <div className="flex items-center gap-2">
+                  <Badge variant="outline" className="text-[10px]">Stage 4</Badge>
+                  <span className="text-xs font-bold text-muted-foreground">AI Voice Phone Screen</span>
+                  <Badge variant="secondary" className="text-[10px]">Coming soon</Badge>
+                </div>
+                <p className="text-[11px] text-muted-foreground">Full-duplex voice interviews are in pilot and not yet available on jobs.</p>
               </div>
             </div>
           )}

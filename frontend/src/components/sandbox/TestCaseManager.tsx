@@ -131,8 +131,9 @@ export function TestCaseManager({ testCases, results, onUpdateTestCases }: TestC
               currentResult.passed ? "bg-emerald-950/30 border-emerald-800/60" : "bg-rose-950/30 border-rose-800/60"
             }`}>
               <div className="flex items-center justify-between font-semibold mb-1">
-                <span className={currentResult.passed ? "text-emerald-400" : "text-rose-400"}>
-                  {currentResult.passed ? "✓ Test Passed" : "✗ Test Failed"}
+                <span className={`flex items-center gap-1 ${currentResult.passed ? "text-emerald-400" : "text-rose-400"}`}>
+                  {currentResult.passed ? <CheckCircle2 className="w-3.5 h-3.5" /> : <XCircle className="w-3.5 h-3.5" />}
+                  {currentResult.passed ? "Test Passed" : "Test Failed"}
                 </span>
                 <span className="flex items-center gap-1 text-neutral-400">
                   <Clock className="w-3 h-3" />

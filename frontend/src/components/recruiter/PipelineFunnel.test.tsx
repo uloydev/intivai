@@ -25,7 +25,7 @@ describe("PipelineFunnel Component", () => {
     expect(screen.getByText("60% Qualification Rate")).toBeDefined()
     expect(screen.getByText("AI Assessments Completed")).toBeDefined()
     expect(screen.getByText("30")).toBeDefined()
-    expect(screen.getByText("Strong Hire Recommendations")).toBeDefined()
+    expect(screen.getByText("AI Proceed Recommendations")).toBeDefined()
     expect(screen.getByText("15")).toBeDefined()
   })
 

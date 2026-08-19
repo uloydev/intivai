@@ -317,7 +317,7 @@ export function Candidate360Drawer({
                         <Sparkle className="h-4 w-4 text-primary" weight="fill" />
                         <span>AI Screening Recommendation</span>
                       </div>
-                      <span className="text-[11px] text-muted-foreground">
+                      <span className="text-xs text-muted-foreground">
                         Overall = weighted sum of the dimensions below
                       </span>
                     </div>
@@ -336,7 +336,7 @@ export function Candidate360Drawer({
                           <div key={key} className="flex items-center justify-between gap-2 rounded-lg bg-background/60 border border-border/50 px-2.5 py-1.5">
                             <span className="text-xs text-muted-foreground">{label}</span>
                             <span className="flex items-center gap-1.5">
-                              <span className="font-mono text-[11px] text-muted-foreground">×{Math.round(weight * 100)}%</span>
+                              <span className="font-mono text-xs text-muted-foreground">×{Math.round(weight * 100)}%</span>
                               <span className="font-mono text-xs font-bold text-foreground">
                                 {Math.round(value * 100)}%
                               </span>

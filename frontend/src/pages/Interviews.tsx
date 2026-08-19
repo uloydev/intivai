@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useState, useEffect, useRef } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   ChatCircleText,
@@ -9,14 +9,16 @@ import {
   CheckCircle,
   Play,
   UsersThree,
+  X,
 } from "@phosphor-icons/react"
-import { Link } from "react-router-dom"
+import { Link, useSearchParams } from "react-router-dom"
 import { api } from "@/lib/api"
 import { copyText } from "@/lib/clipboard"
 import { chatInviteUrl } from "@/lib/invites"
 import type { Application, CreateInterviewResult, InterviewListItem } from "@/types/api"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { cn } from "@/lib/utils"
 import { RecommendationBadge } from "@/components/ui/RecommendationBadge"
 import {
   Dialog,
@@ -42,6 +44,10 @@ import { toast } from "sonner"
 export function InterviewsPage() {
   const qc = useQueryClient()
   const [tab, setTab] = useState<"interviews" | "eligible">("interviews")
+  const [searchParams, setSearchParams] = useSearchParams()
+  const statusFilter = searchParams.get("status") ?? "all"
+  const inviteParam = searchParams.get("invite")
+  const inviteHandledRef = useRef(false)
 
   const { data: apps, isLoading: loadingApps } = useQuery({
     queryKey: ["applications"],
@@ -58,8 +64,41 @@ export function InterviewsPage() {
 
   const [open, setOpen] = useState(false)
   const [selectedApp, setSelectedApp] = useState<Application | null>(null)
+  const [highlightedAppId, setHighlightedAppId] = useState<string | null>(null)
   const [count, setCount] = useState("3")
   const [created, setCreated] = useState<CreateInterviewResult | null>(null)
+
+  // `?invite=<candidate_id>` deep-link: auto-open the create-interview flow
+  // for the candidate (or, when not yet eligible, highlight their row).
+  useEffect(() => {
+    if (inviteHandledRef.current || loadingApps || !inviteParam || !apps) return
+    inviteHandledRef.current = true
+    const app = apps.find((a) => a.candidate_id === inviteParam)
+    if (!app) {
+      toast.info("Candidate application not found.")
+      return
+    }
+    if (app.passed_screening) {
+      setSelectedApp(app)
+      setCreated(null)
+      setOpen(true)
+    } else {
+      setTab("eligible")
+      setHighlightedAppId(app.id)
+      toast.info(`${app.candidate_name} has not passed screening yet — interview creation requires a passing CV score.`)
+    }
+  }, [inviteParam, apps, loadingApps])
+
+  // Interview list filtered by `?status=` (PipelineFunnel drills land here).
+  const filteredInterviews = (createdInterviews ?? []).filter(
+    (iv) => statusFilter === "all" || iv.status === statusFilter
+  )
+
+  const clearStatusFilter = () => {
+    const next = new URLSearchParams(searchParams)
+    next.delete("status")
+    setSearchParams(next, { replace: true })
+  }
 
   const create = useMutation({
     mutationFn: () =>
@@ -86,37 +125,67 @@ export function InterviewsPage() {
             Configure dynamic questioning rails, dispatch invites, and monitor real-time AI sessions.
           </p>
         </div>
-        <Button
-          onClick={() => {
-            if (passed.length > 0) {
-              setSelectedApp(passed[0])
-              setCreated(null)
-              setOpen(true)
-            }
-          }}
-          disabled={passed.length === 0}
-          variant="gradient"
-          className="shadow-md shadow-primary/20"
-        >
-          <Plus className="mr-1.5 h-4 w-4" weight="bold" /> New Interview Session
-        </Button>
+        <div className="flex flex-col items-end gap-1.5">
+          <Button
+            onClick={() => {
+              if (passed.length > 0) {
+                setSelectedApp(passed[0])
+                setCreated(null)
+                setOpen(true)
+              }
+            }}
+            disabled={passed.length === 0}
+            variant="gradient"
+            className="shadow-md shadow-primary/20"
+          >
+            <Plus className="mr-1.5 h-4 w-4" weight="bold" /> New Interview Session
+          </Button>
+          {passed.length === 0 && (
+            <p className="text-xs text-muted-foreground" aria-live="polite">
+              No candidates passed screening yet
+            </p>
+          )}
+        </div>
       </div>
 
+      {statusFilter !== "all" && (
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <Badge variant="outline" className="gap-1 border-primary/30 bg-primary/5 text-primary">
+            Filtered: {statusFilter}
+            <button
+              type="button"
+              onClick={clearStatusFilter}
+              aria-label="Clear interview status filter"
+              className="rounded-full p-0.5 hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
+            >
+              <X className="h-3 w-3" />
+            </button>
+          </Badge>
+          <span>{filteredInterviews.length} session{filteredInterviews.length === 1 ? "" : "s"}</span>
+        </div>
+      )}
+
       {/* Navigation Tabs */}
-      <div className="flex items-center gap-2 border-b border-border/60 pb-3">
+      <div role="tablist" aria-label="Interview operations" className="flex items-center gap-2 border-b border-border/60 pb-3">
         <Button
           variant={tab === "interviews" ? "secondary" : "ghost"}
           size="sm"
           className="text-xs gap-1.5"
+          role="tab"
+          aria-selected={tab === "interviews"}
+          tabIndex={tab === "interviews" ? 0 : -1}
           onClick={() => setTab("interviews")}
         >
           <ChatCircleText className="h-4 w-4" weight="bold" />
-          Active & Completed Sessions ({createdInterviews?.length ?? 0})
+          Active & Completed Sessions ({filteredInterviews.length})
         </Button>
         <Button
           variant={tab === "eligible" ? "secondary" : "ghost"}
           size="sm"
           className="text-xs gap-1.5"
+          role="tab"
+          aria-selected={tab === "eligible"}
+          tabIndex={tab === "eligible" ? 0 : -1}
           onClick={() => setTab("eligible")}
         >
           <UsersThree className="h-4 w-4" weight="bold" />
@@ -128,12 +197,14 @@ export function InterviewsPage() {
         <div className="space-y-4">
           {loadingList ? (
             <Skeleton className="h-48 w-full rounded-xl" />
-          ) : !createdInterviews?.length ? (
+          ) : !filteredInterviews.length ? (
             <div className="rounded-2xl border border-dashed border-border/80 p-12 text-center">
               <ChatCircleText className="mx-auto h-12 w-12 text-muted-foreground/40 mb-3" />
               <p className="font-display font-semibold text-base">No interviews generated yet</p>
               <p className="text-xs text-muted-foreground mt-1 max-w-sm mx-auto">
-                {passed.length > 0
+                {statusFilter !== "all"
+                  ? `No interview sessions with status "${statusFilter}".`
+                  : passed.length > 0
                   ? "You have candidates who passed screening ready for interviews! Switch to 'Eligible Candidates' tab to invite them."
                   : "Upload CVs and screen candidates first. Once they pass screening, you can schedule interviews."}
               </p>
@@ -152,7 +223,7 @@ export function InterviewsPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {createdInterviews.map((iv) => (
+                  {filteredInterviews.map((iv) => (
                     <TableRow key={iv.interview_id} className="transition-colors hover:bg-muted/40">
                       <TableCell className="font-medium">
                         <div className="flex items-center gap-2.5">
@@ -241,7 +312,13 @@ export function InterviewsPage() {
                 </TableHeader>
                 <TableBody>
                   {passed.map((app) => (
-                    <TableRow key={app.id} className="transition-colors hover:bg-muted/40">
+                    <TableRow
+                      key={app.id}
+                      className={cn(
+                        "transition-colors hover:bg-muted/40",
+                        highlightedAppId === app.id && "bg-primary/5 ring-2 ring-primary/40 ring-inset"
+                      )}
+                    >
                       <TableCell className="font-medium">{app.candidate_name}</TableCell>
                       <TableCell className="text-xs text-muted-foreground">{app.job_title}</TableCell>
                       <TableCell>
@@ -292,11 +369,11 @@ export function InterviewsPage() {
                     <Label className="text-xs font-semibold flex items-center gap-1.5">
                       <ChatCircleText className="h-4 w-4 text-primary" weight="bold" /> Chat Interview Link
                     </Label>
-                    <Badge variant="secondary" className="text-[10px]">Candidate Portal</Badge>
+                    <Badge variant="secondary" className="text-xs">Candidate Portal</Badge>
                   </div>
                   <div className="flex gap-1.5">
                     <Input readOnly value={chatInviteUrl(created.interview_id, created.invitation_token)} className="text-xs bg-background" />
-                    <Button size="sm" variant="outline" onClick={() => copyText(chatInviteUrl(created.interview_id, created.invitation_token), "Chat link")}>
+                    <Button size="sm" variant="outline" onClick={() => copyText(chatInviteUrl(created.interview_id, created.invitation_token), "Chat link")} aria-label="Copy chat invite link">
                       <Copy className="h-3.5 w-3.5" />
                     </Button>
                   </div>
@@ -339,7 +416,7 @@ export function InterviewsPage() {
                     onChange={(e) => setCount(e.target.value)}
                     className="bg-background/80"
                   />
-                  <p className="text-[11px] text-muted-foreground">
+                  <p className="text-xs text-muted-foreground">
                     DeepSeek will synthesize CV-gap questions tailored to the candidate's missing competencies.
                   </p>
                 </div>
