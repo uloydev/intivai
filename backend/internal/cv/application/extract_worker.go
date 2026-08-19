@@ -135,14 +135,25 @@ func (w *ExtractWorker) handle(ctx context.Context, t *asynq.Task) error {
 	// (re-running the LLM is safe: applications dedupe, status re-marks).
 	// Deterministic TaskIDs make a retry-after-partial-failure re-run a no-op
 	// for tasks that already committed (asynq unique-enqueue).
-	// Enqueue email for candidate review (magic link)
-	c, _ := w.candRepo.GetByID(ctx, candID)
-	if c != nil && c.Email != "" && c.ReviewToken != nil {
-		inviteURL := fmt.Sprintf("%s/candidate-review/%s", strings.TrimSuffix(w.publicURL, "/"), *c.ReviewToken)
+	// Enqueue email for candidate review (magic link). The candidate is
+	// re-read INSIDE a tenant tx — workers have no HTTP tenant-tx middleware,
+	// and a bare GetByID here silently returned ErrNoTx (email never sent).
+	var reviewEmail, reviewName string
+	var reviewToken *string
+	err = db.RunInTx(ctx, w.pool, p.OrgID, func(tctx context.Context) error {
+		c, err := w.candRepo.GetByID(tctx, candID)
+		if err != nil {
+			return err
+		}
+		reviewEmail, reviewName, reviewToken = c.Email, c.Name, c.ReviewToken
+		return nil
+	})
+	if err == nil && reviewEmail != "" && reviewToken != nil {
+		inviteURL := fmt.Sprintf("%s/candidate-review/%s", strings.TrimSuffix(w.publicURL, "/"), *reviewToken)
 		if _, err := w.queue.Enqueue(ctx, notifapp.TaskSendEmail, notifapp.SendEmailPayload{
 			Type:          notifapp.EmailTypeCandidateReview,
-			To:            c.Email,
-			CandidateName: c.Name,
+			To:            reviewEmail,
+			CandidateName: reviewName,
 			InviteURL:     inviteURL,
 		}, asynq.MaxRetry(5)); err != nil {
 			w.log.Error().Err(err).Msg("failed to enqueue candidate review email")
