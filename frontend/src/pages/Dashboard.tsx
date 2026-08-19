@@ -19,6 +19,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
+import { cn } from "@/lib/utils"
 
 export function DashboardPage() {
   const { data: jobs, isLoading: loadingJobs } = useQuery({
@@ -379,32 +380,41 @@ export function DashboardPage() {
               <CardTitle className="font-display text-sm flex items-center justify-between">
                 <span>Infrastructure Telemetry</span>
                 <span className="flex h-2 w-2 relative">
-                  <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${health === 'healthy' ? 'bg-emerald-400' : 'bg-amber-400'}`} />
-                  <span className={`relative inline-flex rounded-full h-2 w-2 ${health === 'healthy' ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+                  <span
+                    className={cn(
+                      "animate-ping absolute inline-flex h-full w-full rounded-full opacity-75",
+                      health === "healthy" ? "bg-emerald-400" : "bg-amber-400"
+                    )}
+                  />
+                  <span
+                    className={cn(
+                      "relative inline-flex rounded-full h-2 w-2",
+                      health === "healthy" ? "bg-emerald-500" : "bg-amber-500"
+                    )}
+                  />
                 </span>
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-2.5 text-xs">
-              <div className="flex items-center justify-between py-1 border-b border-border/40">
-                <span className="text-muted-foreground">Go REST & WS Server</span>
-                <Badge variant="outline" className="text-[10px] text-emerald-500 border-emerald-500/30">Online (:8081)</Badge>
-              </div>
-              <div className="flex items-center justify-between py-1 border-b border-border/40">
-                <span className="text-muted-foreground">PostgreSQL + pgvector</span>
-                <Badge variant="outline" className="text-[10px] text-emerald-500 border-emerald-500/30">Healthy (RLS)</Badge>
-              </div>
-              <div className="flex items-center justify-between py-1 border-b border-border/40">
-                <span className="text-muted-foreground">Redis & Asynq Workers</span>
-                <Badge variant="outline" className="text-[10px] text-emerald-500 border-emerald-500/30">Connected</Badge>
-              </div>
-              <div className="flex items-center justify-between py-1 border-b border-border/40">
-                <span className="text-muted-foreground">MinIO Object Storage</span>
-                <Badge variant="outline" className="text-[10px] text-emerald-500 border-emerald-500/30">Online (S3)</Badge>
-              </div>
               <div className="flex items-center justify-between py-1">
-                <span className="text-muted-foreground">Whisper STT Server</span>
-                <Badge variant="outline" className="text-[10px] text-blue-500 border-blue-500/30">Docker Sidecar</Badge>
+                <span className="text-muted-foreground">Application, Postgres, Redis & MinIO</span>
+                {health === "offline" ? (
+                  <Badge variant="outline" className="text-[10px] text-destructive border-destructive/30">
+                    Offline
+                  </Badge>
+                ) : health === "degraded" ? (
+                  <Badge variant="outline" className="text-[10px] text-amber-500 border-amber-500/30">
+                    Degraded
+                  </Badge>
+                ) : (
+                  <Badge variant="outline" className="text-[10px] text-emerald-500 border-emerald-500/30">
+                    Online
+                  </Badge>
+                )}
               </div>
+              <p className="text-[11px] text-muted-foreground leading-relaxed">
+                Live readiness probe — Postgres (RLS), Redis, and MinIO are pinged every 10 seconds via /ready.
+              </p>
             </CardContent>
           </Card>
         </div>

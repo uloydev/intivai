@@ -13,9 +13,41 @@ import {
   Calculator,
   Question,
 } from "@phosphor-icons/react"
+import type { Icon } from "@phosphor-icons/react"
 import { useTheme } from "@/lib/theme"
 import { Button } from "@/components/ui/button"
+import { cn } from "@/lib/utils"
 import { getToken } from "@/lib/auth"
+
+interface PublicNavItem {
+  to: string
+  label: string
+  section?: string
+  icon?: Icon
+  mobileClass?: string
+  mobileIconClass?: string
+  desktopIconClass?: string
+}
+
+// Single source of truth for both header lists — desktop links and the mobile
+// drawer render from the same array.
+const NAV: PublicNavItem[] = [
+  { to: "/", label: "Platform" },
+  { to: "/careers", label: "Careers & Jobs", icon: Briefcase, mobileClass: "text-foreground", mobileIconClass: "text-primary" },
+  {
+    to: "/candidate/portal",
+    label: "Track Applications",
+    icon: ShieldCheck,
+    mobileClass: "text-cyan-400 hover:text-cyan-300",
+    mobileIconClass: "text-cyan-400",
+    desktopIconClass: "text-cyan-500",
+  },
+  { to: "/#demo", label: "AI Evaluator", section: "demo", icon: Sparkle, mobileIconClass: "text-primary" },
+  { to: "/#how-it-works", label: "How it Works", section: "how-it-works" },
+  { to: "/#features", label: "Intelligence", section: "features", icon: Cpu },
+  { to: "/#calculator", label: "ROI Calculator", section: "calculator", icon: Calculator },
+  { to: "/#faq", label: "FAQ", section: "faq", icon: Question },
+]
 
 export function PublicLayout() {
   const { theme, toggle } = useTheme()
@@ -36,6 +68,50 @@ export function PublicLayout() {
     } else {
       navigate(`/#${sectionId}`)
     }
+  }
+
+  const renderNavLink = (item: PublicNavItem, viewport: "desktop" | "mobile") => {
+    const Icon = item.icon
+    const isMobile = viewport === "mobile"
+    const active =
+      !item.section &&
+      (item.to === "/"
+        ? location.pathname === "/" && !location.hash
+        : location.pathname.startsWith(item.to))
+    const className = isMobile
+      ? cn(
+          "py-1.5 hover:text-primary transition-colors",
+          item.mobileClass ?? (item.section ? "text-muted-foreground" : "text-foreground"),
+          Icon && "flex items-center gap-2"
+        )
+      : cn(
+          "transition-colors hover:text-primary",
+          Icon && "flex items-center gap-1.5",
+          active ? "text-primary font-bold" : "text-muted-foreground"
+        )
+    return (
+      <Link
+        key={item.to}
+        to={item.to}
+        onClick={(e) => {
+          if (isMobile) setMobileMenuOpen(false)
+          if (item.section) {
+            handleSectionClick(item.section, e)
+          } else if (item.to === "/" && location.pathname === "/") {
+            e.preventDefault()
+            window.scrollTo({ top: 0, behavior: "smooth" })
+          }
+        }}
+        className={className}
+      >
+        {Icon && (
+          <Icon
+            className={isMobile ? cn("h-4 w-4", item.mobileIconClass) : cn("h-3.5 w-3.5", item.desktopIconClass)}
+          />
+        )}
+        {item.label}
+      </Link>
+    )
   }
 
   return (
@@ -62,65 +138,7 @@ export function PublicLayout() {
 
         {/* Desktop Navigation Links */}
         <nav className="hidden items-center gap-7 text-xs font-semibold lg:flex">
-          <Link
-            to="/"
-            onClick={(e) => {
-              if (location.pathname === "/") {
-                e.preventDefault()
-                window.scrollTo({ top: 0, behavior: "smooth" })
-              }
-            }}
-            className={`transition-colors hover:text-primary ${location.pathname === "/" && !location.hash ? "text-primary font-bold" : "text-muted-foreground"}`}
-          >
-            Platform
-          </Link>
-          <Link
-            to="/careers"
-            className={`transition-colors hover:text-primary flex items-center gap-1.5 ${location.pathname.startsWith("/careers") ? "text-primary font-bold" : "text-muted-foreground"}`}
-          >
-            <Briefcase className="h-3.5 w-3.5" /> Careers & Jobs
-          </Link>
-          <Link
-            to="/candidate/portal"
-            className={`transition-colors hover:text-primary flex items-center gap-1.5 ${location.pathname.startsWith("/candidate/portal") ? "text-primary font-bold" : "text-muted-foreground"}`}
-          >
-            <ShieldCheck className="h-3.5 w-3.5 text-cyan-500" /> Track Applications
-          </Link>
-          <Link
-            to="/#demo"
-            onClick={(e) => handleSectionClick("demo", e)}
-            className="text-muted-foreground transition-colors hover:text-primary flex items-center gap-1"
-          >
-            <Sparkle className="h-3.5 w-3.5 text-primary" weight="fill" /> AI Evaluator
-          </Link>
-          <Link
-            to="/#how-it-works"
-            onClick={(e) => handleSectionClick("how-it-works", e)}
-            className="text-muted-foreground transition-colors hover:text-primary"
-          >
-            How it Works
-          </Link>
-          <Link
-            to="/#features"
-            onClick={(e) => handleSectionClick("features", e)}
-            className="text-muted-foreground transition-colors hover:text-primary flex items-center gap-1"
-          >
-            <Cpu className="h-3.5 w-3.5" /> Intelligence
-          </Link>
-          <Link
-            to="/#calculator"
-            onClick={(e) => handleSectionClick("calculator", e)}
-            className="text-muted-foreground transition-colors hover:text-primary flex items-center gap-1"
-          >
-            <Calculator className="h-3.5 w-3.5" /> ROI Calculator
-          </Link>
-          <Link
-            to="/#faq"
-            onClick={(e) => handleSectionClick("faq", e)}
-            className="text-muted-foreground transition-colors hover:text-primary flex items-center gap-1"
-          >
-            <Question className="h-3.5 w-3.5" /> FAQ
-          </Link>
+          {NAV.map((item) => renderNavLink(item, "desktop"))}
         </nav>
 
         {/* Right Action Icons & Auth / Workspace Buttons */}
@@ -169,62 +187,7 @@ export function PublicLayout() {
       {mobileMenuOpen && (
         <div className="lg:hidden border-b border-border/60 bg-background/95 backdrop-blur-xl px-6 py-5 space-y-4 animate-in slide-in-from-top-2 duration-200 z-40 sticky top-16">
           <nav className="flex flex-col space-y-3 text-sm font-semibold">
-            <Link
-              to="/"
-              onClick={() => setMobileMenuOpen(false)}
-              className="py-1.5 text-foreground hover:text-primary transition-colors"
-            >
-              Platform Overview
-            </Link>
-            <Link
-              to="/careers"
-              onClick={() => setMobileMenuOpen(false)}
-              className="py-1.5 text-foreground hover:text-primary transition-colors flex items-center gap-2"
-            >
-              <Briefcase className="h-4 w-4 text-primary" /> Careers & Open Roles
-            </Link>
-            <Link
-              to="/candidate/portal"
-              onClick={() => setMobileMenuOpen(false)}
-              className="py-1.5 text-cyan-400 hover:text-cyan-300 transition-colors flex items-center gap-2"
-            >
-              <ShieldCheck className="h-4 w-4 text-cyan-400" /> Track Applications (Portal)
-            </Link>
-            <Link
-              to="/#demo"
-              onClick={(e) => handleSectionClick("demo", e)}
-              className="py-1.5 text-muted-foreground hover:text-primary transition-colors flex items-center gap-2"
-            >
-              <Sparkle className="h-4 w-4 text-primary" weight="fill" /> Interactive Evaluator
-            </Link>
-            <Link
-              to="/#how-it-works"
-              onClick={(e) => handleSectionClick("how-it-works", e)}
-              className="py-1.5 text-muted-foreground hover:text-primary transition-colors"
-            >
-              How It Works
-            </Link>
-            <Link
-              to="/#features"
-              onClick={(e) => handleSectionClick("features", e)}
-              className="py-1.5 text-muted-foreground hover:text-primary transition-colors flex items-center gap-2"
-            >
-              <Cpu className="h-4 w-4" /> AI Intelligence & Architecture
-            </Link>
-            <Link
-              to="/#calculator"
-              onClick={(e) => handleSectionClick("calculator", e)}
-              className="py-1.5 text-muted-foreground hover:text-primary transition-colors flex items-center gap-2"
-            >
-              <Calculator className="h-4 w-4" /> ROI Calculator
-            </Link>
-            <Link
-              to="/#faq"
-              onClick={(e) => handleSectionClick("faq", e)}
-              className="py-1.5 text-muted-foreground hover:text-primary transition-colors flex items-center gap-2"
-            >
-              <Question className="h-4 w-4" /> FAQ
-            </Link>
+            {NAV.map((item) => renderNavLink(item, "mobile"))}
           </nav>
 
           <div className="pt-3 border-t border-border/50 flex flex-col gap-2">

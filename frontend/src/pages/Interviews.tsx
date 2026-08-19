@@ -2,7 +2,6 @@ import { useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   ChatCircleText,
-  MicrophoneStage,
   Copy,
   Plus,
   ArrowSquareOut,
@@ -13,9 +12,12 @@ import {
 } from "@phosphor-icons/react"
 import { Link } from "react-router-dom"
 import { api } from "@/lib/api"
+import { copyText } from "@/lib/clipboard"
+import { chatInviteUrl } from "@/lib/invites"
 import type { Application, CreateInterviewResult, InterviewListItem } from "@/types/api"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { RecommendationBadge } from "@/components/ui/RecommendationBadge"
 import {
   Dialog,
   DialogContent,
@@ -36,14 +38,6 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { toast } from "sonner"
-
-function chatInviteUrl(iv: CreateInterviewResult): string {
-  return `${window.location.origin}/invite/${iv.interview_id}?t=${encodeURIComponent(iv.invitation_token)}`
-}
-
-function voiceInviteUrl(iv: CreateInterviewResult): string {
-  return `${window.location.origin}/voice/${iv.interview_id}`
-}
 
 export function InterviewsPage() {
   const qc = useQueryClient()
@@ -81,15 +75,6 @@ export function InterviewsPage() {
     },
     onError: (e) => toast.error(e instanceof Error ? e.message : "Create failed"),
   })
-
-  async function copyText(text: string, label: string) {
-    try {
-      await navigator.clipboard.writeText(text)
-      toast.success(`${label} copied to clipboard`)
-    } catch {
-      toast.error("Copy failed — please copy manually")
-    }
-  }
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
@@ -208,15 +193,7 @@ export function InterviewsPage() {
                       </TableCell>
                       <TableCell>
                         {iv.evaluation ? (
-                          <Badge
-                            className={
-                              iv.evaluation.recommendation === "proceed"
-                                ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20 text-xs font-bold capitalize"
-                                : "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20 text-xs font-bold capitalize"
-                            }
-                          >
-                            {iv.evaluation.recommendation.replace("_", " ")}
-                          </Badge>
+                          <RecommendationBadge recommendation={iv.evaluation.recommendation} className="capitalize" />
                         ) : (
                           <span className="text-xs text-muted-foreground">Pending</span>
                         )}
@@ -226,11 +203,6 @@ export function InterviewsPage() {
                           <Button asChild size="sm" variant="ghost" className="h-8 text-xs text-primary gap-1">
                             <Link to={`/interviews/${iv.interview_id}`}>
                               Scorecard <ArrowSquareOut className="h-3.5 w-3.5" />
-                            </Link>
-                          </Button>
-                          <Button asChild size="sm" variant="outline" className="h-8 text-xs gap-1 border-blue-500/30 text-blue-600 dark:text-blue-400 hover:bg-blue-500/10">
-                            <Link to={`/voice/${iv.interview_id}`} target="_blank">
-                              <MicrophoneStage className="h-3.5 w-3.5" /> Voice Sim
                             </Link>
                           </Button>
                         </div>
@@ -323,23 +295,8 @@ export function InterviewsPage() {
                     <Badge variant="secondary" className="text-[10px]">Candidate Portal</Badge>
                   </div>
                   <div className="flex gap-1.5">
-                    <Input readOnly value={chatInviteUrl(created)} className="text-xs bg-background" />
-                    <Button size="sm" variant="outline" onClick={() => copyText(chatInviteUrl(created), "Chat link")}>
-                      <Copy className="h-3.5 w-3.5" />
-                    </Button>
-                  </div>
-                </div>
-
-                <div className="rounded-xl border border-blue-500/20 bg-blue-500/5 p-3.5 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <Label className="text-xs font-semibold flex items-center gap-1.5">
-                      <MicrophoneStage className="h-4 w-4 text-blue-500" weight="bold" /> Voice Interview Link
-                    </Label>
-                    <Badge variant="secondary" className="text-[10px] bg-blue-500/10 text-blue-600 dark:text-blue-400">WebRTC Live</Badge>
-                  </div>
-                  <div className="flex gap-1.5">
-                    <Input readOnly value={voiceInviteUrl(created)} className="text-xs bg-background" />
-                    <Button size="sm" variant="outline" onClick={() => copyText(voiceInviteUrl(created), "Voice link")}>
+                    <Input readOnly value={chatInviteUrl(created.interview_id, created.invitation_token)} className="text-xs bg-background" />
+                    <Button size="sm" variant="outline" onClick={() => copyText(chatInviteUrl(created.interview_id, created.invitation_token), "Chat link")}>
                       <Copy className="h-3.5 w-3.5" />
                     </Button>
                   </div>

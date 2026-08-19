@@ -70,12 +70,14 @@ export function TestCaseManager({ testCases, results, onUpdateTestCases }: TestC
               )}
               <span>Case {idx + 1}</span>
               {testCases.length > 1 && (
-                <span
+                <button
+                  type="button"
+                  aria-label={`Remove test case ${idx + 1}`}
                   onClick={(e) => removeTestCase(idx, e)}
-                  className="hover:text-rose-400 p-0.5 rounded ml-0.5 text-neutral-500"
+                  className="hover:text-rose-400 p-0.5 rounded ml-0.5 text-neutral-500 transition-colors"
                 >
                   <Trash2 className="w-3 h-3" />
-                </span>
+                </button>
               )}
             </button>
           )

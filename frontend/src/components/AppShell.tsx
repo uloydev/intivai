@@ -10,7 +10,7 @@ import {
   Sun,
   Moon,
 } from "@phosphor-icons/react"
-import { getSession, logout } from "@/lib/auth"
+import { getSession, logout, decodePayload } from "@/lib/auth"
 import { useTheme } from "@/lib/theme"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -36,12 +36,8 @@ export function AppShell() {
   const email = (() => {
     const token = session?.token
     if (!token) return "Signed out"
-    try {
-      const claims = JSON.parse(atob(token.split(".")[1]))
-      return String(claims.email ?? claims.sub ?? "")
-    } catch {
-      return ""
-    }
+    const claims = decodePayload(token.split(".")[1])
+    return String(claims?.email ?? claims?.sub ?? "")
   })()
 
   return (
@@ -143,6 +139,7 @@ export function AppShell() {
             <Button
               variant="ghost"
               size="icon"
+              aria-label="Sign out"
               className="rounded-full h-8 w-8 text-muted-foreground hover:text-destructive"
               onClick={() => {
                 logout()

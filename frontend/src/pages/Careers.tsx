@@ -20,6 +20,7 @@ import {
 } from "@phosphor-icons/react"
 import { api } from "@/lib/api"
 import type { PublicJob } from "@/types/api"
+import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -126,6 +127,11 @@ export function CareersPage() {
     setDetailModalOpen(true)
   }
 
+  // Compute once per render, not twice inside the details modal.
+  const selectedSalary = selectedJob
+    ? formatSalary(selectedJob.salary_min, selectedJob.salary_max, selectedJob.currency)
+    : null
+
   function formatSalary(min?: number | null, max?: number | null, cur?: string) {
     if (!min && !max) return null
     const c = cur || "USD"
@@ -146,7 +152,7 @@ export function CareersPage() {
           Join High-Growth Engineering Teams
         </h1>
         <p className="text-sm sm:text-base text-muted-foreground leading-relaxed">
-          Browse verified technical openings with transparent salary ranges, detailed engineering requirements, and instant AI screening feedback.
+          Browse verified technical openings with transparent salary ranges and detailed engineering requirements. You'll receive email updates as your application progresses.
         </p>
 
         <div className="pt-2 flex items-center justify-center gap-3">
@@ -181,11 +187,12 @@ export function CareersPage() {
           <button
             type="button"
             onClick={() => setSelectedSkill("all")}
-            className={`text-xs rounded-full px-3 py-1 font-medium transition-all ${
+            className={cn(
+              "text-xs rounded-full px-3 py-1 font-medium transition-all",
               selectedSkill === "all"
                 ? "bg-primary text-primary-foreground shadow-sm"
                 : "bg-muted hover:bg-muted/80 text-muted-foreground"
-            }`}
+            )}
           >
             All Disciplines
           </button>
@@ -194,11 +201,12 @@ export function CareersPage() {
               key={skill}
               type="button"
               onClick={() => setSelectedSkill(skill)}
-              className={`text-xs rounded-full px-3 py-1 font-medium transition-all ${
+              className={cn(
+                "text-xs rounded-full px-3 py-1 font-medium transition-all",
                 selectedSkill === skill
                   ? "bg-primary text-primary-foreground shadow-sm"
                   : "bg-muted hover:bg-muted/80 text-muted-foreground"
-              }`}
+              )}
             >
               {skill}
             </button>
@@ -330,10 +338,10 @@ export function CareersPage() {
                 <DialogTitle className="font-display text-2xl font-bold">
                   {selectedJob.title}
                 </DialogTitle>
-                {formatSalary(selectedJob.salary_min, selectedJob.salary_max, selectedJob.currency) && (
+                {selectedSalary && (
                   <div className="pt-2">
                     <span className="px-3 py-1 rounded-xl bg-emerald-950/40 border border-emerald-800/50 text-emerald-300 font-bold text-xs">
-                      💰 {formatSalary(selectedJob.salary_min, selectedJob.salary_max, selectedJob.currency)}
+                      💰 {selectedSalary}
                     </span>
                   </div>
                 )}

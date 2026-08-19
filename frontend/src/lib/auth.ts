@@ -13,7 +13,7 @@ export interface Session {
 // base64url → binary string. JWTs strip '=' padding; atob REQUIRES it —
 // decoding without padding intermittently throws (payload length % 4 != 0),
 // which would log out users with perfectly valid tokens.
-function decodePayload(payload: string): Record<string, unknown> | null {
+export function decodePayload(payload: string): Record<string, unknown> | null {
   const b64 = payload.replace(/-/g, "+").replace(/_/g, "/")
   const padded = b64 + "=".repeat((4 - (b64.length % 4)) % 4)
   try {

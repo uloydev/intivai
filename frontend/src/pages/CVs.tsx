@@ -12,6 +12,7 @@ import {
   Briefcase,
   Trash,
   Files,
+  Clock,
 } from "@phosphor-icons/react"
 import { api } from "@/lib/api"
 import type { CVListItem, Job } from "@/types/api"
@@ -31,7 +32,8 @@ import { Label } from "@/components/ui/label"
 import { Skeleton } from "@/components/ui/skeleton"
 import { toast } from "sonner"
 
-const POLL_STATUSES = new Set(["parsing", "extracting", "extracting_llm"])
+const POLL_STATUSES = new Set(["new", "parsing", "extracting", "pending_review"])
+const QUEUE_STATUSES = new Set(["new", "pending_review"])
 
 function statusBadge(status: string) {
   if (status === "parsed" || status === "extracted") {
@@ -45,6 +47,15 @@ function statusBadge(status: string) {
     return (
       <Badge variant="destructive" className="gap-1">
         <XCircle className="h-3 w-3" weight="fill" /> {status}
+      </Badge>
+    )
+  }
+  if (QUEUE_STATUSES.has(status)) {
+    // Queued states can sit for a while (extraction backlog, candidate
+    // review) — a static badge instead of an infinite pulsing spinner.
+    return (
+      <Badge variant="secondary" className="bg-sky-500/10 text-sky-600 dark:text-sky-400 border-sky-500/20 gap-1">
+        <Clock className="h-3 w-3" /> {status === "pending_review" ? "Pending review" : "In queue"}
       </Badge>
     )
   }
