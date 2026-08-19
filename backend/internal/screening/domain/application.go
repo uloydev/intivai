@@ -25,6 +25,9 @@ type Application struct {
 	Status          string
 	Stage           *string
 	RecruiterNotes  *string
+	// InterviewScore — the completed interview's overall score (evaluation
+	// JSONB), populated by the list query; NOT stored on this row.
+	InterviewScore *float64
 }
 
 func NewApplication(orgID, candidateID, jobID uuid.UUID) *Application {

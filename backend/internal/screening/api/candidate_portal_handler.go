@@ -3,9 +3,7 @@ package api
 import (
 	"crypto/rand"
 	"crypto/sha256"
-	"database/sql"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"math/big"
 	"strings"
@@ -13,36 +11,39 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
+	"github.com/hibiken/asynq"
 	iamapp "github.com/intivai/backend/internal/iam/application"
 	notifapp "github.com/intivai/backend/internal/notification/application"
+	scrdomain "github.com/intivai/backend/internal/screening/domain"
 	sharederr "github.com/intivai/backend/internal/shared/errors"
 	"github.com/intivai/backend/internal/shared/httpapi"
 	"github.com/intivai/backend/pkg/queue"
-	"gorm.io/gorm"
+	"github.com/rs/zerolog/log"
 )
 
 const (
 	otpTTL            = 10 * time.Minute
 	otpResendCooldown = 60 * time.Second
 	maxOTPAttempts    = 5
+	maxOTPDaily       = 5 // per-email daily cap (spam hardening)
 	candidateTokenTTL = 7 * 24 * time.Hour
 )
 
 type CandidatePortalHandler struct {
-	pool      *gorm.DB
+	repo      scrdomain.CandidatePortalRepository
 	tokens    iamapp.TokenProvider
 	queue     *queue.Client
 	publicURL string
 }
 
 func NewCandidatePortalHandler(
-	pool *gorm.DB,
+	repo scrdomain.CandidatePortalRepository,
 	tokens iamapp.TokenProvider,
 	q *queue.Client,
 	publicURL string,
 ) *CandidatePortalHandler {
 	return &CandidatePortalHandler{
-		pool:      pool,
+		repo:      repo,
 		tokens:    tokens,
 		queue:     q,
 		publicURL: strings.TrimSuffix(publicURL, "/"),
@@ -70,16 +71,24 @@ func (h *CandidatePortalHandler) RequestOTP(c *fiber.Ctx) error {
 		return httpapi.Error(c, sharederr.NewDomainError("BAD_REQUEST", "valid email address is required"))
 	}
 
-	// Per-email resend cooldown + purge of consumed/expired rows (unbounded
-	// OTP emailing is an abuse vector).
-	var lastCreated sql.NullTime
-	_ = h.pool.WithContext(c.UserContext()).Raw(
-		`SELECT MAX(created_at) FROM candidate_otps WHERE LOWER(email) = ? AND used_at IS NULL`, email).Row().Scan(&lastCreated)
-	if lastCreated.Valid && time.Since(lastCreated.Time) < otpResendCooldown {
+	// Abuse rails: resend cooldown, daily cap, purge of consumed/expired rows.
+	last, err := h.repo.LastRequestAt(c.UserContext(), email)
+	if err != nil {
+		return httpapi.Error(c, sharederr.NewDomainError("INTERNAL_ERROR", "failed to check otp cooldown"))
+	}
+	if last != nil && time.Since(*last) < otpResendCooldown {
 		return httpapi.Error(c, sharederr.NewDomainError("TOO_MANY_REQUESTS", "please wait before requesting another code"))
 	}
-	_ = h.pool.WithContext(c.UserContext()).Exec(
-		`DELETE FROM candidate_otps WHERE LOWER(email) = ? AND (expires_at < NOW() OR used_at IS NOT NULL)`, email)
+	issued, err := h.repo.OTPCountSince(c.UserContext(), email, time.Now().Add(-24*time.Hour))
+	if err != nil {
+		return httpapi.Error(c, sharederr.NewDomainError("INTERNAL_ERROR", "failed to check otp usage"))
+	}
+	if issued >= maxOTPDaily {
+		return httpapi.Error(c, sharederr.NewDomainError("TOO_MANY_REQUESTS", "daily verification code limit reached"))
+	}
+	if err := h.repo.PurgeExpired(c.UserContext(), email); err != nil {
+		return httpapi.Error(c, sharederr.NewDomainError("INTERNAL_ERROR", "failed to purge expired codes"))
+	}
 
 	// Generate secure 6-digit OTP; store only its hash (plaintext codes in
 	// the DB would be trivially brute-forced if the table leaks).
@@ -91,25 +100,23 @@ func (h *CandidatePortalHandler) RequestOTP(c *fiber.Ctx) error {
 	magicToken := uuid.NewString()
 	expiresAt := time.Now().UTC().Add(otpTTL)
 
-	err = h.pool.WithContext(c.UserContext()).Exec(
-		`INSERT INTO candidate_otps (id, email, code_hash, token, expires_at, created_at)
-		 VALUES (?, ?, ?, ?, ?, NOW())`,
-		uuid.New(), email, otpHash(code), magicToken, expiresAt,
-	).Error
-	if err != nil {
+	if err := h.repo.CreateOTP(c.UserContext(), email, otpHash(code), magicToken, expiresAt); err != nil {
 		return httpapi.Error(c, sharederr.NewDomainError("INTERNAL_ERROR", "failed to record otp"))
 	}
 
 	magicLink := fmt.Sprintf("%s/candidate/portal?token=%s", h.publicURL, magicToken)
 
-	// Dispatch email asynchronously
+	// Dispatch email asynchronously — a failed enqueue must not silently
+	// strand the candidate without a code.
 	if h.queue != nil {
-		_, _ = h.queue.Enqueue(c.UserContext(), notifapp.TaskSendEmail, notifapp.SendEmailPayload{
+		if _, err := h.queue.Enqueue(c.UserContext(), notifapp.TaskSendEmail, notifapp.SendEmailPayload{
 			Type:      notifapp.EmailTypeCandidateOTP,
 			To:        email,
 			OTPCode:   code,
 			MagicLink: magicLink,
-		})
+		}, asynq.MaxRetry(5)); err != nil {
+			log.Warn().Err(err).Str("email", email).Msg("enqueue candidate_otp email failed")
+		}
 	}
 
 	return httpapi.OK(c, fiber.Map{
@@ -136,63 +143,47 @@ func (h *CandidatePortalHandler) VerifyOTP(c *fiber.Ctx) error {
 	code := strings.TrimSpace(req.Code)
 	token := strings.TrimSpace(req.Token)
 
-	var (
-		otpID     uuid.UUID
-		userEmail string
-		attempts  int
-	)
-	if token != "" {
-		row := h.pool.WithContext(c.UserContext()).Raw(
-			`SELECT id, email, attempts FROM candidate_otps
-			 WHERE token = ? AND used_at IS NULL AND expires_at > NOW()
-			 ORDER BY created_at DESC LIMIT 1`, token).Row()
-		if err := row.Scan(&otpID, &userEmail, &attempts); err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
-				return httpapi.Error(c, sharederr.NewDomainError("UNAUTHORIZED", "invalid or expired verification code"))
-			}
-			return httpapi.Error(c, sharederr.NewDomainError("INTERNAL_ERROR", "verification lookup failed"))
+	var otp *scrdomain.CandidateOTP
+	var err error
+	switch {
+	case token != "":
+		otp, err = h.repo.FindValidByToken(c.UserContext(), token)
+	case email != "" && code != "":
+		otp, err = h.repo.FindValidByCodeHash(c.UserContext(), email, otpHash(code))
+		if err == nil && otp == nil {
+			// Record the failed attempt against the latest live row so
+			// brute-force is bounded per email even with IP rotation.
+			_ = h.repo.IncrementAttempts(c.UserContext(), email)
 		}
-	} else if email != "" && code != "" {
-		row := h.pool.WithContext(c.UserContext()).Raw(
-			`SELECT id, email, attempts FROM candidate_otps
-			 WHERE LOWER(email) = ? AND code_hash = ? AND used_at IS NULL AND expires_at > NOW()
-			 ORDER BY created_at DESC LIMIT 1`, email, otpHash(code)).Row()
-		if err := row.Scan(&otpID, &userEmail, &attempts); err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
-				// Record the failed attempt against the latest live row so
-				// brute-force is bounded per email even with IP rotation.
-				_ = h.pool.WithContext(c.UserContext()).Exec(
-					`UPDATE candidate_otps SET attempts = attempts + 1
-					 WHERE LOWER(email) = ? AND used_at IS NULL AND expires_at > NOW()`, email)
-				return httpapi.Error(c, sharederr.NewDomainError("UNAUTHORIZED", "invalid or expired verification code"))
-			}
-			return httpapi.Error(c, sharederr.NewDomainError("INTERNAL_ERROR", "verification lookup failed"))
-		}
-	} else {
+	default:
 		return httpapi.Error(c, sharederr.NewDomainError("BAD_REQUEST", "provide either (email + code) or magic token"))
 	}
-
-	if attempts >= maxOTPAttempts {
+	if err != nil {
+		return httpapi.Error(c, sharederr.NewDomainError("INTERNAL_ERROR", "verification lookup failed"))
+	}
+	if otp == nil {
+		return httpapi.Error(c, sharederr.NewDomainError("UNAUTHORIZED", "invalid or expired verification code"))
+	}
+	if otp.Attempts >= maxOTPAttempts {
 		return httpapi.Error(c, sharederr.NewDomainError("TOO_MANY_REQUESTS", "too many attempts, request a new code"))
 	}
 
 	// Single-statement consume — two concurrent verifies cannot both pass
-	// (TOCTOU-safe; the update error is checked, not ignored).
-	res := h.pool.WithContext(c.UserContext()).Exec(
-		`UPDATE candidate_otps SET used_at = NOW() WHERE id = ? AND used_at IS NULL`, otpID)
-	if res.Error != nil {
+	// (TOCTOU-safe).
+	consumed, err := h.repo.Consume(c.UserContext(), otp.ID)
+	if err != nil {
 		return httpapi.Error(c, sharederr.NewDomainError("INTERNAL_ERROR", "failed to consume verification code"))
 	}
-	if res.RowsAffected == 0 {
+	if !consumed {
 		return httpapi.Error(c, sharederr.NewDomainError("UNAUTHORIZED", "invalid or expired verification code"))
 	}
 
 	// Issue candidate token (valid for 7 days). Subject is a deterministic
 	// uuid derived from the email so the token stays tied to one identity
 	// (uuid.Nil/random subjects could not be linked or revoked per candidate).
-	candidateID := uuid.NewSHA1(uuid.NameSpaceOID, []byte(userEmail))
+	candidateID := uuid.NewSHA1(uuid.NameSpaceOID, []byte(otp.Email))
 	extra := map[string]any{
-		"email": userEmail,
+		"email": otp.Email,
 	}
 	jwtToken, err := h.tokens.Issue(candidateID, uuid.Nil, "candidate", iamapp.TokenTypeCandidate, candidateTokenTTL, extra)
 	if err != nil {
@@ -201,7 +192,7 @@ func (h *CandidatePortalHandler) VerifyOTP(c *fiber.Ctx) error {
 
 	return httpapi.OK(c, fiber.Map{
 		"token":      jwtToken,
-		"email":      userEmail,
+		"email":      otp.Email,
 		"expires_at": time.Now().UTC().Add(candidateTokenTTL).Format(time.RFC3339),
 	})
 }
@@ -227,64 +218,49 @@ func (h *CandidatePortalHandler) RequireCandidateAuth(c *fiber.Ctx) error {
 	return c.Next()
 }
 
-type CandidateApplicationDTO struct {
-	ApplicationID     uuid.UUID  `json:"application_id"`
-	OrgID             uuid.UUID  `json:"org_id"`
-	OrgName           string     `json:"org_name"`
-	OrgSlug           string     `json:"org_slug"`
-	JobID             uuid.UUID  `json:"job_id"`
-	JobTitle          string     `json:"job_title"`
-	JobLocation       string     `json:"job_location"`
-	JobEmploymentType string     `json:"job_employment_type"`
-	CandidateID       uuid.UUID  `json:"candidate_id"`
-	CandidateName     string     `json:"candidate_name"`
-	CandidateEmail    string     `json:"candidate_email"`
-	CVScore           *float64   `json:"cv_score"`
-	PassedScreening   *bool      `json:"passed_screening"`
-	ApplicationStatus string     `json:"application_status"`
-	AppliedAt         string     `json:"applied_at"`
-	InterviewID       *uuid.UUID `json:"interview_id"`
-	InterviewStatus   *string    `json:"interview_status"`
-	InterviewType     *string    `json:"interview_type"`
-	InvitationToken   *string    `json:"invitation_token"`
-	OverallScore      *float64   `json:"overall_score"`
-	Recommendation    *string    `json:"recommendation"`
-}
-
 // ListApplications handles GET /api/v1/candidate/portal/applications
 func (h *CandidatePortalHandler) ListApplications(c *fiber.Ctx) error {
 	email, ok := c.Locals("candidate_email").(string)
 	if !ok || email == "" {
 		return httpapi.Error(c, sharederr.NewDomainError("UNAUTHORIZED", "unauthorized"))
 	}
-
-	rows, err := h.pool.WithContext(c.UserContext()).Raw(
-		`SELECT application_id, org_id, org_name, org_slug, job_id, job_title, job_location, job_employment_type,
-		        candidate_id, candidate_name, candidate_email, cv_score, passed_screening, application_status,
-		        applied_at, interview_id, interview_status, interview_type, invitation_token, overall_score, recommendation
-		 FROM candidate_applications_lookup(?)`, email).Rows()
+	apps, err := h.repo.ListApplications(c.UserContext(), email)
 	if err != nil {
 		return httpapi.Error(c, sharederr.NewDomainError("INTERNAL_ERROR", "internal server error"))
 	}
-	defer func() { _ = rows.Close() }()
+	return httpapi.OK(c, apps)
+}
 
-	out := []*CandidateApplicationDTO{}
-	for rows.Next() {
-		var a CandidateApplicationDTO
-		var appliedAt time.Time
-		if err := rows.Scan(
-			&a.ApplicationID, &a.OrgID, &a.OrgName, &a.OrgSlug, &a.JobID, &a.JobTitle, &a.JobLocation, &a.JobEmploymentType,
-			&a.CandidateID, &a.CandidateName, &a.CandidateEmail, &a.CVScore, &a.PassedScreening, &a.ApplicationStatus,
-			&appliedAt, &a.InterviewID, &a.InterviewStatus, &a.InterviewType, &a.InvitationToken, &a.OverallScore, &a.Recommendation,
-		); err != nil {
-			return httpapi.Error(c, sharederr.NewDomainError("INTERNAL_ERROR", "internal server error"))
-		}
-		a.AppliedAt = appliedAt.Format(time.RFC3339)
-		out = append(out, &a)
+// Export handles GET /api/v1/candidate/portal/export — GDPR Art.15 data
+// access: a machine-readable dump of everything the portal knows about the
+// candidate.
+func (h *CandidatePortalHandler) Export(c *fiber.Ctx) error {
+	email, ok := c.Locals("candidate_email").(string)
+	if !ok || email == "" {
+		return httpapi.Error(c, sharederr.NewDomainError("UNAUTHORIZED", "unauthorized"))
 	}
-	if err := rows.Err(); err != nil {
+	apps, err := h.repo.ListApplications(c.UserContext(), email)
+	if err != nil {
 		return httpapi.Error(c, sharederr.NewDomainError("INTERNAL_ERROR", "internal server error"))
 	}
+	return httpapi.OK(c, fiber.Map{
+		"email":        email,
+		"applications": apps,
+		"generated_at": time.Now().UTC().Format(time.RFC3339),
+	})
+}
 
-	return httpapi.OK(c, out)
+// DeleteMe handles DELETE /api/v1/candidate/portal/me — GDPR Art.17
+// right-to-erasure: removes the candidate (and all interview/application
+// data) across every org.
+func (h *CandidatePortalHandler) DeleteMe(c *fiber.Ctx) error {
+	email, ok := c.Locals("candidate_email").(string)
+	if !ok || email == "" {
+		return httpapi.Error(c, sharederr.NewDomainError("UNAUTHORIZED", "unauthorized"))
+	}
+	if err := h.repo.EraseCandidate(c.UserContext(), email); err != nil {
+		log.Warn().Err(err).Str("email", email).Msg("candidate erase failed")
+		return httpapi.Error(c, sharederr.NewDomainError("INTERNAL_ERROR", "failed to erase candidate data"))
+	}
+	return httpapi.OK(c, fiber.Map{"message": "your data has been erased"})
 }

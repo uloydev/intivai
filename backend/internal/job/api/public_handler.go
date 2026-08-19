@@ -3,7 +3,6 @@ package api
 import (
 	"bytes"
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"io"
@@ -11,15 +10,18 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
+	"github.com/hibiken/asynq"
 	cvapp "github.com/intivai/backend/internal/cv/application"
 	cvdomain "github.com/intivai/backend/internal/cv/domain"
 	jobdomain "github.com/intivai/backend/internal/job/domain"
 	"github.com/intivai/backend/internal/job/infrastructure/persistence"
 	notifapp "github.com/intivai/backend/internal/notification/application"
+	scrdomain "github.com/intivai/backend/internal/screening/domain"
 	sharederr "github.com/intivai/backend/internal/shared/errors"
 	"github.com/intivai/backend/internal/shared/httpapi"
 	"github.com/intivai/backend/pkg/db"
 	"github.com/intivai/backend/pkg/queue"
+	"github.com/rs/zerolog/log"
 	"gorm.io/gorm"
 )
 
@@ -27,6 +29,7 @@ type PublicJobHandler struct {
 	pool     *gorm.DB
 	jobRepo  *persistence.PostgresJobRepo
 	candRepo cvdomain.CandidateRepository
+	appRepo  scrdomain.ApplicationRepository
 	store    cvapp.ObjectStore
 	queue    *queue.Client
 }
@@ -35,6 +38,7 @@ func NewPublicJobHandler(
 	pool *gorm.DB,
 	jobRepo *persistence.PostgresJobRepo,
 	candRepo cvdomain.CandidateRepository,
+	appRepo scrdomain.ApplicationRepository,
 	store cvapp.ObjectStore,
 	q *queue.Client,
 ) *PublicJobHandler {
@@ -42,6 +46,7 @@ func NewPublicJobHandler(
 		pool:     pool,
 		jobRepo:  jobRepo,
 		candRepo: candRepo,
+		appRepo:  appRepo,
 		store:    store,
 		queue:    q,
 	}
@@ -64,7 +69,7 @@ func (h *PublicJobHandler) GetPublicJob(c *fiber.Ctx) error {
 		return httpapi.Error(c, sharederr.NewDomainError("BAD_REQUEST", "invalid job id"))
 	}
 	job, err := h.jobRepo.GetPublicDetail(c.UserContext(), id)
-	if err == jobdomain.ErrNotFound {
+	if errors.Is(err, jobdomain.ErrNotFound) {
 		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "job not found or inactive"})
 	}
 	if err != nil {
@@ -120,106 +125,82 @@ func (h *PublicJobHandler) Apply(c *fiber.Ctx) error {
 
 	// Verify job exists and is active
 	job, err := h.jobRepo.GetPublicDetail(c.UserContext(), jobID)
-	if err == jobdomain.ErrNotFound {
+	if errors.Is(err, jobdomain.ErrNotFound) {
 		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "job not found or inactive"})
 	}
 	if err != nil {
 		return httpapi.Error(c, sharederr.NewDomainError("INTERNAL_ERROR", "internal server error"))
 	}
 
-	candidate := &cvdomain.Candidate{}
+	// Validate name/email via the CV domain constructor (validation only —
+	// the row itself is created by the repo's ApplyWithDedupe).
+	if _, err := cvdomain.NewCandidate(job.OrgID, name, email); err != nil {
+		return httpapi.Error(c, sharederr.NewDomainError("BAD_REQUEST", "valid name and email are required"))
+	}
 	contentType := "application/pdf"
+	var candidateID uuid.UUID
 	isNewCandidate := false
 
 	err = db.RunInTx(c.UserContext(), h.pool, job.OrgID.String(), func(txCtx context.Context) error {
-		gormTx, ok := db.TxFrom(txCtx)
-		if !ok {
-			return db.ErrNoTx
+		id, isNew, aerr := h.appRepo.ApplyWithDedupe(txCtx, job.OrgID, jobID, name, email)
+		if aerr != nil {
+			return aerr
 		}
-		// Serialize per (org, email): no unique constraint exists on
-		// candidates(org_id, email), so re-applies must reuse the SAME
-		// candidate instead of orphaned duplicates.
-		lockKey := job.OrgID.String() + ":" + strings.ToLower(email)
-		if err := gormTx.Exec(`SELECT pg_advisory_xact_lock(hashtext(?))`, lockKey).Error; err != nil {
-			return err
-		}
-		var existingID uuid.UUID
-		row := gormTx.Raw(
-			`SELECT id FROM candidates WHERE org_id = ? AND LOWER(email) = ? ORDER BY created_at LIMIT 1`,
-			job.OrgID, strings.ToLower(email)).Row()
-		err := row.Scan(&existingID)
-		switch {
-		case err == nil:
-			candidate, err = h.candRepo.GetByID(txCtx, existingID)
-			if err != nil {
-				return err
-			}
-		case errors.Is(err, sql.ErrNoRows):
-			isNewCandidate = true
-			candidate, err = cvdomain.NewCandidate(job.OrgID, name, email)
-			if err != nil {
-				return err
-			}
-			candidate.CVPath = fmt.Sprintf("cvs/%s/%s.pdf", job.OrgID, candidate.ID)
-			candidate.Status = cvdomain.StatusParsing
-			if err := h.candRepo.Create(txCtx, candidate); err != nil {
-				return err
-			}
-		default:
-			// Real DB failure — must NOT fall through to "create a duplicate".
-			return err
-		}
-
-		// Store the (possibly updated) resume under the candidate's key
-		if err := h.store.Upload(txCtx, candidate.CVPath, bytes.NewReader(fileBytes), int64(len(fileBytes)), contentType); err != nil {
-			return err
-		}
-
-		var appID uuid.UUID
-		return gormTx.Raw(
-			`INSERT INTO applications (id, org_id, candidate_id, job_id, status, stage, created_at, updated_at)
-			 VALUES (?, ?, ?, ?, 'screening', 'applied', NOW(), NOW())
-			 ON CONFLICT (candidate_id, job_id) DO UPDATE SET updated_at = NOW()
-			 RETURNING id`,
-			uuid.New(), job.OrgID, candidate.ID, jobID,
-		).Row().Scan(&appID)
+		candidateID = id
+		isNewCandidate = isNew
+		return nil
 	})
 	if err != nil {
-		if isNewCandidate {
-			_ = h.store.Delete(c.UserContext(), candidate.CVPath)
-		}
 		return httpapi.Error(c, sharederr.NewDomainError("INTERNAL_ERROR", "failed to save candidate application record"))
+	}
+
+	// Store the (possibly updated) resume under the candidate's key — after
+	// the DB work so a slow upload never holds the transaction.
+	candidatePath := fmt.Sprintf("cvs/%s/%s.pdf", job.OrgID, candidateID)
+	if err := h.store.Upload(c.UserContext(), candidatePath, bytes.NewReader(fileBytes), int64(len(fileBytes)), contentType); err != nil {
+		if isNewCandidate {
+			_ = h.rollbackApply(c, job.OrgID, candidateID, jobID)
+		}
+		return httpapi.Error(c, sharederr.NewDomainError("INTERNAL_ERROR", "failed to store resume"))
 	}
 
 	// Enqueue parse task
 	if _, err := h.queue.Enqueue(c.UserContext(), cvapp.TaskParseCV, cvapp.ParseCVPayload{
-		OrgID: job.OrgID.String(), CandidateID: candidate.ID.String(),
-	}); err != nil {
+		OrgID: job.OrgID.String(), CandidateID: candidateID.String(),
+	}, asynq.MaxRetry(5)); err != nil {
+		_ = h.store.Delete(c.UserContext(), candidatePath)
 		if isNewCandidate {
-			_ = h.store.Delete(c.UserContext(), candidate.CVPath)
-			_ = db.RunInTx(c.UserContext(), h.pool, job.OrgID.String(), func(txCtx context.Context) error {
-				if tx, ok := db.TxFrom(txCtx); ok {
-					_ = tx.Exec("DELETE FROM applications WHERE candidate_id = ? AND job_id = ?", candidate.ID, jobID)
-				}
-				_ = h.candRepo.Delete(txCtx, candidate.ID)
-				return nil
-			})
+			_ = h.rollbackApply(c, job.OrgID, candidateID, jobID)
 		}
 		return httpapi.Error(c, sharederr.NewDomainError("INTERNAL_ERROR", "failed to enqueue cv processing"))
 	}
 
 	// Enqueue confirmation email
-	_, _ = h.queue.Enqueue(c.UserContext(), notifapp.TaskSendEmail, notifapp.SendEmailPayload{
+	if _, err := h.queue.Enqueue(c.UserContext(), notifapp.TaskSendEmail, notifapp.SendEmailPayload{
 		Type:          notifapp.EmailTypeConfirmation,
-		To:            candidate.Email,
-		CandidateName: candidate.Name,
+		To:            email,
+		CandidateName: name,
 		JobTitle:      job.Title,
-	})
+	}, asynq.MaxRetry(5)); err != nil {
+		log.Warn().Err(err).Str("candidate_id", candidateID.String()).Msg("enqueue confirmation email failed")
+	}
 
 	return httpapi.Created(c, PublicApplyResponse{
-		CandidateID: candidate.ID,
+		CandidateID: candidateID,
 		JobID:       jobID,
 		Status:      "submitted",
 		Message:     "Application received successfully and queued for AI screening",
+	})
+}
+
+// rollbackApply — best-effort removal of a just-created candidate + its
+// application when a later step (resume upload / task enqueue) fails.
+// Only called for NEW candidates; a re-applying candidate's data is kept.
+func (h *PublicJobHandler) rollbackApply(c *fiber.Ctx, orgID, candidateID, jobID uuid.UUID) error {
+	return db.RunInTx(c.UserContext(), h.pool, orgID.String(), func(txCtx context.Context) error {
+		if tx, ok := db.TxFrom(txCtx); ok {
+			_ = tx.Exec("DELETE FROM applications WHERE candidate_id = ? AND job_id = ?", candidateID, jobID)
+		}
+		return h.candRepo.Delete(txCtx, candidateID)
 	})
 }

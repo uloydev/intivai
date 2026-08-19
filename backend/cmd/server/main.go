@@ -228,8 +228,9 @@ func main() {
 		From:     cfg.SMTP.From,
 	}, logger)
 	emailWorker := notifapp.NewEmailWorker(mailClient, logger)
-	publicJobHandler := jobapi.NewPublicJobHandler(pool, jobRepo, candidateRepo, store, queueClient)
-	candidatePortalHandler := scrapi.NewCandidatePortalHandler(pool, tokens, queueClient, cfg.App.PublicURL)
+	publicJobHandler := jobapi.NewPublicJobHandler(pool, jobRepo, candidateRepo, appRepo, store, queueClient)
+	portalRepo := scrrepo.NewPostgresCandidatePortalRepo(pool)
+	candidatePortalHandler := scrapi.NewCandidatePortalHandler(portalRepo, tokens, queueClient, cfg.App.PublicURL)
 	// --- Sandbox sidecar (ADR-0002): the app talks to the sandbox executor
 	// over mTLS gRPC; it never executes code itself. Fail closed when the
 	// sidecar is not configured/unreachable (code.run frames return an error)
@@ -347,6 +348,8 @@ func main() {
 	// route registered AFTER it. Candidate endpoints would otherwise inherit
 	// the tenant/auth middleware (regression-tested in route_groups_test.go).
 	v1.Get("/candidate/portal/applications", authRateLimit, candidatePortalHandler.RequireCandidateAuth, candidatePortalHandler.ListApplications)
+	v1.Get("/candidate/portal/export", authRateLimit, candidatePortalHandler.RequireCandidateAuth, candidatePortalHandler.Export)
+	v1.Delete("/candidate/portal/me", authRateLimit, candidatePortalHandler.RequireCandidateAuth, candidatePortalHandler.DeleteMe)
 	v1.Post("/candidate/interviews/:id/consent", authRateLimit, chatHandler.Consent)
 	v1.Post("/candidate/interviews/:id/ticket", authRateLimit, chatHandler.Ticket)
 	v1.Post("/candidate/interviews/:id/telemetry", userRateLimit, chatHandler.Telemetry)

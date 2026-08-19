@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	iamauth "github.com/intivai/backend/internal/iam/infrastructure/auth"
 	scrapi "github.com/intivai/backend/internal/screening/api"
+	scrrepo "github.com/intivai/backend/internal/screening/infrastructure/persistence"
 	"github.com/intivai/backend/pkg/db"
 	"github.com/stretchr/testify/require"
 	"gorm.io/driver/postgres"
@@ -32,7 +33,7 @@ func setupTestDB(t *testing.T) *gorm.DB {
 func TestCandidatePortal_OTPAndApplicationLookupFlow(t *testing.T) {
 	pool := setupTestDB(t)
 	tokens := iamauth.NewJWTProvider("secret-test-key-32-chars-intivai-1234")
-	handler := scrapi.NewCandidatePortalHandler(pool, tokens, nil, "http://localhost:5173")
+	handler := scrapi.NewCandidatePortalHandler(scrrepo.NewPostgresCandidatePortalRepo(pool), tokens, nil, "http://localhost:5173")
 
 	app := fiber.New()
 	app.Post("/api/v1/public/candidate/auth/otp", handler.RequestOTP)
@@ -123,7 +124,7 @@ func TestCandidatePortal_OTPAndApplicationLookupFlow(t *testing.T) {
 func TestCandidatePortal_OTPLockoutAndReplay(t *testing.T) {
 	pool := setupTestDB(t)
 	tokens := iamauth.NewJWTProvider("secret-test-key-32-chars-intivai-1234")
-	handler := scrapi.NewCandidatePortalHandler(pool, tokens, nil, "http://localhost:5173")
+	handler := scrapi.NewCandidatePortalHandler(scrrepo.NewPostgresCandidatePortalRepo(pool), tokens, nil, "http://localhost:5173")
 
 	app := fiber.New()
 	app.Post("/api/v1/public/candidate/auth/otp", handler.RequestOTP)
