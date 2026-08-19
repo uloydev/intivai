@@ -6,7 +6,6 @@ import (
 	"sort"
 	"strings"
 
-	ivdomain "github.com/intivai/backend/internal/interview/domain"
 	"github.com/johnfercher/maroto/v2"
 	"github.com/johnfercher/maroto/v2/pkg/components/text"
 	"github.com/johnfercher/maroto/v2/pkg/config"
@@ -110,20 +109,19 @@ func generatePDFReport(detail *InterviewDetail) ([]byte, error) {
 
 	// Proctoring & Integrity Audit
 	summary := detail.ProctoringSummary
-	if summary.IntegrityScore == 0 && len(detail.ProctoringEvents) == 0 {
-		summary = ivdomain.DefaultProctoringSummary()
-	}
 
 	m.AddRow(10, text.NewCol(12, "Anti-Cheating & Integrity Audit:", props.Text{Size: 11, Style: fontstyle.Bold}))
 	m.AddRow(6, text.NewCol(12, fmt.Sprintf("  - Integrity Score: %d / 100 (Risk Tier: %s)", summary.IntegrityScore, strings.ToUpper(string(summary.RiskLevel))), props.Text{Size: 9}))
 	m.AddRow(6, text.NewCol(12, fmt.Sprintf("  - Tab Switches: %d | Time Away: %ds | Pastes: %d (Suspicious: %d) | Audio Anomalies: %d",
 		summary.TabSwitchCount, summary.TotalAwayDurationSec, summary.PasteEventCount, summary.SuspiciousPasteCount, summary.AudioAnomalyCount), props.Text{Size: 9}))
-	if len(summary.Flags) > 0 {
+	if summary.IntegrityScore == 0 && len(detail.ProctoringEvents) == 0 {
+		m.AddRow(6, text.NewCol(12, "  - No integrity telemetry available for this session", props.Text{Size: 9}))
+	} else if len(summary.Flags) > 0 {
 		for _, f := range summary.Flags {
 			m.AddRow(6, text.NewCol(12, fmt.Sprintf("  ! Flag: %s", f), props.Text{Size: 9, Style: fontstyle.Italic}))
 		}
 	} else {
-		m.AddRow(6, text.NewCol(12, "  ✓ Spotless Session: Zero integrity anomalies detected", props.Text{Size: 9}))
+		m.AddRow(6, text.NewCol(12, "  ✓ No integrity anomalies detected", props.Text{Size: 9}))
 	}
 	m.AddRow(8)
 

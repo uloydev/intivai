@@ -49,14 +49,17 @@ export function Candidate360Drawer({
       setNotes(application.recruiter_notes ?? "")
       setInviteResult(null)
     }
-  }, [application])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [application?.id])
 
   const createInterview = useMutation({
-    mutationFn: () =>
-      api.post<CreateInterviewResult>("/interviews", {
-        application_id: application!.id,
+    mutationFn: () => {
+      if (!application) throw new Error("No candidate application selected")
+      return api.post<CreateInterviewResult>("/interviews", {
+        application_id: application.id,
         question_count: 3,
-      }),
+      })
+    },
     onSuccess: (res) => {
       setInviteResult(res)
       setCurrentStage("interview_invited")
@@ -65,6 +68,22 @@ export function Candidate360Drawer({
       toast.success("Interview session created & invite link generated!")
     },
     onError: (e) => toast.error(e instanceof Error ? e.message : "Failed to generate interview"),
+  })
+
+  const saveDecision = useMutation({
+    mutationFn: () => {
+      if (!application) throw new Error("No candidate application selected")
+      return api.patch(`/applications/${application.id}`, {
+        stage: currentStage,
+        recruiter_notes: notes,
+      })
+    },
+    onSuccess: () => {
+      if (application && currentStage !== "") onStageUpdate?.(application.id, currentStage, notes)
+      qc.invalidateQueries({ queryKey: ["applications"] })
+      toast.success("Candidate lifecycle stage & feedback notes updated.")
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : "Failed to save decision"),
   })
 
   if (!open || !application) return null
@@ -81,20 +100,6 @@ export function Candidate360Drawer({
   const handleSaveDecision = () => {
     saveDecision.mutate()
   }
-
-  const saveDecision = useMutation({
-    mutationFn: () =>
-      api.patch(`/applications/${application!.id}`, {
-        stage: currentStage,
-        recruiter_notes: notes,
-      }),
-    onSuccess: () => {
-      if (currentStage !== "") onStageUpdate?.(application.id, currentStage, notes)
-      qc.invalidateQueries({ queryKey: ["applications"] })
-      toast.success("Candidate lifecycle stage & feedback notes updated.")
-    },
-    onError: (e) => toast.error(e instanceof Error ? e.message : "Failed to save decision"),
-  })
 
   const chatInviteUrl = inviteResult
     ? `${window.location.origin}/invite/${inviteResult.interview_id}?t=${encodeURIComponent(inviteResult.invitation_token)}`
@@ -135,12 +140,12 @@ export function Candidate360Drawer({
         <div className="flex items-start justify-between border-b border-border p-6">
           <div className="flex items-center gap-3.5">
             <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-primary/10 text-primary font-display font-bold text-lg border border-primary/20">
-              {application.candidate_name ? application.candidate_name[0].toUpperCase() : "C"}
+              {application.candidate_name ? application.candidate_name.charAt(0).toUpperCase() : "C"}
             </div>
             <div>
               <div className="flex items-center gap-2">
                 <h2 className="font-display text-xl font-bold text-foreground">
-                  {application.candidate_name}
+                  {application.candidate_name || "Candidate Profile"}
                 </h2>
                 <Badge variant="outline" className={cn("text-xs font-semibold", stageMeta.color)}>
                   {stageMeta.label}
@@ -149,12 +154,12 @@ export function Candidate360Drawer({
               <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground mt-1">
                 <span className="flex items-center gap-1">
                   <EnvelopeSimple className="h-3.5 w-3.5" />
-                  {application.candidate_email}
+                  {application.candidate_email || "No email provided"}
                 </span>
                 <span>•</span>
                 <span className="flex items-center gap-1 font-medium text-foreground">
                   <Briefcase className="h-3.5 w-3.5 text-primary" />
-                  {application.job_title}
+                  {application.job_title || "General Application"}
                 </span>
               </div>
             </div>
@@ -237,7 +242,7 @@ export function Candidate360Drawer({
                 <div className="text-right">
                   <span className="text-xs text-muted-foreground">Relevant Experience</span>
                   <p className="font-mono text-lg font-bold text-foreground">
-                    {application.years_experience ?? 3}+ Years
+                    {application.years_experience != null ? `${application.years_experience}+ Years` : "-"}
                   </p>
                 </div>
               </div>
@@ -248,16 +253,20 @@ export function Candidate360Drawer({
                   Verified Skills from Resume
                 </Label>
                 <div className="flex flex-wrap gap-1.5">
-                  {(application.matched_skills ?? ["Go", "Distributed Systems", "PostgreSQL", "Docker"]).map(
-                    (skill, i) => (
-                      <Badge
-                        key={i}
-                        variant="outline"
-                        className="bg-primary/5 text-primary border-primary/20 text-xs py-1 px-2.5"
-                      >
-                        {skill}
-                      </Badge>
-                    )
+                  {(Array.isArray(application.matched_skills)
+                    ? application.matched_skills
+                    : []
+                  ).map((skill, i) => (
+                    <Badge
+                      key={i}
+                      variant="outline"
+                      className="bg-primary/5 text-primary border-primary/20 text-xs py-1 px-2.5"
+                    >
+                      {skill}
+                    </Badge>
+                  ))}
+                  {(!Array.isArray(application.matched_skills) || application.matched_skills.length === 0) && (
+                    <span className="text-xs text-muted-foreground">No skills extracted</span>
                   )}
                 </div>
               </div>
@@ -269,8 +278,8 @@ export function Candidate360Drawer({
                   <span>AI Screening Recommendation</span>
                 </div>
                 <p className="text-xs text-muted-foreground leading-relaxed">
-                  {application.screening_rationale ??
-                    "Candidate demonstrates strong technical alignment with the required backend stack and distributed systems architecture. Ready for AI competence assessment."}
+                  {application.screening_rationale ||
+                    "Pending AI screening rationale."}
                 </p>
               </div>
 
@@ -318,7 +327,7 @@ export function Candidate360Drawer({
                     </div>
 
                     <Button asChild variant="gradient" className="w-full gap-2 text-xs font-bold">
-                      <Link to={`/interviews/${application.interview_id}/result`}>
+                      <Link to={`/interviews/${application.interview_id || ""}`}>
                         <Trophy className="h-4 w-4" weight="bold" />
                         <span>Open Comprehensive Scorecard & Replay →</span>
                       </Link>
@@ -389,6 +398,7 @@ export function Candidate360Drawer({
                   )}
                   <option value="applied">Applied (Inbound)</option>
                   <option value="screening_passed">Screening Passed (Qualified)</option>
+                  <option value="screening_failed">Screening Failed</option>
                   <option value="interview_invited">Interview Invited / Scheduled</option>
                   <option value="interview_completed">Interview Completed (Evaluation Ready)</option>
                   <option value="offer_extended">Offer Extended</option>

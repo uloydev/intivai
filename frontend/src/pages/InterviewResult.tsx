@@ -11,6 +11,7 @@ import {
   DownloadSimple,
   ChatCircleText,
   User,
+  Info,
 } from "@phosphor-icons/react"
 import { Code2 } from "lucide-react"
 import { CodeEditor } from "@/components/sandbox/CodeEditor"
@@ -144,9 +145,13 @@ export function InterviewResultPage() {
             variant="outline"
             size="sm"
             className="text-xs gap-1.5"
-            onClick={() => {
-              navigator.clipboard.writeText(window.location.href)
-              toast.success("Scorecard link copied to clipboard")
+            onClick={async () => {
+              try {
+                await navigator.clipboard.writeText(window.location.href)
+                toast.success("Scorecard link copied to clipboard")
+              } catch (e) {
+                toast.error("Failed to copy link")
+              }
             }}
           >
             <ShareNetwork className="h-3.5 w-3.5" /> Share
@@ -313,8 +318,8 @@ export function InterviewResultPage() {
 
       {/* AI Proctoring & Integrity Telemetry Card */}
       {(() => {
-        const summary = detail.proctoring_summary ?? {
-          integrity_score: 100,
+        const summary = detail.proctoring_summary || {
+          integrity_score: 0,
           risk_level: "low",
           tab_switch_count: 0,
           total_away_duration_sec: 0,
@@ -432,10 +437,15 @@ export function InterviewResultPage() {
                     ))}
                   </ul>
                 </div>
+              ) : summary.integrity_score === 0 && (!detail.proctoring_events || detail.proctoring_events.length === 0) ? (
+                <div className="rounded-xl border border-muted-foreground/20 bg-muted/50 p-3.5 flex items-center gap-2 text-xs text-muted-foreground">
+                  <Info className="h-4 w-4 shrink-0" weight="fill" />
+                  <span>No telemetry data available for this session.</span>
+                </div>
               ) : (
                 <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-3.5 flex items-center gap-2 text-xs text-emerald-600 dark:text-emerald-400">
                   <CheckCircle className="h-4 w-4 shrink-0" weight="fill" />
-                  <span>Spotless Session: No tab switches, external paste blocks, or suspicious anomalies detected.</span>
+                  <span>No integrity anomalies detected.</span>
                 </div>
               )}
 

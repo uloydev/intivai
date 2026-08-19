@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react"
 import { useQuery } from "@tanstack/react-query"
-import { useSearchParams } from "react-router-dom"
+import { useParams, useSearchParams } from "react-router-dom"
 import {
   UsersThree,
   MagnifyingGlass,
@@ -58,7 +58,7 @@ function stagePill(app: Application) {
     case "offer_extended":
       return <Badge className="bg-purple-500/10 text-purple-400 border-purple-500/30 text-[11px]">Offer Extended</Badge>
     case "interview_completed":
-      return <Badge className="bg-blue-500/10 text-blue-400 border-blue-500/30 text-[11px]">Evaluated ({app.interview_score ?? 85}/100)</Badge>
+      return <Badge className="bg-blue-500/10 text-blue-400 border-blue-500/30 text-[11px]">Evaluated ({app.interview_score ?? "-"}/100)</Badge>
     case "interview_invited":
       return <Badge className="bg-cyan-500/10 text-cyan-400 border-cyan-500/30 text-[11px]">Interview Invited</Badge>
     case "screening_passed":
@@ -72,10 +72,11 @@ function stagePill(app: Application) {
 }
 
 export function CandidatesPage() {
+  const { id: routeId } = useParams<{ id: string }>()
   const [searchParams, setSearchParams] = useSearchParams()
   const jobParam = searchParams.get("job_id") ?? "all"
   const stageParam = searchParams.get("stage") ?? "all"
-  const candidateParam = searchParams.get("candidate_id")
+  const candidateParam = searchParams.get("candidate_id") || searchParams.get("application_id") || routeId
 
   const { data: apps, isLoading, error } = useQuery({
     queryKey: ["applications"],
@@ -104,17 +105,20 @@ export function CandidatesPage() {
     if (stageParam) setStatusFilter(stageParam)
   }, [stageParam])
 
-  // Open drawer if candidate_id param is provided
+  // Open drawer if candidate_id or routeId is provided
   useEffect(() => {
     if (candidateParam && apps) {
-      const match = apps.find((a) => a.candidate_id === candidateParam || a.id === candidateParam)
+      const match = apps.find(
+        (a) =>
+          a.candidate_id === candidateParam ||
+          a.id === candidateParam ||
+          a.candidate_email === candidateParam
+      )
       if (match) {
         setSelectedApp(match)
         setDrawerOpen(true)
       } else {
-        // CVs page passes a candidate id that has no application yet
-        // (never screened) — the drawer needs an application row.
-        toast.info("This candidate has no application yet — screen them against a job first.")
+        toast.info("Candidate application profile not found or pending screening.")
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -147,10 +151,11 @@ export function CandidatesPage() {
   }
 
   const filteredApps = (apps ?? []).filter((app) => {
-    const matchesSearch =
-      app.candidate_name.toLowerCase().includes(search.toLowerCase()) ||
-      app.candidate_email.toLowerCase().includes(search.toLowerCase()) ||
-      app.job_title.toLowerCase().includes(search.toLowerCase())
+    const name = (app.candidate_name || "").toLowerCase()
+    const email = (app.candidate_email || "").toLowerCase()
+    const title = (app.job_title || "").toLowerCase()
+    const q = (search || "").toLowerCase()
+    const matchesSearch = name.includes(q) || email.includes(q) || title.includes(q)
     const matchesJob = selectedJob === "all" || app.job_id === selectedJob
     
     let matchesStatus = true
@@ -284,15 +289,15 @@ export function CandidatesPage() {
                         {app.candidate_name ? app.candidate_name.charAt(0).toUpperCase() : "C"}
                       </div>
                       <div>
-                        <p className="font-display font-semibold text-sm">{app.candidate_name}</p>
-                        <p className="text-xs text-muted-foreground">{app.candidate_email}</p>
+                        <p className="font-display font-semibold text-sm">{app.candidate_name || "Candidate"}</p>
+                        <p className="text-xs text-muted-foreground">{app.candidate_email || "No email"}</p>
                       </div>
                     </div>
                   </TableCell>
                   <TableCell>
                     <div className="flex items-center gap-1.5 text-xs font-medium">
                       <Briefcase className="h-3.5 w-3.5 text-muted-foreground" />
-                      <span>{app.job_title}</span>
+                      <span>{app.job_title || "General Application"}</span>
                     </div>
                   </TableCell>
                   <TableCell>{scorePill(app)}</TableCell>
