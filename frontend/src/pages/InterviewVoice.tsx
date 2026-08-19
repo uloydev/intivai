@@ -14,10 +14,10 @@ import {
 } from "@phosphor-icons/react"
 import { Code2 } from "lucide-react"
 import { CodingSandbox } from "@/components/sandbox/CodingSandbox"
-import { api } from "@/lib/api"
+import { aiReview, runCode } from "@/lib/sandbox"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
-import type { SandboxLanguage, SandboxTestCase, SandboxExecutionResult, AICodeReview } from "@/types/api"
+import type { SandboxLanguage, SandboxTestCase } from "@/types/api"
 
 export function InterviewVoicePage() {
   const { id } = useParams<{ id: string }>()
@@ -73,6 +73,7 @@ export function InterviewVoicePage() {
       pc.ontrack = (event) => {
         if (audioRef.current && event.streams[0]) {
           audioRef.current.srcObject = event.streams[0]
+          // autoplay policy — the user has already clicked "Start Call"
           audioRef.current.play().catch(() => {})
         }
       }
@@ -116,8 +117,9 @@ export function InterviewVoicePage() {
               })
             }
           }
-        } catch {
-          // parse error
+        } catch (err) {
+          // Malformed signaling frame — drop it and keep the stream alive.
+          console.error("Failed to parse voice signaling frame", err)
         }
       }
 
@@ -190,29 +192,11 @@ export function InterviewVoicePage() {
     return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`
   }
 
-  const handleExecuteSandbox = async (
-    language: SandboxLanguage,
-    code: string,
-    testCases: SandboxTestCase[]
-  ): Promise<SandboxExecutionResult> => {
-    return await api.post<SandboxExecutionResult>("/sandbox/execute", {
-      language,
-      code,
-      test_cases: testCases,
-      timeout_sec: 5,
-    })
-  }
+  const handleExecuteSandbox = (language: SandboxLanguage, code: string, testCases: SandboxTestCase[]) =>
+    runCode(language, code, testCases)
 
-  const handleAIReview = async (
-    language: SandboxLanguage,
-    code: string
-  ): Promise<AICodeReview> => {
-    return await api.post<AICodeReview>("/sandbox/evaluate", {
-      language,
-      code,
-      problem: liveCaption || "Voice Interview Coding Problem",
-    })
-  }
+  const handleAIReview = (language: SandboxLanguage, code: string) =>
+    aiReview(language, code, liveCaption || "Voice Interview Coding Problem")
 
   return (
     <div className="flex flex-col h-screen bg-background text-foreground overflow-hidden">
@@ -288,11 +272,12 @@ export function InterviewVoicePage() {
                   </>
                 )}
                 <div
-                  className={`relative flex h-24 w-24 items-center justify-center rounded-full shadow-xl transition-all duration-500 ${
+                  className={cn(
+                    "relative flex h-24 w-24 items-center justify-center rounded-full shadow-xl transition-all duration-500",
                     isStarted
                       ? "bg-primary text-primary-foreground shadow-primary/30 scale-105"
                       : "bg-muted text-muted-foreground border border-border/80"
-                  }`}
+                  )}
                 >
                   {isMuted ? (
                     <MicrophoneSlash size={40} weight="fill" className="text-destructive" />
@@ -305,9 +290,10 @@ export function InterviewVoicePage() {
               {/* Status Pill */}
               <div className="flex items-center gap-2 rounded-full border border-border/60 bg-muted/40 px-3.5 py-1 text-xs">
                 <span
-                  className={`h-2 w-2 rounded-full ${
+                  className={cn(
+                    "h-2 w-2 rounded-full",
                     isStarted ? (isMuted ? "bg-amber-400" : "bg-emerald-400 animate-pulse") : "bg-muted-foreground"
-                  }`}
+                  )}
                 />
                 <span className="font-medium text-foreground">{status}</span>
               </div>

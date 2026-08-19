@@ -13,10 +13,11 @@ import {
   ChatCircleDots,
 } from "@phosphor-icons/react"
 import { Code2 } from "lucide-react"
-import { ChatClient, type ChatFrame, type PacingTelemetry } from "@/lib/ws"
+import type { PacingTelemetry } from "@/lib/ws"
+import { useChatSession } from "@/lib/useChatSession"
 import { useProctoring } from "@/lib/useProctoring"
+import { aiReview, runCode } from "@/lib/sandbox"
 import { TimerGate } from "@/components/interview/TimerGate"
-import { api } from "@/lib/api"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
@@ -25,42 +26,16 @@ import { CodingSandbox } from "@/components/sandbox/CodingSandbox"
 import { Markdown } from "@/components/markdown/Markdown"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
-import type { SandboxLanguage, SandboxTestCase, SandboxExecutionResult, AICodeReview } from "@/types/api"
-
-interface Bubble {
-  kind: "question" | "answer" | "assistant" | "system"
-  content: string
-  idx?: number
-  streaming?: boolean
-}
-
-const MAX_RECONNECTS = 5
+import type { SandboxLanguage, SandboxTestCase } from "@/types/api"
 
 export function ChatPage() {
   const { id } = useParams<{ id: string }>()
   const [params] = useSearchParams()
   const ticket = params.get("t") ?? ""
 
-  const clientRef = useRef<ChatClient | null>(null)
-  const [bubbles, setBubbles] = useState<Bubble[]>([])
   const [input, setInput] = useState("")
-  const [streaming, setStreaming] = useState(false)
-  const [total, setTotal] = useState(0)
-  const [currentIdx, setCurrentIdx] = useState(0)
-  const [currentQuestionText, setCurrentQuestionText] = useState("")
-  const [sessionRemainingSec, setSessionRemainingSec] = useState(1800)
-  const [timeLimitSec, setTimeLimitSec] = useState(180)
-  const [archetype, setArchetype] = useState<"conversational" | "system_design" | "coding">("conversational")
-  const [evaluation, setEvaluation] = useState<Extract<ChatFrame, { type: "evaluation" }> | null>(null)
-  const [reconnecting, setReconnecting] = useState(false)
-  const [expired, setExpired] = useState(false)
   const [showSandbox, setShowSandbox] = useState(false)
-  const sessionIdRef = useRef<string>("")
-  const reconnectCountRef = useRef(0)
-  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const evaluatedRef = useRef(false)
   const pastedFlagRef = useRef(false)
-  const [pendingAnswer, setPendingAnswer] = useState(false)
   const scrollRef = useRef<HTMLDivElement>(null)
 
   // Authenticity & Pacing Telemetry Refs
@@ -69,11 +44,27 @@ export function ChatPage() {
   const typedCharsCountRef = useRef<number>(0)
   const pastedCharsCountRef = useRef<number>(0)
 
+  const resetPacing = () => {
+    questionDisplayedAtRef.current = Date.now()
+    firstKeystrokeAtRef.current = null
+    typedCharsCountRef.current = 0
+    pastedCharsCountRef.current = 0
+    pastedFlagRef.current = false
+  }
+
+  const session = useChatSession({
+    id,
+    ticket,
+    onQuestion: resetPacing,
+  })
+
+  const { bubbles, streaming, total, currentIdx, currentQuestionText, sessionRemainingSec, timeLimitSec, archetype, evaluation, reconnecting, expired, pendingAnswer } = session
+
   const { trackPaste } = useProctoring({
     interviewId: id,
     ticket,
     currentQuestionIdx: currentIdx,
-    client: clientRef.current,
+    client: session.clientRef.current,
     active: !evaluation && !expired,
   })
 
@@ -81,118 +72,6 @@ export function ChatPage() {
     () => window.matchMedia("(prefers-reduced-motion: reduce)").matches,
     []
   )
-
-  useEffect(() => {
-    if (!id || !ticket) {
-      toast.error("Missing interview session credentials.")
-      return
-    }
-
-    const client = new ChatClient({
-      ticket,
-      onOpen: () => {
-        // Replay the resume frame once the socket is actually OPEN —
-        // session pinning never happened when sent during CONNECTING.
-        if (sessionIdRef.current) {
-          clientRef.current?.resume(sessionIdRef.current)
-        }
-      },
-      onClose: () => {
-        if (evaluatedRef.current) return
-        if (reconnectCountRef.current < MAX_RECONNECTS) {
-          setReconnecting(true)
-          const delay = Math.min(1000 * 2 ** reconnectCountRef.current, 10000)
-          reconnectCountRef.current += 1
-          reconnectTimerRef.current = setTimeout(() => {
-            if (sessionIdRef.current && clientRef.current && id) {
-              clientRef.current.connect(id)
-            }
-          }, delay)
-        } else {
-          setReconnecting(false)
-          toast.error("Connection lost. Please refresh the page to resume your session.")
-        }
-      },
-      onFrame: (frame: ChatFrame) => {
-        if (frame.type === "interview.start") {
-          setReconnecting(false)
-          sessionIdRef.current = frame.session_id
-          setTotal(frame.total_questions)
-          if (frame.session_budget_sec) {
-            setSessionRemainingSec(frame.session_budget_sec)
-          }
-        } else if (frame.type === "question") {
-          setReconnecting(false)
-          setCurrentIdx(frame.idx)
-          setCurrentQuestionText(frame.content)
-          if (frame.time_limit_sec) setTimeLimitSec(frame.time_limit_sec)
-          if (frame.archetype) setArchetype(frame.archetype)
-          if (frame.session_remaining_sec) setSessionRemainingSec(frame.session_remaining_sec)
-
-          // Reset question pacing tracker
-          questionDisplayedAtRef.current = Date.now()
-          firstKeystrokeAtRef.current = null
-          typedCharsCountRef.current = 0
-          pastedCharsCountRef.current = 0
-          pastedFlagRef.current = false
-
-          setStreaming(false)
-          setPendingAnswer(false)
-          setBubbles((prev) => {
-            // Deduplicate: If question is already present at end or same idx, don't duplicate on reconnect
-            const last = prev[prev.length - 1]
-            if (last && last.kind === "question" && (last.idx === frame.idx || last.content === frame.content)) {
-              return prev
-            }
-            if (prev.some((b) => b.kind === "question" && b.idx === frame.idx && b.content === frame.content)) {
-              return prev
-            }
-            return [...prev, { kind: "question", content: frame.content, idx: frame.idx }]
-          })
-        } else if (frame.type === "token") {
-          setStreaming(true)
-          setBubbles((prev) => {
-            const last = prev[prev.length - 1]
-            if (last && last.kind === "assistant" && last.streaming) {
-              return [
-                ...prev.slice(0, -1),
-                { ...last, content: last.content + frame.content },
-              ]
-            }
-            return [...prev, { kind: "assistant", content: frame.content, streaming: true }]
-          })
-        } else if (frame.type === "response") {
-          setStreaming(false)
-          setBubbles((prev) => {
-            const last = prev[prev.length - 1]
-            if (last && last.kind === "assistant") {
-              return [...prev.slice(0, -1), { ...last, content: frame.content, streaming: false }]
-            }
-            return [...prev, { kind: "assistant", content: frame.content, streaming: false }]
-          })
-        } else if (frame.type === "evaluation") {
-          evaluatedRef.current = true
-          setStreaming(false)
-          setEvaluation(frame)
-        } else if (frame.type === "error") {
-          setStreaming(false)
-          setPendingAnswer(false)
-          if (frame.code === "INTERVIEW_EXPIRED") {
-            setExpired(true)
-          }
-          toast.error(frame.message || "An error occurred during the interview session.")
-        }
-      },
-    })
-
-    clientRef.current = client
-    client.connect(id)
-
-    return () => {
-      if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current)
-      client.close()
-    }
-  }, [id, ticket])
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -222,15 +101,11 @@ export function ChatPage() {
   const sendAnswer = () => {
     const trimmed = input.trim()
     if (!trimmed || streaming || pendingAnswer || !!evaluation || expired) return
-    setPendingAnswer(true)
-    setBubbles((prev) => [...prev, { kind: "answer", content: trimmed }])
+    const sent = session.submitAnswer(trimmed, collectPacingTelemetry())
     setInput("")
-    const pacing = collectPacingTelemetry()
-    const sent = clientRef.current?.answer(trimmed, pacing) ?? false
     if (!sent) {
       // Socket not open (reconnect window) — never leave the input disabled
       // with a silently dropped answer.
-      setPendingAnswer(false)
       toast.error("Connection lost — your answer was not sent. Please try again.")
     }
   }
@@ -239,41 +114,16 @@ export function ChatPage() {
     if (streaming || pendingAnswer || !!evaluation || expired) return
     const trimmed = input.trim()
     const submissionText = trimmed.length > 0 ? trimmed : "Candidate did not submit an answer within the allocated time limit."
-    setPendingAnswer(true)
-    setBubbles((prev) => [...prev, { kind: "answer", content: submissionText }])
+    session.submitAnswer(submissionText, collectPacingTelemetry())
     setInput("")
-    const pacing = collectPacingTelemetry()
-    const sent = clientRef.current?.answer(submissionText, pacing) ?? false
-    if (!sent) {
-      setPendingAnswer(false)
-    }
     toast.info("Stage time limit elapsed. Response auto-submitted.")
   }
 
-  const handleExecuteSandbox = async (
-    language: SandboxLanguage,
-    code: string,
-    testCases: SandboxTestCase[]
-  ): Promise<SandboxExecutionResult> => {
-    return await api.post<SandboxExecutionResult>("/sandbox/execute", {
-      language,
-      code,
-      test_cases: testCases,
-      timeout_sec: 5,
-    })
-  }
+  const handleExecuteSandbox = (language: SandboxLanguage, code: string, testCases: SandboxTestCase[]) =>
+    runCode(language, code, testCases)
 
-  const handleAIReview = async (
-    language: SandboxLanguage,
-    code: string
-  ): Promise<AICodeReview> => {
-    const lastQuestion = currentQuestionText || "Technical Interview Problem"
-    return await api.post<AICodeReview>("/sandbox/evaluate", {
-      language,
-      code,
-      problem_description: lastQuestion,
-    })
-  }
+  const handleAIReview = (language: SandboxLanguage, code: string) =>
+    aiReview(language, code, currentQuestionText || "Technical Interview Problem")
 
   return (
     <div className="flex h-screen flex-col bg-background text-foreground selection:bg-primary/20 selection:text-primary">
@@ -401,9 +251,9 @@ export function ChatPage() {
               </div>
             )}
 
-            {bubbles.map((b, i) => (
+            {bubbles.map((b) => (
               <div
-                key={i}
+                key={b.id}
                 className={cn(
                   "flex gap-3 text-xs sm:text-sm leading-relaxed animate-in fade-in duration-300",
                   b.kind === "answer" && "justify-end",
@@ -551,7 +401,7 @@ export function ChatPage() {
                     className="h-[48px] w-[48px] rounded-xl border-destructive/30 text-destructive hover:bg-destructive/10 shrink-0"
                     title="Skip AI speech / Advance immediately"
                     aria-label="Stop response"
-                    onClick={() => clientRef.current?.interrupt()}
+                    onClick={() => session.interrupt()}
                   >
                     <Stop className="h-5 w-5" weight="fill" />
                   </Button>
@@ -580,7 +430,7 @@ export function ChatPage() {
               onExecute={handleExecuteSandbox}
               onRequestAIReview={handleAIReview}
               onCodeChange={(lang, code) => {
-                clientRef.current?.sendCodeChange(lang, code, currentIdx)
+                session.sendCodeChange(lang, code, currentIdx)
               }}
             />
           </div>

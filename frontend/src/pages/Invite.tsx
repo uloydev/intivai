@@ -90,9 +90,15 @@ export function InvitePage() {
                 className="mt-0.5"
                 aria-label="I consent"
               />
-              <Label htmlFor="consent" className="text-xs leading-relaxed text-foreground cursor-pointer font-medium">
-                I consent to my answers being evaluated by AI, and I acknowledge that telemetry (including clipboard activity, window focus, and audio) will be tracked to ensure fairness.
-              </Label>
+              <div className="space-y-1">
+                <Label htmlFor="consent" className="text-xs leading-relaxed text-foreground cursor-pointer font-medium">
+                  I consent to my answers being evaluated by AI, and I acknowledge that the following telemetry is
+                  collected during the session: tab switching, paste events, window focus loss, and audio anomalies.
+                </Label>
+                <p className="text-[10px] text-muted-foreground leading-relaxed">
+                  Flagged events are reviewed by a human recruiter before any hiring decision is made.
+                </p>
+              </div>
             </div>
 
             <Button

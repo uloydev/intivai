@@ -82,8 +82,9 @@ export class ChatClient {
     ws.onmessage = (ev) => {
       try {
         this.opts.onFrame(JSON.parse(ev.data as string) as ChatFrame)
-      } catch {
-        // ignore malformed frames
+      } catch (err) {
+        // Malformed frames must not kill the socket — log and drop.
+        console.error("Ignoring malformed chat frame", err)
       }
     }
     ws.onclose = (ev) => {
@@ -145,17 +146,6 @@ export class ChatClient {
       type: "code.change",
       language,
       code,
-      question_idx: questionIdx,
-    })
-  }
-
-  sendCodeRun(language: string, code: string, testCases?: unknown[], questionIdx?: number, stdin?: string): boolean {
-    return this.send({
-      type: "code.run",
-      language,
-      code,
-      stdin,
-      test_cases: testCases,
       question_idx: questionIdx,
     })
   }

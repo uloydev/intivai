@@ -4,6 +4,7 @@ import { TerminalConsole } from "./TerminalConsole"
 import { TestCaseManager } from "./TestCaseManager"
 import { Sparkles, Activity, Layers } from "lucide-react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { cn } from "@/lib/utils"
 import type { SandboxLanguage, SandboxTestCase, SandboxExecutionResult, AICodeReview } from "@/types/api"
 
 interface CodingSandboxProps {
@@ -75,8 +76,10 @@ export function CodingSandbox({
       const review = await onRequestAIReview(language, code)
       setAiReview(review)
       setShowReviewModal(true)
-    } catch {
-      // fallback
+    } catch (err) {
+      // UX stays unchanged — the AI review button just fails silently;
+      // log with context so failures are visible in devtools.
+      console.error("AI code review request failed", err)
     } finally {
       setIsReviewing(false)
     }
@@ -104,21 +107,23 @@ export function CodingSandbox({
           <div className="flex items-center gap-1">
             <button
               onClick={() => setBottomTab("terminal")}
-              className={`px-3 py-1 rounded text-xs font-semibold transition-colors ${
+              className={cn(
+                "px-3 py-1 rounded text-xs font-semibold transition-colors",
                 bottomTab === "terminal"
                   ? "bg-neutral-800 text-neutral-100"
                   : "text-neutral-500 hover:text-neutral-300"
-              }`}
+              )}
             >
               Terminal Console
             </button>
             <button
               onClick={() => setBottomTab("tests")}
-              className={`px-3 py-1 rounded text-xs font-semibold transition-colors flex items-center gap-1.5 ${
+              className={cn(
+                "px-3 py-1 rounded text-xs font-semibold transition-colors flex items-center gap-1.5",
                 bottomTab === "tests"
                   ? "bg-neutral-800 text-neutral-100"
                   : "text-neutral-500 hover:text-neutral-300"
-              }`}
+              )}
             >
               <span>Test Suite</span>
               <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-neutral-900 border border-neutral-700 text-neutral-400">

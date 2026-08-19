@@ -10,6 +10,7 @@ import {
   Eye,
 } from "@phosphor-icons/react"
 import { api } from "@/lib/api"
+import { stageMeta } from "@/lib/stages"
 import type { Application, CandidateLifecycleStage, Job } from "@/types/api"
 import { Candidate360Drawer } from "@/components/candidates/Candidate360Drawer"
 import { toast } from "sonner"
@@ -25,6 +26,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { cn } from "@/lib/utils"
 
 function scorePill(app: Application) {
   if (app.cv_score == null) {
@@ -50,32 +52,22 @@ function scorePill(app: Application) {
 
 function stagePill(app: Application) {
   // stage is the authoritative recruiter decision (ADR-0001); null = undecided
-  const stage: CandidateLifecycleStage | "" = app.stage ?? ""
-
-  switch (stage) {
-    case "hired":
-      return <Badge className="bg-emerald-500/10 text-emerald-500 border-emerald-500/30 text-[11px]">Hired 🎉</Badge>
-    case "offer_extended":
-      return <Badge className="bg-purple-500/10 text-purple-400 border-purple-500/30 text-[11px]">Offer Extended</Badge>
-    case "interview_completed":
-      return <Badge className="bg-blue-500/10 text-blue-400 border-blue-500/30 text-[11px]">Evaluated ({app.interview_score ?? "-"}/100)</Badge>
-    case "interview_invited":
-      return <Badge className="bg-cyan-500/10 text-cyan-400 border-cyan-500/30 text-[11px]">Interview Invited</Badge>
-    case "screening_passed":
-      return <Badge className="bg-emerald-500/10 text-emerald-400 border-emerald-500/30 text-[11px]">Screening Passed</Badge>
-    case "screening_failed":
-    case "rejected":
-      return <Badge className="bg-rose-500/10 text-rose-400 border-rose-500/30 text-[11px]">Rejected</Badge>
-    default:
-      return <Badge variant="secondary" className="text-[11px]">Undecided</Badge>
-  }
+  const meta = stageMeta(app.stage ?? "")
+  const isCompleted = app.stage === "interview_completed"
+  return (
+    <Badge className={cn("text-[11px]", meta.color)}>
+      {meta.label}
+      {isCompleted ? ` (${app.interview_score ?? "-"}/100)` : ""}
+    </Badge>
+  )
 }
 
 export function CandidatesPage() {
   const { id: routeId } = useParams<{ id: string }>()
   const [searchParams, setSearchParams] = useSearchParams()
-  const jobParam = searchParams.get("job_id") ?? "all"
-  const stageParam = searchParams.get("stage") ?? "all"
+  // Filter state IS the URL — derive directly, no sync effects.
+  const selectedJob = searchParams.get("job_id") ?? "all"
+  const statusFilter = searchParams.get("stage") ?? "all"
   const candidateParam = searchParams.get("candidate_id") || searchParams.get("application_id") || routeId
 
   const { data: apps, isLoading, error } = useQuery({
@@ -91,19 +83,8 @@ export function CandidatesPage() {
   })
 
   const [search, setSearch] = useState("")
-  const [selectedJob, setSelectedJob] = useState<string>(jobParam)
-  const [statusFilter, setStatusFilter] = useState<string>(stageParam)
   const [selectedApp, setSelectedApp] = useState<Application | null>(null)
   const [drawerOpen, setDrawerOpen] = useState(false)
-
-  // Sync state if search params change externally
-  useEffect(() => {
-    if (jobParam) setSelectedJob(jobParam)
-  }, [jobParam])
-
-  useEffect(() => {
-    if (stageParam) setStatusFilter(stageParam)
-  }, [stageParam])
 
   // Open drawer if candidate_id or routeId is provided
   useEffect(() => {
@@ -125,7 +106,6 @@ export function CandidatesPage() {
   }, [candidateParam, apps])
 
   const handleJobChange = (jobId: string) => {
-    setSelectedJob(jobId)
     const next = new URLSearchParams(searchParams)
     if (jobId === "all") next.delete("job_id")
     else next.set("job_id", jobId)
@@ -133,7 +113,6 @@ export function CandidatesPage() {
   }
 
   const handleStageChange = (stage: string) => {
-    setStatusFilter(stage)
     const next = new URLSearchParams(searchParams)
     if (stage === "all") next.delete("stage")
     else next.set("stage", stage)
@@ -277,10 +256,19 @@ export function CandidatesPage() {
               {filteredApps.map((app) => (
                 <TableRow
                   key={app.id}
-                  className="cursor-pointer transition-colors hover:bg-muted/40"
+                  tabIndex={0}
+                  role="button"
+                  className="cursor-pointer transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
                   onClick={() => {
                     setSelectedApp(app)
                     setDrawerOpen(true)
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault()
+                      setSelectedApp(app)
+                      setDrawerOpen(true)
+                    }
                   }}
                 >
                   <TableCell>

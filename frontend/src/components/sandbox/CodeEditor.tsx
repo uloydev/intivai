@@ -1,6 +1,7 @@
 import { useState } from "react"
 import Editor from "@monaco-editor/react"
 import { Play, RotateCcw, Sparkles, Check, ChevronDown } from "lucide-react"
+import { cn } from "@/lib/utils"
 import type { SandboxLanguage } from "@/types/api"
 
 export const STARTER_TEMPLATES: Record<SandboxLanguage, string> = {
@@ -162,13 +163,14 @@ export function CodeEditor({
             <button
               onClick={onRun}
               disabled={isRunning}
-              className={`flex items-center gap-1.5 px-4 py-1.5 rounded text-xs font-bold text-white shadow-lg transition-all ${
+              className={cn(
+                "flex items-center gap-1.5 px-4 py-1.5 rounded text-xs font-bold text-white shadow-lg transition-all",
                 isRunning
                   ? "bg-emerald-800 opacity-60 cursor-not-allowed"
                   : "bg-emerald-600 hover:bg-emerald-500 active:scale-95 shadow-emerald-950/50"
-              }`}
+              )}
             >
-              <Play className={`w-3.5 h-3.5 fill-current ${isRunning ? "animate-spin" : ""}`} />
+              <Play className={cn("w-3.5 h-3.5 fill-current", isRunning && "animate-spin")} />
               <span>{isRunning ? "Running..." : "Run & Test"}</span>
             </button>
           )}
@@ -189,7 +191,7 @@ export function CodeEditor({
       <div className="flex-1 min-h-0 bg-[#1e1e1e]">
         <Editor
           height="100%"
-          language={language === "typescript" ? "typescript" : language === "javascript" ? "javascript" : language === "python" ? "python" : "go"}
+          language={language}
           value={code}
           theme="vs-dark"
           options={{

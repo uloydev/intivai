@@ -14,13 +14,25 @@ import {
   Trophy,
 } from "@phosphor-icons/react"
 import { api } from "@/lib/api"
-import type { Application, CandidateLifecycleStage, CreateInterviewResult } from "@/types/api"
+import { copyText } from "@/lib/clipboard"
+import { chatInviteUrl } from "@/lib/invites"
+import { stageMeta } from "@/lib/stages"
+import type { Application, CandidateLifecycleStage, CreateInterviewResult, ScreeningScoreBreakdown } from "@/types/api"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
+import { RecommendationBadge } from "@/components/ui/RecommendationBadge"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
+
+const SCREENING_DIMENSIONS: Array<{ key: keyof ScreeningScoreBreakdown; label: string }> = [
+  { key: "skills_match", label: "Skills Match" },
+  { key: "experience_years", label: "Experience" },
+  { key: "semantic_match", label: "Semantic Match" },
+  { key: "education", label: "Education" },
+  { key: "certifications", label: "Certifications" },
+]
 
 export interface Candidate360DrawerProps {
   application: Application | null
@@ -88,46 +100,19 @@ export function Candidate360Drawer({
 
   if (!open || !application) return null
 
-  const handleCopy = async (text: string, label: string) => {
-    try {
-      await navigator.clipboard.writeText(text)
-      toast.success(`${label} copied to clipboard!`)
-    } catch {
-      toast.error("Failed to copy link")
-    }
-  }
-
   const handleSaveDecision = () => {
     saveDecision.mutate()
   }
 
-  const chatInviteUrl = inviteResult
-    ? `${window.location.origin}/invite/${inviteResult.interview_id}?t=${encodeURIComponent(inviteResult.invitation_token)}`
+  const inviteLink = inviteResult
+    ? chatInviteUrl(inviteResult.interview_id, inviteResult.invitation_token)
     : application.interview_id
-    ? `${window.location.origin}/invite/${application.interview_id}`
+    ? chatInviteUrl(application.interview_id)
     : ""
 
-  const stageBadgeInfo = (stage: CandidateLifecycleStage | "") => {
-    switch (stage) {
-      case "hired":
-        return { label: "Hired", color: "bg-emerald-500/10 text-emerald-500 border-emerald-500/30" }
-      case "offer_extended":
-        return { label: "Offer Extended", color: "bg-purple-500/10 text-purple-400 border-purple-500/30" }
-      case "interview_completed":
-        return { label: "Assessment Complete", color: "bg-blue-500/10 text-blue-400 border-blue-500/30" }
-      case "interview_invited":
-        return { label: "Interview Scheduled", color: "bg-cyan-500/10 text-cyan-400 border-cyan-500/30" }
-      case "screening_passed":
-        return { label: "Screening Passed", color: "bg-emerald-500/10 text-emerald-400 border-emerald-500/30" }
-      case "screening_failed":
-      case "rejected":
-        return { label: "Rejected", color: "bg-rose-500/10 text-rose-400 border-rose-500/30" }
-      default:
-        return { label: "Undecided", color: "bg-muted text-muted-foreground border-border" }
-    }
-  }
-
-  const stageMeta = stageBadgeInfo(currentStage)
+  // Stage badge derives from the authoritative application.stage (ADR-0001),
+  // not the unsaved select draft — the header must never show a lie.
+  const stageBadge = stageMeta(application.stage ?? "")
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end bg-background/80 backdrop-blur-sm animate-in fade-in duration-300">
@@ -147,8 +132,8 @@ export function Candidate360Drawer({
                 <h2 className="font-display text-xl font-bold text-foreground">
                   {application.candidate_name || "Candidate Profile"}
                 </h2>
-                <Badge variant="outline" className={cn("text-xs font-semibold", stageMeta.color)}>
-                  {stageMeta.label}
+                <Badge variant="outline" className={cn("text-xs font-semibold", stageBadge.color)}>
+                  {stageBadge.label}
                 </Badge>
               </div>
               <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground mt-1">
@@ -271,17 +256,30 @@ export function Candidate360Drawer({
                 </div>
               </div>
 
-              {/* AI Screening Rationale */}
-              <div className="space-y-2 rounded-xl border border-border/70 bg-muted/20 p-4">
-                <div className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
-                  <Sparkle className="h-4 w-4 text-primary" weight="fill" />
-                  <span>AI Screening Recommendation</span>
-                </div>
-                <p className="text-xs text-muted-foreground leading-relaxed">
-                  {application.screening_rationale ||
-                    "Pending AI screening rationale."}
-                </p>
-              </div>
+              {/* AI Screening Rationale — real scored dimensions, no canned copy */}
+              {application.score_breakdown &&
+                Object.keys(application.score_breakdown).length > 0 && (
+                  <div className="space-y-3 rounded-xl border border-border/70 bg-muted/20 p-4">
+                    <div className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
+                      <Sparkle className="h-4 w-4 text-primary" weight="fill" />
+                      <span>AI Screening Recommendation</span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      {SCREENING_DIMENSIONS.map(({ key, label }) => {
+                        const value = application.score_breakdown?.[key]
+                        if (value == null) return null
+                        return (
+                          <div key={key} className="flex items-center justify-between rounded-lg bg-background/60 border border-border/50 px-2.5 py-1.5">
+                            <span className="text-[11px] text-muted-foreground">{label}</span>
+                            <span className="font-mono text-xs font-bold text-foreground">
+                              {Math.round(value * 100)}%
+                            </span>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )}
 
               {/* CV Action Link */}
               <div className="border-t border-border pt-4">
@@ -304,8 +302,8 @@ export function Candidate360Drawer({
                   <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
                     Interview Assessment State
                   </span>
-                  <Badge variant="outline" className={cn("text-xs font-medium", stageMeta.color)}>
-                    {stageMeta.label}
+                  <Badge variant="outline" className={cn("text-xs font-medium", stageBadge.color)}>
+                    {stageBadge.label}
                   </Badge>
                 </div>
 
@@ -320,9 +318,7 @@ export function Candidate360Drawer({
                       </div>
                       <div className="text-right">
                         <p className="text-xs text-muted-foreground">AI Recommendation</p>
-                        <Badge className="bg-emerald-500/10 text-emerald-500 border-emerald-500/30 text-xs font-bold capitalize mt-1">
-                          {application.recommendation ?? "Proceed"}
-                        </Badge>
+                        <RecommendationBadge recommendation={application.recommendation} className="mt-1 capitalize" />
                       </div>
                     </div>
 
@@ -339,20 +335,20 @@ export function Candidate360Drawer({
                       Dispatch an interactive AI assessment session with real-time technical probing, live coding challenge, and stage timer gates.
                     </p>
 
-                    {chatInviteUrl ? (
+                    {inviteLink ? (
                       <div className="space-y-2">
                         <Label className="text-xs font-medium">Active Candidate Invitation Link</Label>
                         <div className="flex items-center gap-2">
                           <input
                             type="text"
                             readOnly
-                            value={chatInviteUrl}
+                            value={inviteLink}
                             className="flex-1 rounded-lg border border-border bg-muted/40 px-3 py-1.5 text-xs font-mono text-muted-foreground select-all"
                           />
                           <Button
                             size="sm"
                             variant="secondary"
-                            onClick={() => handleCopy(chatInviteUrl, "Candidate Invite Link")}
+                            onClick={() => copyText(inviteLink, "Candidate Invite Link")}
                             className="gap-1.5 text-xs"
                           >
                             <Copy className="h-3.5 w-3.5" /> Copy

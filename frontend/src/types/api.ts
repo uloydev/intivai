@@ -127,6 +127,16 @@ export type CandidateLifecycleStage =
   | "hired"
   | "rejected"
 
+// Weighted dimensions of the screening engine (0–1 each); stored as JSONB on
+// the application row (backend ScoreResult.Breakdown).
+export interface ScreeningScoreBreakdown {
+  skills_match?: number
+  experience_years?: number
+  semantic_match?: number
+  education?: number
+  certifications?: number
+}
+
 export interface Application {
   id: string
   candidate_id: string
@@ -147,7 +157,7 @@ export interface Application {
   interview_id?: string
   interview_status?: string
   interview_score?: number
-  score_breakdown?: any
+  score_breakdown?: ScreeningScoreBreakdown
   recommendation?: string
   integrity_score?: number
   applied_at?: string

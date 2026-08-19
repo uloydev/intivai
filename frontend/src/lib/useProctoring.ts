@@ -74,15 +74,6 @@ export function useProctoring({
     [dispatchEvent]
   )
 
-  const trackAudioAnomaly = useCallback(
-    (anomalyType: string) => {
-      dispatchEvent("audio_anomaly", {
-        anomaly: anomalyType,
-      })
-    },
-    [dispatchEvent]
-  )
-
   useEffect(() => {
     if (!active || !interviewId) return
 
@@ -146,7 +137,6 @@ export function useProctoring({
 
   return {
     trackPaste,
-    trackAudioAnomaly,
     dispatchEvent,
   }
 }

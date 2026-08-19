@@ -4,17 +4,16 @@ import {
   CheckCircle,
   XCircle,
   WarningCircle,
-  ShieldCheck,
   Sparkle,
   ArrowLeft,
-  ShareNetwork,
   DownloadSimple,
   ChatCircleText,
   User,
-  Info,
 } from "@phosphor-icons/react"
 import { Code2 } from "lucide-react"
 import { CodeEditor } from "@/components/sandbox/CodeEditor"
+import { ProctoringCard } from "@/components/interview/ProctoringCard"
+import { RecommendationBadge } from "@/components/ui/RecommendationBadge"
 import { api } from "@/lib/api"
 import type { InterviewDetail } from "@/types/api"
 import { Badge } from "@/components/ui/badge"
@@ -22,29 +21,6 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
 import { toast } from "sonner"
-
-function recommendationBadge(rec: string) {
-  const normalized = rec.toLowerCase()
-  if (normalized === "proceed" || normalized === "strong_hire" || normalized === "hire") {
-    return (
-      <Badge className="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20 text-xs font-bold gap-1 py-1 px-2.5">
-        <CheckCircle className="h-3.5 w-3.5" weight="fill" /> {rec.toUpperCase().replace("_", " ")}
-      </Badge>
-    )
-  }
-  if (normalized === "reject" || normalized === "no_hire") {
-    return (
-      <Badge variant="destructive" className="text-xs font-bold gap-1 py-1 px-2.5">
-        <XCircle className="h-3.5 w-3.5" weight="fill" /> {rec.toUpperCase().replace("_", " ")}
-      </Badge>
-    )
-  }
-  return (
-    <Badge variant="secondary" className="bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20 text-xs font-bold gap-1 py-1 px-2.5">
-      <WarningCircle className="h-3.5 w-3.5" weight="fill" /> {rec.toUpperCase().replace("_", " ")}
-    </Badge>
-  )
-}
 
 export function InterviewResultPage() {
   const { id } = useParams<{ id: string }>()
@@ -147,21 +123,6 @@ export function InterviewResultPage() {
             className="text-xs gap-1.5"
             onClick={async () => {
               try {
-                await navigator.clipboard.writeText(window.location.href)
-                toast.success("Scorecard link copied to clipboard")
-              } catch (e) {
-                toast.error("Failed to copy link")
-              }
-            }}
-          >
-            <ShareNetwork className="h-3.5 w-3.5" /> Share
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            className="text-xs gap-1.5"
-            onClick={async () => {
-              try {
                 toast.info("Generating Maroto evaluation PDF…")
                 const blob = await api.getBlob(`/interviews/${id}/report/pdf`)
                 const url = window.URL.createObjectURL(blob)
@@ -195,7 +156,7 @@ export function InterviewResultPage() {
                 <div className="space-y-1.5">
                   <div className="flex items-center gap-2">
                     <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Hiring Verdict:</span>
-                    {recommendationBadge(evalReport.recommendation)}
+                    <RecommendationBadge recommendation={evalReport.recommendation} />
                   </div>
                   <p className="text-xs text-muted-foreground leading-relaxed max-w-xl">
                     Automated synthesis derived from {detail.questions.length} dynamically generated competence probes, evaluating factual depth, communication clarity, and problem-solving patterns.
@@ -317,172 +278,7 @@ export function InterviewResultPage() {
       )}
 
       {/* AI Proctoring & Integrity Telemetry Card */}
-      {(() => {
-        const summary = detail.proctoring_summary || {
-          integrity_score: 0,
-          risk_level: "low",
-          tab_switch_count: 0,
-          total_away_duration_sec: 0,
-          paste_event_count: 0,
-          suspicious_paste_count: 0,
-          audio_anomaly_count: 0,
-          flags: [],
-        }
-
-        const isClean = summary.integrity_score >= 85
-        const isMed = summary.integrity_score >= 60 && summary.integrity_score < 85
-
-        return (
-          <Card className="glass border-border/60 overflow-hidden shadow-sm">
-            <div className="p-6 space-y-5">
-              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-border/50 pb-4">
-                <div className="flex items-center gap-3">
-                  <div
-                    className={`flex h-10 w-10 items-center justify-center rounded-xl font-bold ${
-                      isClean
-                        ? "bg-emerald-500/10 text-emerald-500"
-                        : isMed
-                        ? "bg-amber-500/10 text-amber-500"
-                        : "bg-destructive/10 text-destructive"
-                    }`}
-                  >
-                    <ShieldCheck className="h-5 w-5" weight="bold" />
-                  </div>
-                  <div>
-                    <h3 className="font-display font-bold text-base tracking-tight">AI Proctoring & Integrity Audit</h3>
-                    <p className="text-xs text-muted-foreground">
-                      Real-time telemetry tracking window focus, clipboard behavior, and audio integrity
-                    </p>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-2.5">
-                  <Badge
-                    variant="outline"
-                    className={`font-mono text-xs px-2.5 py-1 font-bold ${
-                      isClean
-                        ? "border-emerald-500/30 text-emerald-600 dark:text-emerald-400 bg-emerald-500/5"
-                        : isMed
-                        ? "border-amber-500/30 text-amber-600 dark:text-amber-400 bg-amber-500/5"
-                        : "border-destructive/30 text-destructive bg-destructive/5"
-                    }`}
-                  >
-                    Integrity: {summary.integrity_score}/100
-                  </Badge>
-                  <Badge
-                    className={`text-[10px] font-bold uppercase tracking-wider ${
-                      isClean
-                        ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
-                        : isMed
-                        ? "bg-amber-500/15 text-amber-600 dark:text-amber-400"
-                        : "bg-destructive/15 text-destructive"
-                    }`}
-                  >
-                    {summary.risk_level} Risk
-                  </Badge>
-                </div>
-              </div>
-
-              {/* Quick Metrics Grid */}
-              <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-                <div className="rounded-xl border border-border/40 bg-muted/20 p-3">
-                  <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider block">
-                    Tab Switches
-                  </span>
-                  <span className="font-display text-lg font-bold text-foreground mt-0.5 block">
-                    {summary.tab_switch_count}
-                  </span>
-                </div>
-                <div className="rounded-xl border border-border/40 bg-muted/20 p-3">
-                  <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider block">
-                    Time Out of Focus
-                  </span>
-                  <span className="font-display text-lg font-bold text-foreground mt-0.5 block">
-                    {summary.total_away_duration_sec}s
-                  </span>
-                </div>
-                <div className="rounded-xl border border-border/40 bg-muted/20 p-3">
-                  <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider block">
-                    Clipboard Pastes
-                  </span>
-                  <span className="font-display text-lg font-bold text-foreground mt-0.5 block">
-                    {summary.paste_event_count}{" "}
-                    <span className="text-xs font-normal text-muted-foreground">
-                      ({summary.suspicious_paste_count} large)
-                    </span>
-                  </span>
-                </div>
-                <div className="rounded-xl border border-border/40 bg-muted/20 p-3">
-                  <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider block">
-                    Audio Anomalies
-                  </span>
-                  <span className="font-display text-lg font-bold text-foreground mt-0.5 block">
-                    {summary.audio_anomaly_count}
-                  </span>
-                </div>
-              </div>
-
-              {/* Flags / Audit Details */}
-              {summary.flags && summary.flags.length > 0 ? (
-                <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-4 space-y-2">
-                  <p className="text-xs font-bold text-amber-600 dark:text-amber-400 flex items-center gap-1.5 uppercase tracking-wider">
-                    <WarningCircle className="h-4 w-4" weight="fill" /> Flagged Integrity Telemetry
-                  </p>
-                  <ul className="space-y-1 text-xs text-foreground/90 pl-1">
-                    {summary.flags.map((flag, idx) => (
-                      <li key={idx} className="flex items-start gap-1.5">
-                        <span className="text-amber-500 font-bold">•</span>
-                        <span>{flag}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              ) : summary.integrity_score === 0 && (!detail.proctoring_events || detail.proctoring_events.length === 0) ? (
-                <div className="rounded-xl border border-muted-foreground/20 bg-muted/50 p-3.5 flex items-center gap-2 text-xs text-muted-foreground">
-                  <Info className="h-4 w-4 shrink-0" weight="fill" />
-                  <span>No telemetry data available for this session.</span>
-                </div>
-              ) : (
-                <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-3.5 flex items-center gap-2 text-xs text-emerald-600 dark:text-emerald-400">
-                  <CheckCircle className="h-4 w-4 shrink-0" weight="fill" />
-                  <span>No integrity anomalies detected.</span>
-                </div>
-              )}
-
-              {/* Telemetry Event Stream */}
-              {detail.proctoring_events && detail.proctoring_events.length > 0 && (
-                <div className="pt-2 space-y-2">
-                  <p className="text-xs font-bold text-muted-foreground uppercase tracking-wider">
-                    Chronological Telemetry Stream ({detail.proctoring_events.length} events)
-                  </p>
-                  <div className="max-h-40 overflow-y-auto rounded-xl border border-border/40 bg-background/50 divide-y divide-border/30 text-xs">
-                    {detail.proctoring_events.map((ev, idx) => (
-                      <div key={idx} className="p-2.5 flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <span className="font-mono text-[10px] text-muted-foreground">
-                            {new Date(ev.timestamp).toLocaleTimeString()}
-                          </span>
-                          <Badge variant="outline" className="text-[10px] py-0 px-1.5 capitalize">
-                            {ev.type.replace("_", " ")}
-                          </Badge>
-                          {ev.question_idx && (
-                            <span className="text-muted-foreground text-[11px]">Q{ev.question_idx}</span>
-                          )}
-                        </div>
-                        {ev.details && Object.keys(ev.details).length > 0 && (
-                          <span className="text-[11px] text-muted-foreground truncate max-w-xs">
-                            {JSON.stringify(ev.details)}
-                          </span>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          </Card>
-        )
-      })()}
+      <ProctoringCard summary={detail.proctoring_summary} events={detail.proctoring_events} />
 
       {/* Coding Sessions & Sandbox Submissions */}
       {detail.coding_sessions && detail.coding_sessions.length > 0 && (
@@ -541,19 +337,21 @@ export function InterviewResultPage() {
                       <div className="text-center">
                         <div className="text-[10px] text-neutral-400">Time Complexity</div>
                         <div className="font-mono font-bold text-indigo-400 mt-0.5">
-                          {session.ai_code_review.time_complexity || "O(N)"}
+                          {session.ai_code_review.time_complexity || "—"}
                         </div>
                       </div>
                       <div className="text-center">
                         <div className="text-[10px] text-neutral-400">Space Complexity</div>
                         <div className="font-mono font-bold text-emerald-400 mt-0.5">
-                          {session.ai_code_review.space_complexity || "O(1)"}
+                          {session.ai_code_review.space_complexity || "—"}
                         </div>
                       </div>
                       <div className="text-center">
                         <div className="text-[10px] text-neutral-400">Quality Score</div>
                         <div className="font-bold text-purple-400 mt-0.5">
-                          {session.ai_code_review.quality_score || 85}/100
+                          {session.ai_code_review.quality_score != null
+                            ? `${session.ai_code_review.quality_score}/100`
+                            : "not evaluated"}
                         </div>
                       </div>
                     </div>

@@ -14,6 +14,8 @@ export interface TimerGateProps {
 }
 
 const GRACE_PERIOD_SEC = 15
+const DEFAULT_SESSION_BUDGET_SEC = 1800
+const DEFAULT_QUESTION_LIMIT_SEC = 180
 
 export function TimerGate({
   sessionRemainingSec,
@@ -25,8 +27,8 @@ export function TimerGate({
   isProcessing = false,
   onExpire,
 }: TimerGateProps) {
-  const [sessionClock, setSessionClock] = useState(sessionRemainingSec || 1800)
-  const [questionClock, setQuestionClock] = useState(timeLimitSec || 180)
+  const [sessionClock, setSessionClock] = useState(sessionRemainingSec || DEFAULT_SESSION_BUDGET_SEC)
+  const [questionClock, setQuestionClock] = useState(timeLimitSec || DEFAULT_QUESTION_LIMIT_SEC)
   const [graceClock, setGraceClock] = useState<number | null>(null)
   const onExpireRef = useRef(onExpire)
   const expiredFiredRef = useRef(false)
@@ -43,34 +45,24 @@ export function TimerGate({
   }, [sessionRemainingSec])
 
   useEffect(() => {
-    setQuestionClock(timeLimitSec || 180)
+    setQuestionClock(timeLimitSec || DEFAULT_QUESTION_LIMIT_SEC)
     setGraceClock(null)
     expiredFiredRef.current = false
   }, [currentIdx, timeLimitSec])
 
-  // Global Session Countdown Timer
+  // Single 1s ticker drives all three clocks: global session budget, per-stage
+  // question timer and the 15s grace period. Processing pauses the question and
+  // grace clocks but never the session budget.
   useEffect(() => {
-    if (!active || sessionClock <= 0) return
+    if (!active) return
 
     const interval = setInterval(() => {
-      setSessionClock((prev) => {
-        if (prev <= 1) {
-          clearInterval(interval)
-          return 0
-        }
-        return prev - 1
+      setSessionClock((prev) => (prev > 0 ? prev - 1 : prev))
+      setQuestionClock((prev) => (isProcessing ? prev : prev > 0 ? prev - 1 : prev))
+      setGraceClock((prev) => {
+        if (prev === null || isProcessing) return prev
+        return prev > 0 ? prev - 1 : prev
       })
-    }, 1000)
-
-    return () => clearInterval(interval)
-  }, [active, sessionClock])
-
-  // Question Stage Countdown
-  useEffect(() => {
-    if (!active || isProcessing) return
-
-    const interval = setInterval(() => {
-      setQuestionClock((prev) => (prev > 0 ? prev - 1 : prev))
     }, 1000)
 
     return () => clearInterval(interval)
@@ -81,18 +73,6 @@ export function TimerGate({
     if (!active || isProcessing || questionClock > 0 || graceClock !== null) return
     setGraceClock(GRACE_PERIOD_SEC)
   }, [active, questionClock, graceClock, isProcessing])
-
-  // Grace countdown — separate ticker so the banner starts at a full 15s
-  // instead of being decremented on the same tick that starts it.
-  useEffect(() => {
-    if (!active || isProcessing || graceClock === null) return
-
-    const interval = setInterval(() => {
-      setGraceClock((prev) => (prev === null || prev <= 0 ? prev : prev - 1))
-    }, 1000)
-
-    return () => clearInterval(interval)
-  }, [active, isProcessing, graceClock])
 
   // Clean trigger when grace period expires
   useEffect(() => {
@@ -109,7 +89,7 @@ export function TimerGate({
     return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`
   }
 
-  const initialLimit = timeLimitSec || 180
+  const initialLimit = timeLimitSec || DEFAULT_QUESTION_LIMIT_SEC
   const questionPercent = useMemo(() => {
     return Math.max(0, Math.min(100, (questionClock / initialLimit) * 100))
   }, [questionClock, initialLimit])
@@ -130,13 +110,13 @@ export function TimerGate({
 
   // Color state based on percent remaining
   const timerStatusColor = useMemo(() => {
-    if (graceClock !== null || questionClock <= 15) return "text-rose-400 border-rose-500/30 bg-rose-500/10"
+    if (graceClock !== null || questionClock <= GRACE_PERIOD_SEC) return "text-rose-400 border-rose-500/30 bg-rose-500/10"
     if (questionPercent < 30) return "text-amber-400 border-amber-500/30 bg-amber-500/10"
     return "text-emerald-400 border-emerald-500/30 bg-emerald-500/10"
   }, [questionClock, questionPercent, graceClock])
 
   const progressBarColor = useMemo(() => {
-    if (graceClock !== null || questionClock <= 15) return "bg-rose-500"
+    if (graceClock !== null || questionClock <= GRACE_PERIOD_SEC) return "bg-rose-500"
     if (questionPercent < 30) return "bg-amber-500"
     return "bg-emerald-500"
   }, [questionClock, questionPercent, graceClock])
@@ -164,7 +144,7 @@ export function TimerGate({
             className={cn(
               "inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 font-semibold transition-colors duration-300",
               timerStatusColor,
-              (questionClock <= 15 || graceClock !== null) && "animate-pulse"
+              (questionClock <= GRACE_PERIOD_SEC || graceClock !== null) && "animate-pulse"
             )}
             title="Time remaining for this question"
           >
