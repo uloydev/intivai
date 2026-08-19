@@ -50,15 +50,30 @@ func (r *PostgresCandidateRepo) GetByID(ctx context.Context, id uuid.UUID) (*cvd
 	return scanCandidate(row)
 }
 
+// GetByReviewToken — public review flow (no tenant context exists): the
+// cross-org token lookup runs through the SECURITY DEFINER function.
 func (r *PostgresCandidateRepo) GetByReviewToken(ctx context.Context, token string) (*cvdomain.Candidate, error) {
-	q, err := r.tx(ctx)
-	if err != nil {
-		return nil, err
-	}
-	row := q.Raw(
+	row := r.pool.WithContext(ctx).Raw(
 		`SELECT id, org_id, name, email, cv_path, cv_raw_text, cv_structured, cv_ocr_method, status, error_message, batch_id, review_token, created_at
-		 FROM candidates WHERE review_token = $1`, token).Row()
+		 FROM candidate_by_review_token($1)`, token).Row()
 	return scanCandidate(row)
+}
+
+// ConfirmReview — atomically confirm the extracted profile (SECURITY DEFINER);
+// returns the candidate's org + id, or uuid.Nil when the token is invalid or
+// the candidate is no longer pending review.
+func (r *PostgresCandidateRepo) ConfirmReview(ctx context.Context, token string, structured []byte) (uuid.UUID, uuid.UUID, error) {
+	var orgID, candID uuid.UUID
+	row := r.pool.WithContext(ctx).Raw(
+		`SELECT org_id, candidate_id FROM candidate_confirm_review($1, $2)`, token, string(structured)).Row()
+	err := row.Scan(&orgID, &candID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return uuid.Nil, uuid.Nil, nil
+	}
+	if err != nil {
+		return uuid.Nil, uuid.Nil, err
+	}
+	return orgID, candID, nil
 }
 
 func (r *PostgresCandidateRepo) List(ctx context.Context, orgID uuid.UUID) ([]*cvdomain.Candidate, error) {

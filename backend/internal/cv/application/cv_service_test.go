@@ -51,6 +51,10 @@ func (s *stubRepo) ListByIDs(ctx context.Context, orgID uuid.UUID, ids []uuid.UU
 	return map[uuid.UUID]*domain.Candidate{}, nil
 }
 
+func (s *stubRepo) ConfirmReview(ctx context.Context, token string, structured []byte) (uuid.UUID, uuid.UUID, error) {
+	return uuid.Nil, uuid.Nil, nil
+}
+
 func (s *stubRepo) Create(ctx context.Context, c *domain.Candidate) error {
 	if s.failCreate != nil {
 		return s.failCreate
@@ -101,7 +105,7 @@ func actor() application.AuthContext {
 func TestUploadHappyPath(t *testing.T) {
 	store := &stubStore{}
 	repo := &stubRepo{}
-	svc := NewCVService(repo, nil, store, &stubEnqueuer{})
+	svc := NewCVService(repo, nil, store, &stubEnqueuer{}, nil)
 
 	res, err := svc.Upload(context.Background(), actor(), "Jane", "j@x.io", []byte("pdf"), "application/pdf")
 	if err != nil {
@@ -118,7 +122,7 @@ func TestUploadHappyPath(t *testing.T) {
 func TestUploadCompensatesOnEnqueueFailure(t *testing.T) {
 	store := &stubStore{}
 	repo := &stubRepo{}
-	svc := NewCVService(repo, nil, store, &stubEnqueuer{fail: true})
+	svc := NewCVService(repo, nil, store, &stubEnqueuer{fail: true}, nil)
 
 	if _, err := svc.Upload(context.Background(), actor(), "Jane", "j@x.io", []byte("pdf"), "application/pdf"); err == nil {
 		t.Fatal("expected queue failure error")
@@ -134,7 +138,7 @@ func TestUploadCompensatesOnEnqueueFailure(t *testing.T) {
 func TestUploadCompensatesOnRepoFailure(t *testing.T) {
 	store := &stubStore{}
 	repo := &stubRepo{failCreate: errors.New("db down")}
-	svc := NewCVService(repo, nil, store, &stubEnqueuer{})
+	svc := NewCVService(repo, nil, store, &stubEnqueuer{}, nil)
 
 	if _, err := svc.Upload(context.Background(), actor(), "Jane", "j@x.io", []byte("pdf"), "application/pdf"); err == nil {
 		t.Fatal("expected create failure error")
@@ -145,7 +149,7 @@ func TestUploadCompensatesOnRepoFailure(t *testing.T) {
 }
 
 func TestUploadRejectsMemberRole(t *testing.T) {
-	svc := NewCVService(&stubRepo{}, nil, &stubStore{}, &stubEnqueuer{})
+	svc := NewCVService(&stubRepo{}, nil, &stubStore{}, &stubEnqueuer{}, nil)
 	_, err := svc.Upload(context.Background(), application.AuthContext{OrgID: uuid.New(), Role: "member"}, "J", "j@x.io", []byte("p"), "application/pdf")
 	if err == nil {
 		t.Fatal("member role accepted upload")
@@ -155,7 +159,7 @@ func TestUploadRejectsMemberRole(t *testing.T) {
 func TestReExtractGuards(t *testing.T) {
 	repo := &stubRepo{}
 	enq := &stubEnqueuer{}
-	svc := NewCVService(repo, nil, &stubStore{}, enq)
+	svc := NewCVService(repo, nil, &stubStore{}, enq, nil)
 	act := actor()
 	orgID := act.OrgID
 
@@ -188,7 +192,7 @@ func TestReExtractGuards(t *testing.T) {
 
 func TestGetAndListSummary(t *testing.T) {
 	repo := &stubRepo{}
-	svc := NewCVService(repo, nil, &stubStore{}, &stubEnqueuer{})
+	svc := NewCVService(repo, nil, &stubStore{}, &stubEnqueuer{}, nil)
 	act := actor()
 	orgID := act.OrgID
 
@@ -234,7 +238,7 @@ func TestGetAndListSummary(t *testing.T) {
 func TestDeleteCandidate(t *testing.T) {
 	repo := &stubRepo{}
 	store := &stubStore{}
-	svc := NewCVService(repo, nil, store, &stubEnqueuer{})
+	svc := NewCVService(repo, nil, store, &stubEnqueuer{}, nil)
 	act := actor()
 
 	c := &domain.Candidate{
@@ -287,7 +291,7 @@ func TestReExtract(t *testing.T) {
 	repo := &stubRepo{}
 	store := &stubStore{}
 	enq := &stubEnqueuer{}
-	svc := NewCVService(repo, nil, store, enq)
+	svc := NewCVService(repo, nil, store, enq, nil)
 	act := actor()
 
 	c := &domain.Candidate{

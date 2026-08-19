@@ -199,7 +199,7 @@ func main() {
 	appRepo := scrrepo.NewPostgresApplicationRepo(pool)
 
 	candidateRepo := cvrepo.NewPostgresCandidateRepo(pool)
-	cvService := cvapp.NewCVService(candidateRepo, appRepo, store, queueClient)
+	cvService := cvapp.NewCVService(candidateRepo, appRepo, store, queueClient, pool)
 	cvHandler := cvapi.NewCVHandler(cvService, cfg.Cv.MaxUploadMB)
 
 	screeningService := scrapp.NewScreeningService(pool, appRepo, candidateRepo, jobRepo, queueClient, cfg.App.PublicURL)

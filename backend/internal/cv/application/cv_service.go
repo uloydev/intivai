@@ -15,7 +15,9 @@ import (
 	scrapp "github.com/intivai/backend/internal/screening/application"
 	scrdomain "github.com/intivai/backend/internal/screening/domain"
 	"github.com/intivai/backend/internal/shared/errors"
+	"github.com/intivai/backend/pkg/db"
 	"github.com/rs/zerolog/log"
+	"gorm.io/gorm"
 )
 
 const TaskParseCV = "parse_cv"
@@ -39,10 +41,11 @@ type CVService struct {
 	appRepo scrdomain.ApplicationRepository
 	store   ObjectStore
 	queue   Enqueuer
+	pool    *gorm.DB
 }
 
-func NewCVService(repo domain.CandidateRepository, appRepo scrdomain.ApplicationRepository, store ObjectStore, queueClient Enqueuer) *CVService {
-	return &CVService{repo: repo, appRepo: appRepo, store: store, queue: queueClient}
+func NewCVService(repo domain.CandidateRepository, appRepo scrdomain.ApplicationRepository, store ObjectStore, queueClient Enqueuer, pool *gorm.DB) *CVService {
+	return &CVService{repo: repo, appRepo: appRepo, store: store, queue: queueClient, pool: pool}
 }
 
 func (s *CVService) Upload(ctx context.Context, actor application.AuthContext, name, email string, file []byte, contentType string) (*CVResult, error) {
@@ -259,36 +262,37 @@ func (s *CVService) ReviewProfile(ctx context.Context, token string) (*CVDetail,
 }
 
 func (s *CVService) ConfirmProfile(ctx context.Context, token string, structuredData []byte) error {
-	candidate, err := s.repo.GetByReviewToken(ctx, token)
-	if err == domain.ErrNotFound {
-		return errors.NewNotFoundError("candidate_review", "invalid token")
-	}
+	orgID, candID, err := s.repo.ConfirmReview(ctx, token, structuredData)
 	if err != nil {
 		return err
 	}
-	if candidate.Status != domain.StatusPendingReview {
-		return errors.NewDomainError("CANDIDATE_NOT_READY", "candidate is not pending review")
+	if orgID == uuid.Nil {
+		return errors.NewNotFoundError("candidate_review", "invalid token")
 	}
 
-	candidate.CVStructured = structuredData
-	candidate.Status = domain.StatusExtracted
-	candidate.ReviewToken = nil
-
-	if err := s.repo.Update(ctx, candidate); err != nil {
+	// Enqueue TaskScoreCV per application — the confirm endpoint is public
+	// (no tenant middleware), so the enumeration runs inside a tenant tx
+	// using the org returned by the SECURITY DEFINER function.
+	var appIDs []string
+	err = db.RunInTx(ctx, s.pool, orgID.String(), func(tctx context.Context) error {
+		apps, err := s.appRepo.ByCandidate(tctx, orgID, candID)
+		if err != nil {
+			return err
+		}
+		for _, app := range apps {
+			appIDs = append(appIDs, app.ID.String())
+		}
+		return nil
+	})
+	if err != nil {
 		return err
 	}
-
-	// Enqueue TaskScoreCV — typed payload + consts + bounded retries (a
-	// failed enqueue must not silently strand the candidate's score).
-	apps, err := s.appRepo.ByCandidate(ctx, candidate.OrgID, candidate.ID)
-	if err == nil {
-		for _, app := range apps {
-			if _, err := s.queue.Enqueue(ctx, scrapp.TaskScoreCV, scrapp.ScoreCVPayload{
-				OrgID:         candidate.OrgID.String(),
-				ApplicationID: app.ID.String(),
-			}, asynq.MaxRetry(5)); err != nil {
-				log.Warn().Err(err).Str("application_id", app.ID.String()).Msg("enqueue score_cv failed")
-			}
+	for _, appID := range appIDs {
+		if _, err := s.queue.Enqueue(ctx, scrapp.TaskScoreCV, scrapp.ScoreCVPayload{
+			OrgID:         orgID.String(),
+			ApplicationID: appID,
+		}, asynq.MaxRetry(5)); err != nil {
+			log.Warn().Err(err).Str("application_id", appID).Msg("enqueue score_cv failed")
 		}
 	}
 	return nil
