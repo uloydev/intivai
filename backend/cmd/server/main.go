@@ -213,7 +213,7 @@ func main() {
 	ivRepo := ivrepo.NewPostgresInterviewRepo(pool)
 	tokenRepo := ivrepo.NewPostgresTokenRepo(pool)
 	questionBank := ivrepo.NewPostgresQuestionBank(pool)
-	evalWorker := evalapp.NewEvaluationWorker(pool, ivRepo, evalllm.NewEvaluator(llmClient))
+	evalWorker := evalapp.NewEvaluationWorker(pool, ivRepo, evalllm.NewEvaluator(llmClient), queueClient, cfg.App.PublicURL, logger)
 	interviewService := ivapp.NewInterviewService(pool, ivRepo, tokenRepo, questionBank, appRepo, candidateRepo, jobRepo, contextRepo, store, tokens, ivdomain.SystemClock(), interviewEnqueuer{client: queueClient, publicURL: cfg.App.PublicURL})
 	sessionRegistry := ivapi.NewRedisSessionRegistry(rdb, 35*time.Minute)
 	chatHandler := ivapi.NewChatHandler(interviewService, llmClient, tokens, logger, sessionRegistry)

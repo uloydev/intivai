@@ -15,6 +15,7 @@ import (
 	ivrepo "github.com/intivai/backend/internal/interview/infrastructure/persistence"
 	"github.com/intivai/backend/internal/llm"
 	"github.com/intivai/backend/pkg/db"
+	"github.com/rs/zerolog"
 )
 
 type mockEvalProvider struct{}
@@ -90,7 +91,7 @@ func TestEvaluationWorkerHappyPathAndIdempotent(t *testing.T) {
 	}
 
 	repo := ivrepo.NewPostgresInterviewRepo(pool)
-	worker := NewEvaluationWorker(pool, repo, evalllm.NewEvaluator(mockEvalProvider{}))
+	worker := NewEvaluationWorker(pool, repo, evalllm.NewEvaluator(mockEvalProvider{}), nil, "http://localhost:5173", zerolog.Nop())
 
 	payload, _ := json.Marshal(EvaluatePayload{OrgID: orgID, InterviewID: ivID.String()})
 	task := asynq.NewTask(TaskEvaluateInterview, payload)
