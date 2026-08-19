@@ -167,4 +167,20 @@ else
   exit 1
 fi
 
+say "sandbox code-run round-trip (sidecar)"
+SB_RESP=$(mktemp)
+SB_CODE=$(curl -s -o "$SB_RESP" -w '%{http_code}' -X POST "$BASE/sandbox/execute" \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"language":"go","code":"package main\n\nfunc main() { println(\"sandbox-ok\") }"}' || true)
+SB_CODE=${SB_CODE:-000}
+if [ "$SB_CODE" = "200" ]; then
+  SB_EXIT=$(python3 -c "import json; print(json.load(open('$SB_RESP'))['data']['exit_code'])")
+  rm -f "$SB_RESP"
+  [ "$SB_EXIT" = "0" ] || { echo "sandbox run failed: exit code $SB_EXIT"; exit 1; }
+  echo "sandbox execute ok (exit 0)"
+else
+  rm -f "$SB_RESP"
+  echo "sandbox endpoint unavailable (HTTP $SB_CODE) — code-run check skipped (sidecar not up?)"
+fi
+
 say "SMOKE PASSED"

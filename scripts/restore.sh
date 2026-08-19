@@ -11,6 +11,10 @@ NETWORK="intivai_default"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
+# Resolve the postgres container from the running prod stack (no hardcoded name).
+POSTGRES_CT=$(docker compose --env-file .env.prod -f docker-compose.yml -f docker-compose.prod.yml ps -q postgres)
+[ -n "$POSTGRES_CT" ] || { echo "postgres container not found — is the prod stack up?"; exit 1; }
+
 set -a; . ./.env.prod; set +a
 
 if [[ "$DUMP" == /* ]]; then
@@ -23,11 +27,11 @@ else
 fi
 
 echo "restoring $DUMP — this OVERWRITES the intivai database"
-docker exec -i intivai-postgres-1 dropdb -U intivai --if-exists intivai_restore
-docker exec -i intivai-postgres-1 createdb -U intivai intivai_restore
+docker exec -i "$POSTGRES_CT" dropdb -U intivai --if-exists intivai_restore
+docker exec -i "$POSTGRES_CT" createdb -U intivai intivai_restore
 
 echo "bootstrapping roles..."
-docker exec -i intivai-postgres-1 psql -U intivai -d postgres -v ON_ERROR_STOP=1 -c "
+docker exec -i "$POSTGRES_CT" psql -U intivai -d postgres -v ON_ERROR_STOP=1 -c "
 DO \$\$
 BEGIN
   IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'intivai_app') THEN
@@ -39,7 +43,7 @@ BEGIN
 END \$\$;
 "
 
-gzip -dc "$WORK/restore.sql.gz" | docker exec -i intivai-postgres-1 psql -U intivai -d intivai_restore -v ON_ERROR_STOP=1 >/dev/null
+gzip -dc "$WORK/restore.sql.gz" | docker exec -i "$POSTGRES_CT" psql -U intivai -d intivai_restore -v ON_ERROR_STOP=1 >/dev/null
 
 echo "restore complete into database 'intivai_restore'"
 
@@ -49,5 +53,5 @@ docker run --rm --network "$NETWORK" \
   minio/mc mirror --overwrite "intivai/intivai-backups/cvs" "intivai/intivai" >/dev/null
 echo "object storage restored"
 echo "review it, then promote:"
-echo "  docker exec -i intivai-postgres-1 psql -U intivai -c 'ALTER DATABASE intivai RENAME TO intivai_old'"
-echo "  docker exec -i intivai-postgres-1 psql -U intivai -c 'ALTER DATABASE intivai_restore RENAME TO intivai'"
+echo "  docker exec -i $POSTGRES_CT psql -U intivai -c 'ALTER DATABASE intivai RENAME TO intivai_old'"
+echo "  docker exec -i $POSTGRES_CT psql -U intivai -c 'ALTER DATABASE intivai_restore RENAME TO intivai'"

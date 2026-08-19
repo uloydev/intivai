@@ -1,6 +1,17 @@
 .DEFAULT_GOAL := help
 .PHONY: help check lint vet build test proto sandbox-images coverage test-integration test-integration-dev migrate dev redis-clear smoke load-ws seed backup restore load-k6
 
+# Dev stack connection tuple (docker-compose.dev.yml non-conflicting host
+# ports: postgres 5433, redis 6380, minio 9002/9003, minioadmin creds).
+TEST_ENV := \
+	TEST_DATABASE_URL='postgres://intivai_app:intivai_app@localhost:5433/intivai?sslmode=disable' \
+	TEST_REDIS_ADDR='localhost:6380' \
+	TEST_MINIO_ENDPOINT='localhost:9002' TEST_MINIO_ACCESS='minioadmin' TEST_MINIO_SECRET='minioadmin'
+
+# Dev compose invocation (base + dev overlay, --env-file .env). Used from
+# the repo root, so `cd ..` before every $(COMPOSE) call.
+COMPOSE := docker compose --env-file .env -f docker-compose.yml -f docker-compose.dev.yml
+
 # Display available commands and descriptions
 help:
 	@printf "\n\033[1;36mIntivai Backend — Commands & Targets\033[0m\n\n"
@@ -31,8 +42,10 @@ help:
 	@printf "  \033[32mdev\033[0m                   Boot full stack on fresh Redis (builds app, sandbox & certs)\n"
 	@printf "  \033[32mredis-clear\033[0m           Flush Redis queue while stack stays running\n\n"
 
-# Full pre-commit gate (unit-level)
-check: lint vet build test
+# Full pre-commit gate (unit-level): gofmt + lint + vet + build + unit tests.
+check:
+	@test -z "$$(gofmt -l .)" || { echo "gofmt violations:"; gofmt -l .; exit 1; }
+	$(MAKE) lint vet build test
 
 # Regenerate the sandbox gRPC stubs from proto/sandbox.proto
 proto:
@@ -63,10 +76,7 @@ test:
 # Coverage gate: per-package floors (see scripts/check-coverage.sh).
 # Needs the dev stack up (integration-gated tests must count).
 coverage:
-	TEST_DATABASE_URL='postgres://intivai_app:intivai_app@localhost:5433/intivai?sslmode=disable' \
-	TEST_REDIS_ADDR='localhost:6380' \
-	TEST_MINIO_ENDPOINT='localhost:9002' TEST_MINIO_ACCESS='minioadmin' TEST_MINIO_SECRET='minioadmin' \
-	bash ../scripts/check-coverage.sh
+	$(TEST_ENV) bash ../scripts/check-coverage.sh
 
 # Integration tests against a live Postgres+Redis (see CI + docker-compose).
 # Pass TEST_DATABASE_URL / TEST_REDIS_ADDR to point elsewhere.
@@ -76,27 +86,24 @@ test-integration:
 
 # Integration tests against the local dev stack (docker compose up first)
 test-integration-dev:
-	TEST_DATABASE_URL='postgres://intivai_app:intivai_app@localhost:5433/intivai?sslmode=disable' \
-	TEST_REDIS_ADDR='localhost:6380' \
-	TEST_MINIO_ENDPOINT='localhost:9002' TEST_MINIO_ACCESS='minioadmin' TEST_MINIO_SECRET='minioadmin' \
-	go test ./...
+	$(TEST_ENV) go test ./...
 
 migrate:
-	INTIVAI_MIGRATE_URL='postgres://intivai:intivai@localhost:5433/intivai?sslmode=disable' go run ./cmd/server -migrate-only
+	$(TEST_ENV) INTIVAI_MIGRATE_URL='postgres://intivai:intivai@localhost:5433/intivai?sslmode=disable' go run ./cmd/server -migrate-only
 
 # Boot the dev stack on a FRESH redis: stale asynq tasks/dead-letters from a
 # previous session must not leak into the new one. Containers are recreated
 # (redis data lives in the container layer); postgres + minio volumes persist.
 dev:
-	cd .. && docker compose --env-file .env -f docker-compose.yml -f docker-compose.dev.yml down
+	cd .. && $(COMPOSE) down
 	DOCKER_BUILDKIT=0 docker build -t intivai-app:latest .
 	$(MAKE) sandbox-images
 	bash ../scripts/gen-sandbox-certs.sh
-	cd .. && docker compose --env-file .env -f docker-compose.yml -f docker-compose.dev.yml up -d
+	cd .. && $(COMPOSE) up -d
 
 # Flush redis while the stack stays up (mid-session queue cleanup).
 redis-clear:
-	docker compose --env-file .env -f docker-compose.yml -f docker-compose.dev.yml exec redis redis-cli FLUSHALL
+	cd .. && $(COMPOSE) exec redis redis-cli FLUSHALL
 
 CV_PDF ?= /tmp/kilo/cv.pdf
 
@@ -121,11 +128,11 @@ seed:
 
 # Wipe volumes, start fresh containers, apply migrations, and seed sample data
 seed-fresh:
-	cd .. && docker compose --env-file .env -f docker-compose.yml -f docker-compose.dev.yml down -v
+	cd .. && $(COMPOSE) down -v
 	DOCKER_BUILDKIT=0 docker build -t intivai-app:latest .
 	$(MAKE) sandbox-images
 	bash ../scripts/gen-sandbox-certs.sh
-	cd .. && docker compose --env-file .env -f docker-compose.yml -f docker-compose.dev.yml up -d
+	cd .. && $(COMPOSE) up -d
 	sleep 3
 	$(MAKE) migrate
 	$(MAKE) seed SCENARIO=$(SCENARIO)
@@ -141,8 +148,7 @@ restore:
 # 100-concurrent-WS load check (M3 criterion). Needs the dev stack up.
 # CONNS overrides the connection count.
 load-ws:
-	TEST_DATABASE_URL='postgres://intivai_app:intivai_app@localhost:5433/intivai?sslmode=disable' \
-	BASE_URL='http://localhost:8081' CONNS=$(or $(CONNS),100) go run ./cmd/loadcheck
+	$(TEST_ENV) BASE_URL='http://localhost:8081' CONNS=$(or $(CONNS),100) go run ./cmd/loadcheck
 
 # k6 REST load test (100 concurrent users)
 load-k6:

@@ -1,7 +1,15 @@
 # Intivai — Caddy reverse proxy + static frontend (TLS auto via Let's Encrypt).
-# Replace intivai.example.com with the real domain before first deploy.
-# Frontend build ships to ./frontend/dist (see CI deploy job).
-intivai.example.com {
+# The site address interpolates $DOMAIN (set in .env.prod); falls back to
+# intivai.example.com. Frontend build ships to ./frontend/dist (see CI deploy).
+{$DOMAIN:intivai.example.com} {
+	# Security headers on the whole site (HSTS + clickjacking/MIME sniffing).
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+	}
+
 	# API + WebSocket (chat) → Go app. Caddy handles the WS upgrade.
 	handle /api/* {
 		reverse_proxy app:8080

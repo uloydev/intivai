@@ -1,7 +1,7 @@
 # sandboxd — the sandbox execution sidecar (ADR-0002). Owns the Docker
 # socket; serves mTLS gRPC on :8443. The app container never mounts the
 # socket.
-FROM golang:1.26-alpine AS build
+FROM golang:1.26.0-alpine3.23 AS build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download

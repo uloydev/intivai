@@ -10,12 +10,12 @@
 6. **Production-First Mindset:** This is NOT a beta project. It is aimed at making money. Every decision must prioritize stability, scalability, and security.
 7. **Strict Rule Adherence:** Strictly follow all rules defined in this document.
 8. **Fail-Safe Error Handling:** Never swallow errors. All errors must be handled, logged with context, and never leak sensitive data.
-9. **Strict Types:** TypeScript `any` is strictly forbidden. Go `interface{}` forbidden unless generic.
+9. **Strict Types:** TypeScript `any` is strictly forbidden. Go `any` (formerly `interface{}`) forbidden unless generic.
 10. **HR-Centric Product Mindset:** Every feature must strictly align with HR needs. Before implementing, ask: "As an HR professional, does this genuinely make my hiring process more efficient?" Build for the user, not just for the tech.
 11. **Depth Over Speed:** NEVER sacrifice quality for speed. Always perform deep, thorough, and systemic analysis (file-by-file, checking transaction boundaries, race conditions, and architecture constraints) before proposing solutions or declaring a review complete.
 12. **Proactive Systemic Auditing (Corollary to Depth Over Speed):** When a bug (e.g., missing database column in an `INSERT`, or an unchecked error) is identified in one repository or handler, NEVER stop at fixing just that one instance. You MUST proactively search and audit the entire codebase for the same class of bug before declaring the issue resolved.
 13. **Explicit State Inserts:** NEVER rely on database defaults (omitted columns) for fields that participate in state machines or domain logic (like `status`, `stage`). Always explicitly insert their starting values (e.g., `stage = 'applied'`) in repository `Create` methods and Raw SQL inserts to ensure the Go domain layer always loads a valid initial state.
-14. **No Dynamic JSON Parsing:** Enforcing the "Strict Types" rule. When handling incoming JSON (like WebSocket telemetry or worker payloads), you must define and use strict Go structs for nested data. NEVER use `map[string]interface{}` or `[]interface{}` as an escape hatch, even for "dynamic" or "extra" payload fields.
+14. **No Dynamic JSON Parsing:** Enforcing the "Strict Types" rule. When handling incoming JSON (like WebSocket telemetry or worker payloads), you must define and use strict Go structs for nested data. NEVER use `map[string]any` or `[]any` as an escape hatch, even for "dynamic" or "extra" payload fields.
 
 ## Project
 
@@ -144,6 +144,7 @@ is the top checklist in `M3_Plan.md`.
   - HTTP: tenant-tx middleware (already in place)
   - Workers/services: `db.RunInTx(ctx, pool, orgID, fn)`
 - Never touch RLS tables outside a tenant transaction (`db.TxFrom` required)
+- Candidate-portal OTP access goes through the OTP repository layer (`Create`/`FindValidByToken`/`FindValidByCodeHash`/`IncrementAttempts`/`Consume`/`PurgeExpired`) — handlers never run OTP SQL directly, and never duplicate lookup logic
 - Postgres semantics — test, don't assume:
   - A failed statement aborts the whole transaction (25P02). Unique-violation → savepoint (`tx.SavePoint` / `RollbackTo`) before recovery logic
   - A handler that wrote >=400 must not commit (tenant-tx middleware rolls back)

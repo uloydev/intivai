@@ -7,6 +7,17 @@
 # secrets (JWT, MinIO, origins). All values interpolate from .env.prod via
 # --env-file; `${VAR:?}` fails fast when a required secret is missing.
 # !override REPLACES the base port lists (compose v5 appends otherwise).
+#
+# ROLLBACK (keep last N image tags on the VPS):
+#   CI tags every deploy image with TAG=<git-sha> and also pushes :latest.
+#   To roll back, point compose at the previous tag and re-up:
+#     docker compose --env-file .env.prod -f docker-compose.yml \
+#       -f docker-compose.prod.yml up -d \
+#       -e IMAGE=<image> -e TAG=<previous-sha>
+#   (`up -d` recreates only the changed containers; `docker image prune -f`
+#   in CI only removes <none> layers, never tagged images.) Keep the last 5
+#   TAGs available locally; `docker images ghcr.io/<IMAGE> --format '{{.Tag}}'`
+#   lists what you can roll back to.
 services:
   migrate:
     image: ghcr.io/${IMAGE:-intivai/backend}:${TAG:-latest}
@@ -55,6 +66,17 @@ services:
       INTIVAI_SANDBOX_CLIENT_KEY: /sandbox-certs/client-key.pem
     restart: always
     mem_limit: 1g
+    read_only: true
+    tmpfs:
+      - /tmp:rw,size=64m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null -T 3 http://localhost:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
     volumes:
       - appdata:/data
       - ./backend/.sandbox-certs:/sandbox-certs:ro
@@ -68,7 +90,7 @@ services:
       minio:
         condition: service_healthy
       sandbox-sidecar:
-        condition: service_started
+        condition: service_healthy
 
   sandbox-sidecar:
     image: ghcr.io/${IMAGE:-intivai/backend}:${TAG:-latest}
@@ -82,12 +104,20 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./backend/.sandbox-certs:/certs:ro
     restart: always
+    mem_limit: 512m
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost 8443"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
   postgres:
     ports: !override []
     environment:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set in .env.prod}
     restart: always
+    mem_limit: 1g
 
   redis:
     ports: !override []
@@ -95,6 +125,7 @@ services:
     command: redis-server --appendonly yes
     volumes:
       - redisdata:/data
+    mem_limit: 512m
 
   minio:
     ports: !override []
@@ -102,26 +133,34 @@ services:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-intivai}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set in .env.prod}
     restart: always
+    mem_limit: 1g
 
   caddy:
     image: caddy:2-alpine
     restart: always
     ports: !override ["80:80", "443:443"]
+    mem_limit: 256m
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null -T 3 http://localhost/"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - ./frontend/dist:/srv/frontend:ro
       - caddydata:/data
       - caddyconfig:/config
     depends_on:
-      - app
-
-  whisper:
-    build:
-      context: ./backend/docker/whisper
-    ports: !override []
-    restart: always
+      app:
+        condition: service_healthy
 
   mailpit:
+    profiles: ["none"]
+
+  # Voice is deferred (D6) — whisper stays out of prod. The dev compose
+  # entry remains; this profile pin keeps it from booting here.
+  whisper:
     profiles: ["none"]
 
 volumes:

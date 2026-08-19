@@ -13,7 +13,10 @@ FLOOR_ALL=50
 FLOOR_DOMAIN=70
 FAIL=0
 
-go test -count=1 -cover ./... > /tmp/intivai-coverage.txt 2>&1 || true
+COV_FILE="$(mktemp)"
+trap 'rm -f "$COV_FILE"' EXIT
+
+go test -count=1 -cover ./... > "$COV_FILE" 2>&1 || true
 
 while IFS= read -r line; do
   case "$line" in
@@ -56,7 +59,7 @@ while IFS= read -r line; do
     echo "LOW: $pkg ${pct}% < ${floor}%"
     FAIL=1
   fi
-done < /tmp/intivai-coverage.txt
+done < "$COV_FILE"
 
 if [ "$FAIL" -eq 0 ]; then
   echo "coverage gate OK"

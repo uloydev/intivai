@@ -45,11 +45,18 @@ run_sql() {
     printf "  ↳ [%s] %s... " "$SCENARIO" "$filename"
 
     if command -v psql >/dev/null 2>&1; then
-        psql "$DB_URL" -v ON_ERROR_STOP=1 -f "$file" >/dev/null 2>&1 || {
-            # Fallback to docker compose if direct psql host port differs
+        PSQL_ERR="$(mktemp)"
+        if ! psql "$DB_URL" -v ON_ERROR_STOP=1 -f "$file" >/dev/null 2>"$PSQL_ERR"; then
+            # Fallback to docker compose if direct psql host port differs.
+            # Surface the original error first — silent fallback hides drift.
+            echo "direct psql failed — falling back to docker compose:"
+            sed 's/^/    /' "$PSQL_ERR"
+            rm -f "$PSQL_ERR"
             docker compose -f "${SCRIPT_DIR}/../docker-compose.yml" -f "${SCRIPT_DIR}/../docker-compose.dev.yml" \
                 exec -T postgres psql -U intivai -d intivai -v ON_ERROR_STOP=1 < "$file" >/dev/null
-        }
+        else
+            rm -f "$PSQL_ERR"
+        fi
     else
         docker compose -f "${SCRIPT_DIR}/../docker-compose.yml" -f "${SCRIPT_DIR}/../docker-compose.dev.yml" \
             exec -T postgres psql -U intivai -d intivai -v ON_ERROR_STOP=1 < "$file" >/dev/null

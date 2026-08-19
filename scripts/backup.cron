@@ -1,1 +1,6 @@
+# Intivai nightly backup — pg_dump + MinIO mirror into intivai-backups, 14-day retention.
+# Offsite DR (hard gate 2026-09-30): enable by setting OFFSITE_DEST, e.g.
+#   OFFSITE_DEST='b2:intivai-backups/prod/'     (rclone remote:path)
+#   OFFSITE_DEST='s3://bucket/intivai-backups/' (aws s3, needs aws cli)
+# rclone/aws must be installed and configured on the host; unset OFFSITE_DEST = no-op.
 0 2 * * * root /opt/intivai/scripts/backup.sh >> /var/log/intivai-backup.log 2>&1
