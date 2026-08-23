@@ -1,22 +1,33 @@
 # Intivai — Project Structure (current implementation)
 
+> Status: current · Last-reviewed: 2026-08-24 · Owner: EM
+
 DDD + hexagonal intent, applied pragmatically: every bounded context has
 `domain` (entities + ports), `application` (use cases + workers), and
 `infrastructure` (persistence/adapters), with HTTP handlers in `api/`.
 The original design doc (pre-implementation) listed planned files that
 landed differently — this file is the **synced source of truth**; the design
-rationale lives in `AI_Interviewer_Research.md`.
+rationale lives in [`design-decisions.md`](design-decisions.md).
 
 ```
 /
-├── AI_Interviewer_Phases.md            # Phase plan + testing criteria (synced)
-├── AI_Interviewer_Research.md          # Design decisions (synced with impl notes)
-├── AI_Interviewer_Project_Structure.md # THIS FILE
-├── M3_Plan.md                          # M3 progress + carryover + BETA GATE
-├── P4_Plan.md                          # Beta-launch build plan (P4a + FE + P6a)
-├── AGENTS.md                           # Engineering workflow (commands, conventions)
-├── api/openapi.yaml                    # API contract (single source for DTOs)
-├── design-system/intivai/              # MASTER.md + page overrides (FE tokens)
+├── README.md                             # What + quickstart
+├── AGENTS.md                             # Engineering workflow (commands, conventions)
+├── CONTEXT.md                            # Ubiquitous language
+├── CHANGELOG.md                          # Tag → notable changes
+├── api/openapi.yaml                      # API contract (single source for DTOs)
+├── docs/
+│   ├── README.md                         # Docs index (status + last-reviewed per doc)
+│   ├── FINDINGS.md                       # Single remediation ledger (all reviews)
+│   ├── product/                          # PRD, pricing, demo seed guide
+│   ├── engineering/                      # THIS FILE, design decisions, roadmap,
+│   │                                     #   beta gate, schemas, threat model, SLOs
+│   ├── adr/                              # Architecture decision records
+│   ├── plans/active | plans/archive      # In-flight vs closed plans
+│   ├── reviews/                          # Dated review snapshots (append-only)
+│   ├── compliance/                       # Access control, retention, IR, SOC 2
+│   └── runbooks/                         # deploy, rollback, restore drill, LLM outage
+├── design-system/intivai/                # MASTER.md + page overrides (FE tokens)
 │
 ├── backend/                            # Go monolith (modular)
 │   ├── cmd/
@@ -25,7 +36,7 @@ rationale lives in `AI_Interviewer_Research.md`.
 │   ├── pkg/
 │   │   ├── config/                     # Viper env config (+ validation)
 │   │   ├── db/                         # GORM pool (pgx stdlib), tenant/tx ctx,
-│   │   │   └── migrations/             #   golang-migrate embedded (001–007)
+│   │   │   └── migrations/             #   golang-migrate embedded (001–025 as of 2026-08-24)
 │   │   ├── logger/                     # zerolog
 │   │   ├── metrics/                    # Prometheus custom metrics (LLM tokens, active WS)
 │   │   ├── queue/                      # asynq client/server, task-name consts
@@ -81,7 +92,7 @@ rationale lives in `AI_Interviewer_Research.md`.
 │   │   ├── notification/               # email notification subsystem
 │   │   │   ├── application/            # EmailWorker (Mailpit SMTP dispatch)
 │   │   │   └──                         #   interview invitation templates
-│   │   ├── llm/                        # DeepSeek provider (chat/stream/structured),
+│   │   ├── llm/                        # LLM provider (chat/stream/structured),
 │   │   │                               #   Client with retry + fallback
 │   │   ├── embedding/                  # local 384-dim embeddings (cybertron,
 │   │   │                               #   CGO-free; multi-qa default, bge via env)

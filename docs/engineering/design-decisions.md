@@ -1,5 +1,9 @@
 # AI Interviewer SaaS — Production-Grade Research
 
+> Status: current · Last-reviewed: 2026-08-24 · Owner: EM
+> Canonical evaluation JSON + WS frame payloads + size/token caps live in
+> [`schemas.md`](schemas.md) — this doc links to them instead of duplicating.
+
 ## Table of Contents
 1. CV Parsing & Scoring
    - 1.1 PDF Text Extraction
@@ -35,7 +39,7 @@ reasoning. Status markers: ✅ implemented as designed · ⚠️ deviated (reaso
 |---|---|---|
 | 1.1 PDF text extraction via pure-Go lib | ✅ `ledongthuc/pdf` | `cv/application/parse_worker.go` |
 | 1.2 Scanned PDFs → pdftoppm + Tesseract | ✅ (functional fixture test) | `cv/infrastructure/ocr/` |
-| 1.3 LLM structured extraction (JSON mode) | ✅ DeepSeek `StructuredOutput`, 12K char cap | `cv/application/extract_worker.go` |
+| 1.3 LLM structured extraction (JSON mode) | ✅ LLM `StructuredOutput`, 12K char cap | `cv/application/extract_worker.go` |
 | 1.4 Weighted scoring (skills .35 / exp .20 / semantic .25 / edu .10 / certs .10) | ✅ | `screening/domain/scoring.go` |
 | 1.5 Per-tenant weights + threshold fallback | ✅ org > job > default 50 | `screening/application/org_settings.go` |
 | 1.6 Company context + tenant prompt, versioning, rails | ✅ `ContainsInjection`, `ValidatePrompt`, hash dedup, version pinning on interviews | `context/` + `interview` (context_version) |
@@ -53,7 +57,7 @@ reasoning. Status markers: ✅ implemented as designed · ⚠️ deviated (reaso
 | §4.7 CORS/CSWSH | ✅ origin allowlist (CORS + WS), `?ticket=` for browsers | `httpmw/cors.go`, `interview/api` |
 | §4.8 Rate limiting | ✅ Redis sliding window (auth/tenant/user), fail-open | `httpmw/ratelimit.go` |
 | §4.9 Stack | ✅ GORM over pgx stdlib, Fiber, MinIO, React 19 + TypeScript + Vite | everywhere |
-| §5 LLM patterns | ✅ DeepSeek provider port; evaluation adds injection rails + schema validation (LLM never sets the final score) | `llm/`, `evaluation/` |
+| §5 LLM patterns | ✅ LLM provider port; evaluation adds injection rails + schema validation (LLM never sets the final score) | `llm/`, `evaluation/` |
 | §6 Anti-Cheating & Proctoring | ✅ Real-time telemetry (tab switch, away time, large paste detection, voice anomalies) + Maroto PDF audit. **Posture (design decision): advisory only** — events are client-reported and spoofable; the integrity score is a separate report axis, never mixed into the evaluation score, never auto-fails an interview. Raw events retention-capped at 500/interview; the summary reflects full history. | `interview/domain/proctoring.go`, `useProctoring.ts`, migration 009 |
 | §7 Consent & Email | ✅ `consent_given` gate before interview start; Mailpit SMTP notification worker | `interview` (consent endpoint), `notification/application/email_worker.go` |
 | §8 Executive PDF Export | ✅ Maroto v2 executive scorecards with dimension radar + proctoring audit | `evaluation/application/pdf.go` |
@@ -127,7 +131,7 @@ type ResumeData struct {
 
 // Use OpenAI JSON mode for structured output
 resp, _ := client.CreateChatCompletion(ctx, ChatCompletionRequest{
-    Model: "deepseek-chat",  // cheap for extraction
+    Model: "MiniMax-M2.7-highspeed",  // cheap for extraction
     Messages: []Message{
         {Role: "system", Content: prompt},
         {Role: "user", Content: resumeText},
@@ -302,7 +306,7 @@ Call at the end of `ResolveScoringWeights` before returning — **required, do n
 - **Audit:** the breakdown stores the weights USED per scoring (not the configured ones) → traceable why a score is what it is
 
 **Embeddings for semantic matching:**
-- Use **local embedding (fastembed, bge-small-en-v1.5 = 384 dims)** — $0, consistent with the Mnemosyne layer. DeepSeek has no public embedding API — do not use. If you change the embedding model, update `VECTOR(dim)` + migration.
+- Use **local embedding (fastembed, bge-small-en-v1.5 = 384 dims)** — $0, consistent with the Mnemosyne layer. LLM provider has no public embedding API — do not use. If you change the embedding model, update `VECTOR(dim)` + migration.
   - **Status:** deferred (M2.5). Columns `VECTOR(384)` + HNSW index exist (migration 002); `SemanticMatch` currently uses keyword overlap (`internal/screening/domain/semantic.go`); pgvector bank adapter stores NULL embeddings until fastembed lands.
 - Pre-compute JD embeddings on create
 - Compute CV embedding on upload
@@ -454,7 +458,7 @@ CREATE TABLE tenant_prompts (
 
 ### Architecture
 ```
-Browser ──WebSocket──▶ Go Server ──SSE──▶ LLM API (streaming)   // DeepSeek streaming = SSE, not WebSocket
+Browser ──WebSocket──▶ Go Server ──SSE──▶ LLM API (streaming)   // LLM streaming = SSE, not WebSocket
                            │
                       Save to PostgreSQL
                       (messages, evaluations)
@@ -489,11 +493,13 @@ On complete → LLM generates final evaluation:
 ### Critical: Heartbeat, Timeout & Reconnection
 
 ```go
-// Server-side config
+// Server-side config — DESIGN INTENT. Implemented mechanism differs: the
+// idle/per-question timeout is a 3-minute WS read deadline per frame (not a
+// timer); see the M3 implementation notes below this section.
 const (
     InterviewMaxDuration = 30 * time.Minute
-    IdleTimeout         = 5 * time.Minute
-    PerQuestionTimeout  = 3 * time.Minute
+    IdleTimeout         = 5 * time.Minute   // design intent; implemented as 3-min read deadline
+    PerQuestionTimeout  = 3 * time.Minute   // == implemented read deadline
     PingInterval        = 30 * time.Second
     PongWait            = 10 * time.Second
 )
@@ -608,36 +614,19 @@ Rules:
 - Continue in candidate's language if supported by LLM
 
 ### Evaluation
-After interview, LLM generates structured evaluation via function calling:
-```json
-{
-  "overall_score": 78,
-  "dimensions": {
-    "technical": { "score": 82, "weight": 0.4 },
-    "communication": { "score": 75, "weight": 0.2 },
-    "problem_solving": { "score": 80, "weight": 0.25 },
-    "culture_fit": { "score": 70, "weight": 0.15 }
-  },
-  "per_question": [
-    {
-      "question_idx": 1,
-      "score": 85,
-      "rationale": "Strong understanding of distributed systems",
-      "strengths": ["Clear explanation", "Used real examples"],
-      "weaknesses": []
-    }
-  ],
-  "strengths": ["Go expertise", "System design"],
-  "weaknesses": ["Limited cloud experience"],
-  "recommendation": "proceed"
-}
-```
-
-**Canonical schema** — the evaluator struct (§5) and Phase 4 must follow this; don't create new schemas. Dimension weights must sum to ≈ 1.
+After the interview, the LLM produces a structured evaluation. The canonical
+JSON schema (overall_score, dimensions, per_question, strengths/weaknesses,
+recommendation enum) lives in [`schemas.md`](schemas.md) — single source of
+truth; the evaluator struct in §5 mirrors it. Dimension weights must sum to ≈ 1.
 
 ---
 
 ## 3. AI Interview (Voice/Video)
+
+> **Status: gated demo — NOT mounted in production routing.** STT/LLM are
+> mocked and Opus decode/encode is unimplemented; see the sync table above and
+> ADR-0006 for the scope history. Everything below is design intent, not a
+> description of shipped behavior.
 
 ### ⚠️ Recommendation: Open Source / Self-Hosted (MVP)
 
@@ -646,7 +635,7 @@ After interview, LLM generates structured evaluation via function calling:
 | Component | Open Source Solution | Cost | Go Integration |
 |-----------|--------------------|------|----------------|
 | **STT** | **Whisper** via `whisper.cpp` | Free (self-hosted) | `os/exec` whisper.cpp CLI, or CGo bindings |
-| **LLM** | **DeepSeek Flash** (via API) | $0.0001/1K tokens | REST API from Go |
+| **LLM** | **LLM** (via API) | $0.0001/1K tokens | REST API from Go |
 | **TTS** | **Piper TTS** or **Edge TTS** (free API) | Free | `os/exec` piper, or REST for Edge TTS |
 | **WebRTC** | **Pion** + **coturn** (STUN/TURN) | Free | Pure Go WebRTC |
 
@@ -665,8 +654,8 @@ Browser (getUserMedia)
   │       ├──▶ Whisper (STT)
   │       │    └─ via whisper.cpp subprocess
   │       │
-  │       ├──▶ DeepSeek Flash (LLM)
-  │       │    └─ via API: https://api.deepseek.com/v1/chat/completions
+  │       ├──▶ LLM (LLM)
+  │       │    └─ via API: https://ai.sumopod.com/v1/chat/completions
   │       │
   │       ├──▶ Piper / Edge TTS
   │       │    └─ via piper subprocess or Edge TTS REST
@@ -707,18 +696,18 @@ Without VAD the server can't tell when an answer ends → audio gets cut or runs
 
 Flow: WebRTC audio → jitter buffer → VAD → segment → Whisper STT (once per segment).
 
-**LLM — DeepSeek Flash (API)**
+**LLM — LLM (API)**
 
-DeepSeek Flash is the cheapest production-grade LLM at $0.0001/1K tokens (~$0.001 per interview response). Has OpenAI-compatible API so Go SDK works directly.
+LLM is the cheapest production-grade LLM at $0.0001/1K tokens (~$0.001 per interview response). Has OpenAI-compatible API so Go SDK works directly.
 
 ```go
-// DeepSeek Flash via OpenAI-compatible API
-func deepSeekChat(messages []Message) (string, error) {
-    client := openai.NewClient(os.Getenv("DEEPSEEK_API_KEY"))
-    client.SetBaseURL("https://api.deepseek.com/v1")
+// LLM via OpenAI-compatible API
+func llmChat(messages []Message) (string, error) {
+    client := openai.NewClient(os.Getenv("LLM_API_KEY"))
+    client.SetBaseURL("https://ai.sumopod.com/v1")
     
     resp, err := client.CreateChatCompletion(ctx, ChatCompletionRequest{
-        Model: "deepseek-chat",  // Flash model
+        Model: "MiniMax-M2.7-highspeed",  // Flash model
         Messages: messages,
         Stream: true,
     })
@@ -752,10 +741,10 @@ func edgeTTS(text string) ([]byte, error) {
 | Stack | Cost per interview (15min) | Dependency |
 |-------|---------------------------|------------|
 | **OpenAI Realtime API** | ~$0.90 | Paid API, vendor lock-in |
-| **Deepgram + DeepSeek + ElevenLabs** | ~$0.28 | 3 paid APIs (premium option, not MVP) |
-| **Whisper + DeepSeek Flash + Piper/Edge TTS** | **~$0.001** | Whisper/Piper free, DeepSeek ~$0.0001/1K tokens |
+| **Deepgram + LLM + ElevenLabs** | ~$0.28 | 3 paid APIs (premium option, not MVP) |
+| **Whisper + LLM + Piper/Edge TTS** | **~$0.001** | Whisper/Piper free, LLM ~$0.0001/1K tokens |
 
-**Recommendation:** Start with Whisper + DeepSeek Flash + Piper/Edge TTS. Near-zero API cost ($0.001/interview), DeepSeek API is cheap enough that self-hosting hardware costs more. Upgrade to paid services only when you need higher accuracy or scale.
+**Recommendation:** Start with Whisper + LLM + Piper/Edge TTS. Near-zero API cost ($0.001/interview), LLM API is cheap enough that self-hosting hardware costs more. Upgrade to paid services only when you need higher accuracy or scale.
 
 ### Hardware Requirements
 
@@ -1321,11 +1310,11 @@ app.Use(cors.New(cors.Config{
 | **WebSocket** | gorilla/websocket | Chat interview, signaling |
 | **WebRTC** | Pion + coturn | Voice/video (STUN/TURN required) |
 | **STT** | Whisper via whisper.cpp | Free, self-hosted, `os/exec` integration |
-| **LLM** | DeepSeek Flash = `deepseek-chat` (via API) | Cheap ($0.0001/1K tokens), fast, high quality |
+| **LLM** | LLM = `MiniMax-M2.7-highspeed` (via API) | Cheap ($0.0001/1K tokens), fast, high quality |
 | **TTS** | Piper TTS / Edge TTS | Free, self-hosted or free API |
 | **Embeddings** | local fastembed (bge-small) | $0, consistent with the Mnemosyne layer |
 | **Migrations** | golang-migrate | Versioned DB migrations |
-| **Frontend** | Next.js + React | SSR dashboard, real-time UI |
+| **Frontend** | Vite + React SPA (TypeScript, Tailwind, shadcn/ui) | Fast static SPA behind Caddy; Next.js was evaluated and rejected (SSR unneeded for an authed dashboard; static export simpler) |
 | **Auth** | JWT + per-tenant RBAC | Multi-tenant ready |
 | **Observability** | Prometheus + health endpoints | Production monitoring |
 | **Deploy** | Docker Compose → K8s | MVP to production |
@@ -1346,7 +1335,7 @@ type LLMProvider interface {
 }
 
 type LLMClient struct {
-    primary    LLMProvider  // DeepSeek Flash (cheap, fast)
+    primary    LLMProvider  // LLM (cheap, fast)
     fallback   LLMProvider  // Secondary OpenAI-compatible provider (e.g. OpenRouter / Neuralwatt) — NOT Anthropic (expensive, contradicts cost strategy)
     metrics    *MetricsRecorder
 }
@@ -1404,7 +1393,7 @@ func buildSafePrompt(ctx InterviewContext) ([]Message, error) {
 }
 ```
 
-**Note:** `cl100k_base` ≈ DeepSeek tokenizer (5-10% drift) — good enough for a budget guard; use the provider's tokenizer if you need precision.
+**Note:** `cl100k_base` ≈ LLM tokenizer (5-10% drift) — good enough for a budget guard; use the provider's tokenizer if you need precision.
 
 ### Rate Limit Handling (429)
 
@@ -1429,7 +1418,8 @@ func (rl *RateLimiter) Allow(tenantID string, tokens int) bool {
 ### Structured Output (Function Calling)
 
 ```go
-// Canonical — single source of truth (synced with schema §2 + Phase 4)
+// Canonical Go mirror of the evaluation schema in docs/engineering/schemas.md
+// (that file is the single source of truth; keep this struct in sync with it)
 type InterviewEvaluation struct {
     OverallScore   int                  `json:"overall_score" jsonschema:"minimum=0,maximum=100"`
     Dimensions     map[string]Dimension `json:"dimensions"` // technical, communication, problem_solving, culture_fit
@@ -1454,7 +1444,7 @@ type PerQuestionScore struct {
 
 func (e *Evaluator) Evaluate(transcript []Message) (*InterviewEvaluation, error) {
     resp, err := e.llm.ChatWithRetry(ctx, ChatRequest{
-        Model: "deepseek-chat",  // cheap for evaluation
+        Model: "MiniMax-M2.7-highspeed",  // cheap for evaluation
         Messages: []Message{
             {Role: "system", Content: evaluationPrompt},
             {Role: "user", Content: formatTranscript(transcript)},
@@ -1530,9 +1520,9 @@ func normalizeDimensionWeights(e *InterviewEvaluation) {
 
 | Strategy | Savings | Implementation |
 |----------|---------|---------------|
-| **Prompt caching** (DeepSeek prefix caching) | Up to 50% on long contexts | Structure prompts with JD + CV as prefix |
+| **Prompt caching** (LLM prefix caching) | Up to 50% on long contexts | Structure prompts with JD + CV as prefix |
 | **Semantic caching** | 20-40% on repeat queries | Redis + pgvector similarity (>0.95) |
-| **Model tiering** | 30-60% | DeepSeek Flash for extraction/evaluation, DeepSeek Flash (reasoning) for complex questions |
+| **Model tiering** | 30-60% | LLM for extraction/evaluation, LLM (reasoning) for complex questions |
 | **Response caching** | 10-20% | Cache common interview questions |
 | **Token optimization** | 10-20% | Sliding window, trim whitespace, concise prompts |
 | **Streaming vs non-streaming** | Same cost | Always stream (better UX, same tokens) |
@@ -1668,7 +1658,7 @@ func normalizeDimensionWeights(e *InterviewEvaluation) {
 
 | External Tool | Purpose | Go Integration |
 |---------------|---------|----------------|
-| **DeepSeek Flash** | LLM (cheap, fast) | OpenAI-compatible API `api.deepseek.com/v1` |
+| **LLM** | LLM (cheap, fast) | OpenAI-compatible API `ai.sumopod.com/v1` |
 | **whisper.cpp** | Self-hosted STT | `os/exec` CLI |
 | **Piper TTS** | Self-hosted TTS | `os/exec` CLI |
 | **Edge TTS** | Free TTS API | `http.Get` (no API key) |
@@ -1689,7 +1679,7 @@ func normalizeDimensionWeights(e *InterviewEvaluation) {
 | ✅ Added heartbeat, timeout, reconnection | Production WebSocket reliability |
 | ✅ Added bias prevention + prohibited questions | Legal compliance for HR SaaS |
 | ✅ Added language detection | Handle multi-language candidates |
-| ✅ **Replaced OpenAI Realtime WebRTC with Whisper + DeepSeek Flash + Piper/Edge TTS** | Voice stack self-hosted, $0.001/interview |
+| ✅ **Replaced OpenAI Realtime WebRTC with Whisper + LLM + Piper/Edge TTS** | Voice stack self-hosted, $0.001/interview |
 | ✅ Added WebRTC complexity warning + TURN requirement | Realistic architecture assessment |
 | ✅ Added recording consent + GDPR compliance | Legal requirement |
 | ✅ Added bot detection | Prevent AI-cheating |
