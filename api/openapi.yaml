@@ -786,22 +786,9 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
 
-  /api/v1/interviews/{id}/voice:
-    get:
-      tags: [Interviews]
-      summary: WebSocket voice session (WebRTC signaling)
-      description: |
-        Upgrade to WebSocket for WebRTC voice interview. Accepts a ws_ticket (candidate) or recruiter auth token.
-
-        **Server → client frames:** offer, answer, audio (base64), error
-        **Client → server frames:** offer, candidate (ICE)
-      parameters:
-        - $ref: "#/components/parameters/InterviewID"
-      responses:
-        "101":
-          description: WebSocket upgrade
-        "401":
-          $ref: "#/components/responses/Unauthorized"
+  # NOTE: /api/v1/interviews/{id}/voice (WebRTC gated demo) is intentionally NOT
+  # mounted in main.go while voice stays demo-deferred — see ADR-0006. Re-add the
+  # path block when the route ships.
 
   # ── Webhooks ───────────────────────────────────────────────────────────
   /api/v1/webhooks:
