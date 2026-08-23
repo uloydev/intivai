@@ -6,19 +6,19 @@ an AI interviewer. Post-interview, a structured evaluation report lands back
 with the recruiter.
 
 **Status:** MVP backend (P1–P3) + beta scope (P4a + FE + P6a) complete.
-Tracking the beta gate: `M3_Plan.md`.
+Tracking the beta gate: `docs/engineering/beta-gate.md`.
 
 ---
 
 ## Quickstart (development)
 
-Prereqs: Docker + Docker Compose v5, Go 1.26, Node 22, Python 3 (smoke/OCR).
+Prereqs: Docker + Docker Compose v2 (compose spec), Go 1.26, Node 22, Python 3 (smoke/OCR).
 
 ```bash
 # 1. Backend stack (fresh redis each run; postgres/minio volumes persist)
 cd backend && make dev
 
-# 2. Seed a DeepSeek key for the full pipeline (extract/evaluation)
+# 2. Seed a LLM API key for the full pipeline (extract/evaluation)
 #    (make dev already loads it from .env if present)
 
 # 3. Quick Demo Seeder (optional)
@@ -28,7 +28,7 @@ make seed           # seeds demo org (admin@demo.io / password123) + jobs + cont
 make check          # gofmt + golangci-lint + vet + build + unit tests
 make test-integration-dev   # integration tests vs the running stack
 make coverage       # per-package coverage floors
-make smoke          # full E2E API scenario (real DeepSeek; CV_PDF=/tmp/kilo/cv.pdf)
+make smoke          # full E2E API scenario (real LLM; CV_PDF=/tmp/kilo/cv.pdf)
 make load-ws        # 100-concurrent WS load check
 make load-k6        # k6 REST load test (100 concurrent users)
 
@@ -37,7 +37,7 @@ cd frontend
 npm ci
 npm run dev         # http://localhost:5173 (proxies /api + WS to :8081)
 npm run build && npx vitest run   # gates
-npx playwright test # E2E happy path (needs stack + DeepSeek key)
+npx playwright test # E2E happy path (needs stack + LLM API key)
 ```
 
 Registration is self-serve: `/register` creates an org + admin, then the
@@ -54,8 +54,8 @@ Browser (React SPA) ──► Caddy (prod: TLS + static + /api proxy)
                             │
         ┌─────────┬─────────┼──────────┬───────────┐
         ▼         ▼         ▼          ▼           ▼
-    PostgreSQL   Redis    MinIO    DeepSeek   (memory: SQLite dev /
-    (+pgvector,  (queue,   (CVs,    (extract,  pgvector bank prod)
+    PostgreSQL   Redis    MinIO    SumoPod  (memory: SQLite dev /
+     (+pgvector,  (queue,   (CVs,    (extract, pgvector bank prod)
      RLS FORCE)  rate     contexts) chat,
                  limits)            evaluation)
 ```
@@ -75,14 +75,23 @@ Browser (React SPA) ──► Caddy (prod: TLS + static + /api proxy)
 
 ## Documentation index
 
+Full index with status + freshness: **`docs/README.md`**. Landmarks:
+
 | Doc | Contents |
 |-----|----------|
-| `AI_Interviewer_Phases.md` | Phase plan (P0–P6), deliverables, testing criteria — synced to implementation |
-| `AI_Interviewer_Research.md` | Design decisions + implementation-sync table |
-| `AI_Interviewer_Project_Structure.md` | Current code structure, layer rules, deviations |
-| `M3_Plan.md` | M3 progress, carryover backlog, **Beta Gate** checklist |
-| `P4_Plan.md` | Beta-launch build plan (P4a backend, FE workstreams, P6a ops) |
-| `api/openapi.yaml` | HTTP + WS protocol contract |
+| `docs/product/prd.md` | PRD — goals, non-goals, epics, NFRs |
+| `docs/product/pricing.md` | Pricing (single source) |
+| `docs/engineering/architecture.md` | Code structure, layer rules |
+| `docs/engineering/design-decisions.md` | Design record + implementation sync |
+| `docs/engineering/roadmap.md` | Phase plan (P0–P6), testing criteria |
+| `docs/engineering/beta-gate.md` | Beta gate status |
+| `docs/engineering/schemas.md` | Evaluation schema, WS frames, limits |
+| `docs/engineering/threat-model.md` · `slos.md` | Security model · SLOs |
+| `docs/adr/` | Decision records (0001–0007 + template) |
+| `docs/FINDINGS.md` | Single findings/remediation ledger |
+| `docs/runbooks/` | Deploy, rollback, restore drill, LLM outage |
+| `docs/compliance/` | Access control, retention, IR, SOC 2 readiness |
+| `api/openapi.yaml` | HTTP + WS protocol contract (single spec) |
 | `design-system/intivai/` | Design tokens, shadcn mapping, page overrides |
 | `AGENTS.md` | Engineering workflow: commands, TDD, conventions |
 
@@ -109,7 +118,7 @@ Deployments: push to `main` → CI builds/pushes ghcr + ships FE + SSH
 TAG). Secrets: `.env.prod` (gitignored), GH Actions secrets
 (`PROD_HOST/PROD_USER/PROD_SSH_KEY`).
 
-> Pre-deploy checklist + beta gate: `M3_Plan.md` §Beta Gate. Known
+> Pre-deploy checklist + beta gate: `docs/engineering/beta-gate.md`. Known
 > deviations (D5): backups target MinIO only — offsite (B2/S3) no later than
 > first paying customer / 2026-09-30.
 
@@ -118,7 +127,7 @@ TAG). Secrets: `.env.prod` (gitignored), GH Actions secrets
 - **Backend**: unit (domain, pure) + integration (env-gated, real RLS via
   `TEST_DATABASE_URL`); coverage floors (domain ≥70, others ≥50)
 - **FE**: Vitest (lib/api, lib/ws) + Playwright E2E (full candidate journey
-  with real DeepSeek; step-logged)
+  with real LLM; step-logged)
 - **CI**: backend (fmt/lint/vet/build/test/race), integration (postgres +
   redis + minio services), coverage gate, FE (build + vitest), smoke,
   deploy-on-main
