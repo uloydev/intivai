@@ -226,7 +226,7 @@ GLOBAL DEFAULTS (code constant — always present, can't disappear)
 3. Tenant sets invalid value (negative, NaN, >1) → validation rejects & falls back to the global default for that field
 4. Threshold (`min_score_to_proceed`) is per-tenant too: default 50, overridable per org or per job
 
-**Implementasi:**
+**Implementation:**
 
 ```go
 
@@ -328,7 +328,7 @@ Call at the end of `ResolveScoringWeights` before returning — **required, do n
 #### A. Company Context (file or text)
 
 Tenant uploads a file (PDF/MD/TXT) or pastes text containing company context:
-- Values & budaya kerja
+- Values & work culture
 - Tech stack, product, architecture
 - Role-specific requirements
 - FAQ / expected answers
@@ -482,28 +482,22 @@ Browser ──WebSocket──▶ Go Server ──SSE──▶ LLM API (streaming
 
 ### WebSocket Chat Flow
 
-```
+Frame names and payloads are defined in `api/openapi.yaml` and summarized in
+[`schemas.md`](schemas.md). Flow shape:
 
-Client connects → Server upgrades to WS (Authorization: WS ticket — lihat §3 Candidate Access)
+```
+Client connects → Server upgrades to WS (ws_ticket — see §3 Candidate Access)
   ↓
-Server sends: {"type": "interview.start", 
-               "session_id": "iv_abc123", 
-               "total_questions": 5,
-               "max_duration_min": 30}
+Server sends: interview.start (session_id, total_questions, budget)
   ↓
-Client sends: {"type": "answer", "content": "...", "question_idx": 1}
+Client sends: answer
   ↓
 Server streams to LLM with context:
   [System prompt + JD + CV + conversation history]
   ↓
-Server streams tokens back via WebSocket:
-  {"type": "token", "content": "Great"}
-  {"type": "token", "content": " answer"}
-  ...
-  {"type": "response_end", "evaluation": {...}}
+Server streams token frames back, then a response frame
   ↓
-On complete → LLM generates final evaluation:
-  {"type": "evaluation", "scores": {...}, "feedback": "..."}
+On complete → evaluation frame carries the report (or status:pending + async retry)
 ```
 
 ### Critical: Heartbeat, Timeout & Reconnection
@@ -669,7 +663,7 @@ Browser (getUserMedia)
   │
   ├──▶ Go Server (Pion + coturn)
   │       │
-  │       ├──▶ VAD (silero-vad) — segmentasi utterance
+  │       ├──▶ VAD (silero-vad) — segments utterances
   │       │    └─ batas jawaban → trigger STT
   │       ├──▶ Whisper (STT)
   │       │    └─ via whisper.cpp subprocess
@@ -1597,7 +1591,7 @@ func normalizeDimensionWeights(e *InterviewEvaluation) {
 
 **Frame to the buyer outcome, not engineering features.** Recruiters/HR don't care that our backend is Go — they care about: getting good candidates faster, not missing good talent, consistent & fair evaluations.
 
-| # | Buyer outcome | Fitur pendukung |
+| # | Buyer outcome | Supporting features |
 |---|---------------|-----------------|
 | 1 | **Get matching candidates 2x faster** | CV-gap questioning: questions generated from JD↔CV gaps, not a generic question bank |
 | 2 | **All-in-one pipeline, pay once** | CV screening → chat interview → voice interview → report. Competitors charge per module |
@@ -1626,13 +1620,10 @@ func normalizeDimensionWeights(e *InterviewEvaluation) {
 
 ### Pricing Model Recommendation (revised — usage-based for volume, subscription for enterprise)
 
-| Tier | Price | Features |
-|------|-------|----------|
-| **Free** | $0 | 3 interviews, chat only (bikin ngerasain → upsell) |
-| **Starter** | $49/mo | 100 interviews, chat + voice, company context |
-| **Pro** | $199/mo | 1000 interviews, all features, tenant prompt, reflect |
-| **Volume (BPO/agency)** | $0.5-1/interview | Usage-based, target beachhead market |
-| **Enterprise** | Custom | Self-hosted, SOC 2 (post-MVP), custom integrations |
+Historical recommendation ($0 Free/3, $49 Starter, $199 Pro) — **superseded
+2026-08-24 by the competitive-review adjustment**. Current tiers live only in
+[`../product/pricing.md`](../product/pricing.md): Free 10 interviews/mo,
+Starter $29, Pro $199, Credits pack $99/500, Volume $0.50.
 
 ### Compliance Requirements (Enterprise Readiness)
 

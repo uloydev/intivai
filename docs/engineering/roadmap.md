@@ -148,7 +148,7 @@ func (s *SyncWorker) SyncCandidate(ctx context.Context, orgID, candidateID, summ
 
 What gets indexed: semantic summaries (not raw PII) — cross-candidate recall becomes possible.
 
-### Testing Criteria (tambahan Phase 2)
+### Testing Criteria (Phase 2 additions)
 - [x] Sync worker writes to the correct tenant bank (integration-verified)
 - [x] Recall finds matching candidates — keyword overlap verified; embedding recall deferred until fastembed lands (M2.5)
 - [x] Company context upload → version bump + dedup + index into tenant bank
@@ -270,7 +270,7 @@ truth; design rationale in [`design-decisions.md`](design-decisions.md) §2/§5.
 
 ### Cross-Interview Reflect (Phase 4)
 
-Interview selesai → sync summary ke Mnemosyne → reflect lintas interview jadi mungkin:
+Interview completes → summary synced to the Mnemosyne bank → cross-interview reflection becomes possible:
 
 ```go
 
@@ -320,7 +320,7 @@ similar, _ := mn.Recall(ctx,
 | Area | What | Files |
 |------|------|-------|
 | **WebRTC signaling** | Pion-based signaling server, SDP exchange | `internal/interview/infrastructure/webrtc/` |
-| **VAD** | Voice activity detection (silero-vad) — segmentasi utterance → trigger STT | `internal/interview/infrastructure/webrtc/vad.go` |
+| **VAD** | Voice activity detection (silero-vad) — segments utterances → triggers STT | `internal/interview/infrastructure/webrtc/vad.go` |
 | **STT adapter** | Whisper via whisper.cpp CLI (tiny=dev, small/large-v3=production) | `internal/interview/infrastructure/stt/whisper.go` |
 | **TTS adapter** | Edge TTS API integration | `internal/interview/infrastructure/tts/edge_tts.go` |
 | **Voice session** | Audio pipeline: mic → STT → LLM → TTS → speaker | `internal/interview/application/voice_session.go` |
