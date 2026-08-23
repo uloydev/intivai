@@ -7,7 +7,7 @@
 # repo root — backend/Makefile only reaches them via `cd ..`.
 
 .DEFAULT_GOAL := help
-.PHONY: help check dev seed seed-fresh migrate smoke redis-clear test-integration-dev coverage backup restore load-ws load-k6 fe-dev fe-run fe fe-build fe-test fe-e2e up down logs ps restart compose-build up-prod down-prod logs-prod ps-prod
+.PHONY: help check dev seed seed-fresh migrate smoke redis-clear test-integration-dev coverage backup restore load-ws load-k6 fe-dev fe-run fe fe-build fe-lint fe-test fe-e2e up down logs ps restart compose-build up-prod down-prod logs-prod ps-prod
 
 # Display available commands and descriptions
 help:
@@ -19,7 +19,7 @@ help:
 	@printf "  \033[32mfe-test\033[0m               Run frontend unit tests (vitest)\n"
 	@printf "  \033[32mfe-e2e\033[0m                Run Playwright end-to-end happy path tests\n\n"
 	@printf "\033[1;33mQuality & Pre-Commit Gates:\033[0m\n"
-	@printf "  \033[32mcheck\033[0m                 Full gate: backend gofmt+lint+vet+build+tests, FE build+vitest\n\n"
+	@printf "  \033[32mcheck\033[0m                 Full gate: backend gofmt+lint+vet+build+tests, FE lint+build+vitest\n\n"
 	@printf "\033[1;33mDevelopment Stack (Docker Compose):\033[0m\n"
 	@printf "  \033[32mdev\033[0m                   Boot full stack on fresh Redis (builds app, sandbox & certs)\n"
 	@printf "  \033[32mup\033[0m                    Start dev stack containers (detached)\n"
@@ -53,11 +53,25 @@ help:
 COMPOSE := docker compose --env-file .env -f docker-compose.yml -f docker-compose.dev.yml
 COMPOSE_PROD := docker compose --env-file .env.prod -f docker-compose.yml -f docker-compose.prod.yml
 
-# Full pre-commit gate: backend lint/vet/build/unit tests + FE typecheck/build + FE unit tests
+# Full pre-commit gate: backend lint/vet/build/unit tests + FE typecheck/build + FE unit tests + docs gates
 check:
 	$(MAKE) -C backend check
+	cd frontend && npm run lint
 	cd frontend && npm run build
 	cd frontend && npx vitest run
+	$(MAKE) lint-docs
+
+# Docs gates: markdownlint (config .markdownlint-cli2.jsonc) + internal link check.
+# Skips gracefully when the linter is unavailable (offline) — CI always runs it.
+lint-docs:
+	@bash scripts/check-doc-links.sh
+	@if command -v markdownlint-cli2 >/dev/null 2>&1; then \
+	  markdownlint-cli2; \
+	elif [ -x frontend/node_modules/.bin/markdownlint-cli2 ]; then \
+	  frontend/node_modules/.bin/markdownlint-cli2; \
+	else \
+	  echo "markdownlint-cli2 not installed — skipping (CI enforces it)"; \
+	fi
 
 # --- Docker compose (dev) ---
 up:
@@ -105,10 +119,13 @@ fe-dev fe-run fe:
 fe-build:
 	cd frontend && npm run build
 
+fe-lint:
+	cd frontend && npm run lint
+
 fe-test:
 	cd frontend && npx vitest run
 
-# E2E happy path (needs the dev stack up + DeepSeek key)
+# E2E happy path (needs the dev stack up + LLM API key)
 fe-e2e:
 	cd frontend && npx playwright test
 

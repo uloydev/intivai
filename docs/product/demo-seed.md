@@ -18,19 +18,19 @@ Fixtures verified 2026-08-24: `fixtures/cvs/*.pdf`, `scripts/seeds/demo/cvs/`, `
 
 | # | Job Requisition | Seniority | Location & Policy | Type | Salary Band | Passing Candidate | Score | Funnel Stage | PDF Resume File |
 |---|---|---|---|---|---|---|---|---|---|
-| **1** | **Senior Distributed Systems Engineer** | Senior | Remote (US/EU) | Full-time | $160k–$210k USD | **Alex Rivera** | **92.5%** | `interview_completed` | [`fixtures/cvs/alex_rivera_cv.pdf`](fixtures/cvs/alex_rivera_cv.pdf) |
-| **2** | **Staff Frontend Architect** | Staff | San Francisco / Remote | Full-time | $175k–$230k USD | **Elena Rostova** | **94.0%** | `offer_extended` | [`fixtures/cvs/elena_rostova_cv.pdf`](fixtures/cvs/elena_rostova_cv.pdf) |
-| **3** | **Principal AI & ML Systems Engineer** | Principal | New York / Remote | Full-time | $190k–$250k USD | **David Chen, Ph.D.** | **89.0%** | `interview_invited` | [`fixtures/cvs/david_chen_cv.pdf`](fixtures/cvs/david_chen_cv.pdf) |
-| **4** | **Senior Cloud Platform & SRE** | Senior | London, UK (Hybrid) | Full-time | £95k–£130k GBP | **Liam O'Connor** | **91.0%** | `interview_invited` | [`fixtures/cvs/liam_oconnor_cv.pdf`](fixtures/cvs/liam_oconnor_cv.pdf) |
-| **5** | **Staff Mobile Engineer (React Native/iOS)** | Staff | New York, NY (Hybrid) | Full-time | $165k–$215k USD | **Maya Patel** | **93.5%** | `screening_passed` | [`fixtures/cvs/maya_patel_cv.pdf`](fixtures/cvs/maya_patel_cv.pdf) |
-| **6** | **Lead Full-Stack Product Engineer** | Lead | Berlin, DE (Remote EU) | Full-time | €90k–€125k EUR | **Henrik Lindqvist** | **90.5%** | `interview_invited` | [`fixtures/cvs/henrik_lindqvist_cv.pdf`](fixtures/cvs/henrik_lindqvist_cv.pdf) |
-| **7** | **Senior Data & Streaming Pipeline** | Senior | Singapore (Hybrid) | Full-time | S$130k–S$175k SGD | **Priya Sharma** | **88.5%** | `screening_passed` | [`fixtures/cvs/priya_sharma_cv.pdf`](fixtures/cvs/priya_sharma_cv.pdf) |
-| **8** | **Lead AppSec & DevSecOps Engineer** | Lead | Remote (US/EU) | Full-time | $170k–$220k USD | **Zachary Taylor** | **95.0%** | `offer_extended` | [`fixtures/cvs/zachary_taylor_cv.pdf`](fixtures/cvs/zachary_taylor_cv.pdf) |
-| **9** | **Senior SDET & Test Automation Architect** | Senior | Remote (Worldwide) | Full-time | $135k–$175k USD | **Chloe Dubois** | **92.0%** | `interview_completed` | [`fixtures/cvs/chloe_dubois_cv.pdf`](fixtures/cvs/chloe_dubois_cv.pdf) |
-| **10**| **Engineering Manager / Technical Lead** | Lead/EM | San Francisco (Hybrid) | Full-time | $210k–$265k USD | **Samuel Okafor** | **96.0%** | `hired` | [`fixtures/cvs/samuel_okafor_cv.pdf`](fixtures/cvs/samuel_okafor_cv.pdf) |
-| **11**| **Junior Fullstack Engineer** | Junior | Remote (Worldwide) | Contract | $70k–$90k USD | **Jordan Brooks** | **85.0%** | `screening_passed` | [`fixtures/cvs/jordan_brooks_cv.pdf`](fixtures/cvs/jordan_brooks_cv.pdf) |
-| **12**| **AI Evaluation & Prompt Intern** | Intern | San Francisco (On-site) | Internship | $50k–$65k USD ($50/h)| **Sophia Zhang** | **88.0%** | `interview_invited` | [`fixtures/cvs/sophia_zhang_cv.pdf`](fixtures/cvs/sophia_zhang_cv.pdf) |
-| *Ctrl*| *Junior Web Developer (Failed Control)* | Junior | Remote | Full-time | — | *Marcus Vance* | *38.0%* | `screening_failed` | [`fixtures/cvs/marcus_vance_cv.pdf`](fixtures/cvs/marcus_vance_cv.pdf) |
+| **1** | **Senior Distributed Systems Engineer** | Senior | Remote (US/EU) | Full-time | $160k–$210k USD | **Alex Rivera** | **92.5%** | `interview_completed` | [`fixtures/cvs/alex_rivera_cv.pdf`](../../fixtures/cvs/alex_rivera_cv.pdf) |
+| **2** | **Staff Frontend Architect** | Staff | San Francisco / Remote | Full-time | $175k–$230k USD | **Elena Rostova** | **94.0%** | `offer_extended` | [`fixtures/cvs/elena_rostova_cv.pdf`](../../fixtures/cvs/elena_rostova_cv.pdf) |
+| **3** | **Principal AI & ML Systems Engineer** | Principal | New York / Remote | Full-time | $190k–$250k USD | **David Chen, Ph.D.** | **89.0%** | `interview_invited` | [`fixtures/cvs/david_chen_cv.pdf`](../../fixtures/cvs/david_chen_cv.pdf) |
+| **4** | **Senior Cloud Platform & SRE** | Senior | London, UK (Hybrid) | Full-time | £95k–£130k GBP | **Liam O'Connor** | **91.0%** | `interview_invited` | [`fixtures/cvs/liam_oconnor_cv.pdf`](../../fixtures/cvs/liam_oconnor_cv.pdf) |
+| **5** | **Staff Mobile Engineer (React Native/iOS)** | Staff | New York, NY (Hybrid) | Full-time | $165k–$215k USD | **Maya Patel** | **93.5%** | `screening_passed` | [`fixtures/cvs/maya_patel_cv.pdf`](../../fixtures/cvs/maya_patel_cv.pdf) |
+| **6** | **Lead Full-Stack Product Engineer** | Lead | Berlin, DE (Remote EU) | Full-time | €90k–€125k EUR | **Henrik Lindqvist** | **90.5%** | `interview_invited` | [`fixtures/cvs/henrik_lindqvist_cv.pdf`](../../fixtures/cvs/henrik_lindqvist_cv.pdf) |
+| **7** | **Senior Data & Streaming Pipeline** | Senior | Singapore (Hybrid) | Full-time | S$130k–S$175k SGD | **Priya Sharma** | **88.5%** | `screening_passed` | [`fixtures/cvs/priya_sharma_cv.pdf`](../../fixtures/cvs/priya_sharma_cv.pdf) |
+| **8** | **Lead AppSec & DevSecOps Engineer** | Lead | Remote (US/EU) | Full-time | $170k–$220k USD | **Zachary Taylor** | **95.0%** | `offer_extended` | [`fixtures/cvs/zachary_taylor_cv.pdf`](../../fixtures/cvs/zachary_taylor_cv.pdf) |
+| **9** | **Senior SDET & Test Automation Architect** | Senior | Remote (Worldwide) | Full-time | $135k–$175k USD | **Chloe Dubois** | **92.0%** | `interview_completed` | [`fixtures/cvs/chloe_dubois_cv.pdf`](../../fixtures/cvs/chloe_dubois_cv.pdf) |
+| **10**| **Engineering Manager / Technical Lead** | Lead/EM | San Francisco (Hybrid) | Full-time | $210k–$265k USD | **Samuel Okafor** | **96.0%** | `hired` | [`fixtures/cvs/samuel_okafor_cv.pdf`](../../fixtures/cvs/samuel_okafor_cv.pdf) |
+| **11**| **Junior Fullstack Engineer** | Junior | Remote (Worldwide) | Contract | $70k–$90k USD | **Jordan Brooks** | **85.0%** | `screening_passed` | [`fixtures/cvs/jordan_brooks_cv.pdf`](../../fixtures/cvs/jordan_brooks_cv.pdf) |
+| **12**| **AI Evaluation & Prompt Intern** | Intern | San Francisco (On-site) | Internship | $50k–$65k USD ($50/h)| **Sophia Zhang** | **88.0%** | `interview_invited` | [`fixtures/cvs/sophia_zhang_cv.pdf`](../../fixtures/cvs/sophia_zhang_cv.pdf) |
+| *Ctrl*| *Junior Web Developer (Failed Control)* | Junior | Remote | Full-time | — | *Marcus Vance* | *38.0%* | `screening_failed` | [`fixtures/cvs/marcus_vance_cv.pdf`](../../fixtures/cvs/marcus_vance_cv.pdf) |
 
 ---
 
@@ -217,6 +217,7 @@ All 13 resume PDFs are generated with ISO 32000-1 searchable text, professional 
 - **Automated Generator Script:** `frontend/generate_cv_pdfs.mjs`
 
 To regenerate all PDF resumes at any time:
+
 ```bash
 cd frontend && node generate_cv_pdfs.mjs
 ```
@@ -226,6 +227,7 @@ cd frontend && node generate_cv_pdfs.mjs
 ## 4. How to Run & Verify
 
 ### A. Apply Seed Data
+
 ```bash
 # From repository root
 make seed

@@ -1,0 +1,24 @@
+{
+  // Pragmatic docs config: content rules over formatting dogma.
+  "config": {
+    "MD013": false,          // line length — tables/code blocks are long
+    "MD024": { "siblings_only": true },  // repeated headings across sections OK
+    "MD033": false,          // inline HTML allowed (details/br in tables)
+    "MD034": false,          // bare URLs allowed
+    "MD040": false,          // ascii architecture diagrams have no language
+    "MD041": false,          // leading heading not required (status banners first)
+    "MD060": false,          // table pipe alignment style not enforced
+    "MD022": false,          // blank lines around headings — tables/docs too dense
+    "MD032": false           // blank lines around lists — same
+  },
+  "globs": ["**/*.md"],
+  "ignores": [
+    "node_modules/**",
+    "**/node_modules/**",
+    "frontend/test-results/**",
+    ".kilo/**",
+    ".kilocode/**",
+    "docs/plans/archive/**",
+    "docs/reviews/**"
+  ]
+}

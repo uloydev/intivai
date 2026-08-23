@@ -98,8 +98,7 @@ Why first: `backend/api/openapi.yaml` (1750 lines, richer: webhooks CRUD, bulk C
 | Task | Detail |
 |---|---|
 | 1.1 | `git add backend/api/openapi.yaml` immediately (safety commit on its own). Commit message: `chore: track backend OpenAPI copy before reconciliation` |
-| 1.2 | Diff both copies endpoint-by-endpoint against actual Fiber route registrations (`grep -rn "app\.\(Get\|Post\|Put\|Patch\|Delete\)"`
-in `backend/internal/**/api/`). Produce a three-column list: route exists / in root spec / in backend spec |
+| 1.2 | Diff both copies endpoint-by-endpoint against actual Fiber route registrations in `backend/internal/**/api/` and `cmd/server/main.go`. Produce a three-column list: route exists / in root spec / in backend spec |
 | 1.3 | Reconcile into ONE file at `api/openapi.yaml`: union of endpoints, backend-copy summaries where they disagree, complete WS frame description (server→client AND client→server frames incl. `resume`, `pong`, `interrupt`, `code.result`, `audio`) |
 | 1.4 | Delete `backend/api/openapi.yaml`. Grep repo for stray references: `grep -rn "backend/api/openapi" . --include="*.md"` |
 | 1.5 | CI drift guard (interim, until codegen): script `scripts/check-openapi-drift.sh` — extracts registered paths from Go router setup, compares against `paths:` keys, fails on mismatch. Wire into `make check` |
@@ -127,6 +126,7 @@ Every conflict gets ONE resolution applied everywhere. Table of record:
 | C12 | Numbering schemes | M1–M4 vs P0–P6 vs P4a/P4b/P6a/P6b | Single scheme: Phases P0–P6 with sub-splits (P4a…) kept. M-numbers appear only inside archived plans | roadmap.md header legend |
 
 **Accept:** scripted greps return zero hits for known-conflicting strings:
+
 ```bash
 # examples (extend per resolution):
 grep -rn "Next.js" docs/ README.md            # expect: none (or explicit "rejected Next.js" rationale)
@@ -154,7 +154,7 @@ grep -rn "Implemented" docs/compliance/       # expect: only where actually true
 
 | Task | Detail |
 |---|---|
-| 4.1 | Create `docs/adr/template.md`: Context / Decision / Alternatives considered / Consequences / Date / Status(proposed|accepted|superseded-by) |
+| 4.1 | Create `docs/adr/template.md`: Context / Decision / Alternatives considered / Consequences / Date / Status: proposed / accepted / superseded-by |
 | 4.2 | Backfill from existing decisions (each ≤15 lines, cite original doc section as provenance): **ADR-0003** speech architecture (Whisper STT + Edge/Kokoro TTS, Research §3); **ADR-0004** evaluation + proctoring data model (canonical reports schema, PRD ref now resolves); **ADR-0005** advisory-only proctoring posture (Research sync §6 row); **ADR-0006** voice scope history: deferred → pivoted (D6) → final state per C4; **ADR-0007** backup offsite deferral D5 incl. hard date 2026-09-30 |
 | 4.3 | Rule recorded in docs/README.md: every future D-numbered decision or scope flip becomes an ADR same-day; plans may reference ADRs but never contain standalone decision blocks |
 

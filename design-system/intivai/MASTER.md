@@ -73,7 +73,9 @@ Dark mode: verify contrast independently (4.5:1 body) — do NOT inherit light v
 | `--text-3xl` | 36px | Empty states, splash |
 
 **CSS Import:**
+
 ```css
+
 @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600&display=swap');
 ```
 
@@ -149,6 +151,7 @@ Tailwind: extend `font-display: Space Grotesk`, `font-body: DM Sans`; semantic c
 ### Buttons
 
 ```css
+
 .btn-primary { background: var(--color-primary); color: var(--color-on-primary);
   padding: 10px 20px; border-radius: var(--radius-md); font-weight: 600;
   transition: opacity 150ms ease, background 150ms ease; cursor: pointer; }
@@ -167,6 +170,7 @@ Interaction: pressed feedback 80-150ms (opacity/bg, never scale); micro-interact
 ### Cards
 
 ```css
+
 .card { background: var(--color-surface); border: 1px solid var(--color-border);
   border-radius: var(--radius-md); padding: var(--space-lg); box-shadow: var(--shadow-sm); }
 ```
@@ -174,6 +178,7 @@ Interaction: pressed feedback 80-150ms (opacity/bg, never scale); micro-interact
 ### Inputs
 
 ```css
+
 .input { padding: 10px 14px; border: 1px solid var(--color-border);
   border-radius: var(--radius-sm); font-size: var(--text-base); background: var(--color-surface);
   color: var(--color-foreground); transition: border-color 150ms ease; }
@@ -185,6 +190,7 @@ Interaction: pressed feedback 80-150ms (opacity/bg, never scale); micro-interact
 ### Modals
 
 ```css
+
 .modal-overlay { background: rgba(15, 23, 42, 0.55); backdrop-filter: blur(4px); z-index: var(--z-modal); }
 .modal { background: var(--color-surface); border-radius: var(--radius-lg); padding: var(--space-2xl);
   box-shadow: var(--shadow-lg); max-width: 520px; width: 92%; z-index: var(--z-modal); }
@@ -193,6 +199,7 @@ Interaction: pressed feedback 80-150ms (opacity/bg, never scale); micro-interact
 ### Status Pills
 
 ```css
+
 .pill { display: inline-flex; align-items: center; gap: 6px; padding: 2px 10px;
   border-radius: var(--radius-full); font-size: var(--text-xs); font-weight: 600; }
 .pill-passed { background: color-mix(in srgb, var(--color-accent) 12%, transparent); color: var(--color-accent); }
@@ -205,6 +212,7 @@ Interaction: pressed feedback 80-150ms (opacity/bg, never scale); micro-interact
 ### Skeleton (async states)
 
 ```css
+
 .skeleton { background: linear-gradient(90deg, var(--color-muted-surface) 25%, #E8EEF7 50%, var(--color-muted-surface) 75%);
   background-size: 200% 100%; animation: shimmer 1.4s infinite; border-radius: var(--radius-sm); }
 @keyframes shimmer { to { background-position: -200% 0; } }

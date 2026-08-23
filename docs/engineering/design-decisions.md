@@ -92,6 +92,7 @@ pdfcpu **cannot** extract text from scanned documents. For these, you need OCR:
 ### DOCX Parsing (MIT-licensed, no AGPL trap)
 
 ```go
+
 import "github.com/nguyenthenguyen/docx"
 
 func extractDocx(path string) (string, error) {
@@ -110,6 +111,7 @@ func extractDocx(path string) (string, error) {
 Instead of building regex rules (fragile), use LLM to extract:
 
 ```
+
 System: Extract structured data from this resume in JSON format.
 Fields: name, email, phone, skills[], experience[], education[], years_of_exp
 
@@ -119,6 +121,7 @@ Return valid JSON only.
 ```
 
 ```go
+
 // Implemented schema (internal/cv/application/dto.go) — scoring-oriented:
 // name/email/phone live on the candidates table; experience flattened to years.
 type ResumeData struct {
@@ -145,6 +148,7 @@ resp, _ := client.CreateChatCompletion(ctx, ChatCompletionRequest{
 ### Scoring Algorithm
 
 ```go
+
 // Implemented (internal/screening/domain/scoring.go): Total normalized to
 // 0-100 (weights sum to 1.0; threshold default 50, job > org > default).
 type ScoreResult struct {
@@ -203,6 +207,7 @@ Each tenant may override scoring weights, but every value has a global default t
 **Resolution hierarchy (most specific first):**
 
 ```
+
 tenant_scoring_weights (orgs.scoring_weights JSONB)
         │  if field exists & valid → use
         ▼
@@ -224,6 +229,7 @@ GLOBAL DEFAULTS (code constant — always present, can't disappear)
 **Implementasi:**
 
 ```go
+
 // defaults.go — single source of global defaults
 var GlobalScoringDefaults = ScoringWeights{
     SkillsMatch:     0.35,
@@ -278,6 +284,7 @@ func validWeight(v float64) bool {
 **Weight normalization:** if a tenant sets weights whose total ≠ 1 (e.g. 0.5+0.5 = 1.0, or 0.6+0.2 = 0.8), **NORMALIZE in the resolver** — divide each weight by the total sum. This guarantees the max achievable score is ALWAYS 100, and scores are comparable across tenants. Without normalization, a tenant with total weight 0.8 has a max score of 80 — the 100 cap becomes meaningless (easy to reach) and scores are inconsistent.
 
 ```go
+
 // normalizeWeights — normalize in the resolver, NOT at input
 func normalizeWeights(w ScoringWeights) ScoringWeights {
     total := w.SkillsMatch + w.ExperienceYears + w.SemanticMatch +
@@ -329,6 +336,7 @@ Tenant uploads a file (PDF/MD/TXT) or pastes text containing company context:
 **Flow:**
 
 ```
+
 tenant upload file/text (POST /orgs/:id/contexts)
   → validate type + size (64KB max)
   → store raw in MinIO (file) / Postgres (text), hash for dedup
@@ -341,6 +349,7 @@ tenant upload file/text (POST /orgs/:id/contexts)
 ```
 
 ```go
+
 // internal/context/application/upload_context.go
 type UploadContextCommand struct {
     OrgID   uuid.UUID
@@ -376,6 +385,7 @@ Tenants can set a custom system prompt for their interviewer. This controls the 
 **Resolution hierarchy (same as scoring):**
 
 ```
+
 tenant_prompts (active version) → if present & valid → use
         ▼ (not set / invalid)
 GLOBAL DEFAULT INTERVIEW PROMPT (code constant)
@@ -393,6 +403,7 @@ GLOBAL DEFAULT INTERVIEW PROMPT (code constant)
 Implementation: the global default prompt is the **anchor**; the tenant prompt is appended/injected in a safe position; safety rails stay hard-coded AFTER the tenant prompt. The tenant prompt must never replace the whole system prompt.
 
 ```go
+
 // internal/interview/domain/service/prompt_composer.go
 func ComposeInterviewSystemPrompt(
     tenantPrompt *string,     // optional, tenant override
@@ -427,6 +438,7 @@ func ComposeInterviewSystemPrompt(
 **Data model:**
 
 ```sql
+
 -- Company context (versioned)
 CREATE TABLE company_contexts (
     id UUID PRIMARY KEY,
@@ -457,7 +469,9 @@ CREATE TABLE tenant_prompts (
 ## 2. AI Interview (Chat)
 
 ### Architecture
+
 ```
+
 Browser ──WebSocket──▶ Go Server ──SSE──▶ LLM API (streaming)   // LLM streaming = SSE, not WebSocket
                            │
                       Save to PostgreSQL
@@ -467,7 +481,9 @@ Browser ──WebSocket──▶ Go Server ──SSE──▶ LLM API (streaming
 **Single protocol: WebSocket for both directions.** No SSE. Keeps it simple.
 
 ### WebSocket Chat Flow
+
 ```
+
 Client connects → Server upgrades to WS (Authorization: WS ticket — lihat §3 Candidate Access)
   ↓
 Server sends: {"type": "interview.start", 
@@ -493,6 +509,7 @@ On complete → LLM generates final evaluation:
 ### Critical: Heartbeat, Timeout & Reconnection
 
 ```go
+
 // Server-side config — DESIGN INTENT. Implemented mechanism differs: the
 // idle/per-question timeout is a 3-minute WS read deadline per frame (not a
 // timer); see the M3 implementation notes below this section.
@@ -536,6 +553,7 @@ conn.SetReadDeadline(time.Now().Add(PongWait))
 ### Context Management
 
 ```go
+
 type InterviewContext struct {
     SystemPrompt      string      // Interviewer role, scoring rubric
     JobDescription    string      // Parsed JD
@@ -585,6 +603,7 @@ Rules:
 ### Question Generation Strategy
 
 ```
+
 1. Parse JD → extract: required skills, nice-to-haves, responsibilities
 2. Parse CV → identify: matching skills, gaps, weak areas
 3. Score each potential question by:
@@ -605,7 +624,7 @@ Rules:
 - Store bias audit log for compliance
 
 > **Implementation note:** `internal/interview/domain/service/bias.go` — 7 protected classes (age, marital/family, religion, political, gender, ethnicity, disability) with keyword rules; `DetectBias`/`IsBiased` filter generated questions and feed the composer's safety rails (pinned LAST, tenant cannot override).
-
+>
 > **Security note (IAM):** user creation enforces role rank — a user may only create roles at or below their own rank (`canCreateRole`, `create_user.go`). No recruiter→admin escalation; the rank order is admin > recruiter > interviewer > member.
 
 ### Language Handling
@@ -644,6 +663,7 @@ truth; the evaluator struct in §5 mirrors it. Dimension weights must sum to ≈
 ### Architecture (Open Source Stack)
 
 ```
+
 Browser (getUserMedia)
   │  WebRTC audio
   │
@@ -667,7 +687,7 @@ Browser (getUserMedia)
 
 ### Component Details
 
-**STT — Whisper (self-hosted)**
+#### STT — Whisper (self-hosted)
 
 | Option | Method | Quality | Latency |
 |--------|--------|---------|---------|
@@ -678,6 +698,7 @@ Browser (getUserMedia)
 **MVP approach:** Use **whisper.cpp** via `os/exec` in Go. `tiny` is fine for dev; production uses `small`/`large-v3` — `tiny` accuracy is poor for Indonesian.
 
 ```go
+
 func transcribeAudio(audioPath string) (string, error) {
     cmd := exec.Command("whisper.cpp", "--model", "tiny", "--output-txt", audioPath)
     output, err := cmd.Output()
@@ -685,7 +706,7 @@ func transcribeAudio(audioPath string) (string, error) {
 }
 ```
 
-**VAD (Voice Activity Detection) — MANDATORY before STT**
+#### VAD (Voice Activity Detection) — mandatory before STT
 
 Without VAD the server can't tell when an answer ends → audio gets cut or runs together across sentences.
 
@@ -696,11 +717,12 @@ Without VAD the server can't tell when an answer ends → audio gets cut or runs
 
 Flow: WebRTC audio → jitter buffer → VAD → segment → Whisper STT (once per segment).
 
-**LLM — LLM (API)**
+#### LLM — LLM API
 
 LLM is the cheapest production-grade LLM at $0.0001/1K tokens (~$0.001 per interview response). Has OpenAI-compatible API so Go SDK works directly.
 
 ```go
+
 // LLM via OpenAI-compatible API
 func llmChat(messages []Message) (string, error) {
     client := openai.NewClient(os.Getenv("LLM_API_KEY"))
@@ -715,7 +737,7 @@ func llmChat(messages []Message) (string, error) {
 }
 ```
 
-**TTS — Piper or Edge TTS**
+#### TTS — Piper or Edge TTS
 
 | Option | Quality | Cost | Implementation |
 |--------|---------|------|---------------|
@@ -726,6 +748,7 @@ func llmChat(messages []Message) (string, error) {
 ⚠️ `api.edge-tts.com` is a community endpoint (unofficial, reverse-engineered Edge Read Aloud) — can change/go offline without notice. Fallback chain: Edge TTS → Piper (local, safe).
 
 ```go
+
 // Edge TTS — completely free, no API key
 func edgeTTS(text string) ([]byte, error) {
     resp, err := http.Post("https://api.edge-tts.com/v1/tts", "application/json", 
@@ -787,6 +810,7 @@ WebRTC in Go requires:
 Candidates are **not internal users** — they have no account. Interview access flow:
 
 ```sql
+
 -- Interview invitation token — invitation credential (1x START), not "single-use raw"
 CREATE TABLE interview_tokens (
     id UUID PRIMARY KEY,
@@ -801,6 +825,7 @@ CREATE TABLE interview_tokens (
 ```
 
 ```go
+
 // Flow:
 // 1. Recruiter creates interview → generate token
 // 2. Deliver token SECURELY: email body / copy-paste. NOT in URL — leaks via referrer/log
@@ -828,6 +853,7 @@ CREATE TABLE interview_tokens (
 ### Modular Monolith (Recommended for MVP → Scale)
 
 ```
+
 /backend
 ├── cmd/
 │   └── server/        # Single binary entry point
@@ -864,6 +890,7 @@ CREATE TABLE interview_tokens (
 ### Multi-Tenant Data Model
 
 ```sql
+
 -- Organizations
 CREATE TABLE orgs (
     id UUID PRIMARY KEY,
@@ -1038,6 +1065,7 @@ CREATE POLICY tenant_isolation_orgs ON orgs
 **Solution: hybrid 2 layers.**
 
 ```
+
 ┌──────────────────────────────────────────────────────────┐
 │  PostgreSQL  (SOURCE OF TRUTH — data integrity)            │
 │  • orgs, users, candidates, jobs, interviews               │
@@ -1077,6 +1105,7 @@ CREATE POLICY tenant_isolation_orgs ON orgs
 Mnemosyne has native **Memory Bank Isolation**:
 
 ```
+
 ~/.hermes/mnemosyne/data/banks/<org_id>/mnemosyne.db
 ```
 
@@ -1087,6 +1116,7 @@ Mnemosyne has native **Memory Bank Isolation**:
   - The Go port stays the same for both options — swap the adapter without touching use cases.
 
 ```go
+
 // internal/memory/domain/memory_port.go
 // Port (Go) — adapter implementation for the memory layer via MCP/HTTP or native
 type MemoryBank interface {
@@ -1106,6 +1136,7 @@ type MemoryHit struct {
 ```
 
 ```go
+
 // internal/memory/infrastructure/mcp/mnemosyne_mcp.go  (Option A)
 // Adapter — Mnemosyne MCP server via stdio
 func (a *MCPAdapter) Remember(ctx context.Context, entityType, summary string, importance float64) error {
@@ -1129,6 +1160,7 @@ func (a *MCPAdapter) ForBank(orgID string) MemoryBank {
 After an event lands in Postgres, a sync worker indexes it to Mnemosyne:
 
 ```go
+
 // Event: candidate scored / interview completed
 type SyncEvent struct {
     OrgID       string `json:"org_id"`
@@ -1153,6 +1185,7 @@ Events indexed:
 #### Recall & Reflect (concrete use cases)
 
 ```go
+
 // 1. Semantic candidate search (not keyword) — via the Go port
 res, _ := mn.Recall(ctx, "strong Go candidate with fintech payment experience", "high")
 
@@ -1179,6 +1212,7 @@ insight, _ := mn.Reflect(ctx, "of the last 50 interviews, which question fails m
 ### Async Processing with Queue
 
 ```go
+
 const (
     JobTypeParseCV       = "cv.parse"
     JobTypeScoreCV       = "cv.score"
@@ -1217,6 +1251,7 @@ func (s *Server) handleCVUpload(c *fiber.Ctx) error {
 Use `golang-migrate/migrate` or `pressly/goose`:
 
 ```bash
+
 migrate create -ext sql -dir migrations create_interviews_table
 migrate up
 ```
@@ -1226,6 +1261,7 @@ Migrations committed to git, run as part of deploy pipeline.
 ### Observability
 
 ```go
+
 // Health checks
 http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
     // Check DB, Redis, S3 connectivity
@@ -1258,6 +1294,7 @@ llmClient.Close()
 Solo founder + 1 server = 1 bad day away from losing everything. Minimum:
 
 ```bash
+
 # 1. PostgreSQL — daily dump to MinIO (cron)
 # /etc/cron.d/pg-backup
 0 3 * * * pg_dump -Fc $DATABASE_URL | s3cmd put - s3://backups/pg-$(date +\%F).dump
@@ -1281,6 +1318,7 @@ Solo founder + 1 server = 1 bad day away from losing everything. Minimum:
 ### CORS & Security
 
 ```go
+
 app.Use(cors.New(cors.Config{
     AllowOrigins:     "https://*.yourapp.com",
     AllowMethods:     "GET,POST,PUT,DELETE",
@@ -1326,6 +1364,7 @@ app.Use(cors.New(cors.Config{
 ### Provider Abstraction with Fallback
 
 ```go
+
 type LLMProvider interface {
     Chat(ctx context.Context, req ChatRequest) (*ChatResponse, error)
     ChatStream(ctx context.Context, req ChatRequest) (<-chan string, error)
@@ -1370,6 +1409,7 @@ func (c *LLMClient) ChatWithRetry(ctx context.Context, req ChatRequest) (*ChatRe
 ### Token Counting (Critical)
 
 ```go
+
 import "github.com/pkoukk/tiktoken-go"
 
 func CountTokens(text string) int {
@@ -1398,6 +1438,7 @@ func buildSafePrompt(ctx InterviewContext) ([]Message, error) {
 ### Rate Limit Handling (429)
 
 ```go
+
 func isRateLimited(err error) bool {
     var apiErr *openai.APIError
     if errors.As(err, &apiErr) {
@@ -1418,6 +1459,7 @@ func (rl *RateLimiter) Allow(tenantID string, tokens int) bool {
 ### Structured Output (Function Calling)
 
 ```go
+
 // Canonical Go mirror of the evaluation schema in docs/engineering/schemas.md
 // (that file is the single source of truth; keep this struct in sync with it)
 type InterviewEvaluation struct {
@@ -1470,6 +1512,7 @@ func (e *Evaluator) Evaluate(transcript []Message) (*InterviewEvaluation, error)
 ### Response Validation Layer
 
 ```go
+
 func (v *Validator) ValidateResponse(raw string) (*InterviewEvaluation, error) {
     // 1. Parse JSON
     var eval InterviewEvaluation

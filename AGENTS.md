@@ -20,8 +20,8 @@
 ## Project
 
 - Monorepo: `backend/` (Go), `frontend/` (React SPA), `docker-compose*.yml` (dev/prod stacks), `.github/workflows/ci.yml`
-- Architecture reference: `AI_Interviewer_Phases.md` (phases + testing criteria), `AI_Interviewer_Research.md` (design + impl-sync table), `AI_Interviewer_Project_Structure.md` (current structure)
-- Phases: M1–M3 complete; **P4a (evaluation + FE + P6a ops) complete — beta gate** in `M3_Plan.md`; next phase plan in `P4_Plan.md`
+- Architecture reference: `docs/engineering/roadmap.md` (phases + testing criteria), `docs/engineering/design-decisions.md` (design + impl-sync table), `docs/engineering/architecture.md` (current structure)
+- Phases: P1–P4a complete; **beta gate** status in `docs/engineering/beta-gate.md`; roadmap in `docs/engineering/roadmap.md`
 
 ## Commands (run from repo root — the root `Makefile` forwards to `backend/`; everything also works directly from `backend/`)
 
@@ -52,7 +52,7 @@
 |---|---|---|
 | `npm run build` | tsc + vite build | Before EVERY FE commit |
 | `npx vitest run` | unit tests (api/ws libs) | Before commit |
-| `npx playwright test` | E2E happy path (needs stack + DeepSeek key) | After FE flow changes |
+| `npx playwright test` | E2E happy path (needs stack + LLM key) | After FE flow changes |
 
 ## Compose commands (run from repo root — compose files live at the root)
 
@@ -89,14 +89,15 @@ make check && make coverage && make test-integration-dev
 > The root `Makefile` is a thin delegation layer — never add logic to it;
 > put logic in `backend/Makefile` or the owning script.
 
-Plan for the current phase lives in `M3_Plan.md` (acceptance criteria from
-`AI_Interviewer_Phases.md` — mark executed, not just coded). Beta-gate status
-is the top checklist in `M3_Plan.md`.
+Plan for the current phase lives in `docs/engineering/roadmap.md` (acceptance
+criteria — mark executed, not just coded). Beta-gate status is tracked in
+`docs/engineering/beta-gate.md`.
 
 ## Workflow per change
 
 0. **Never commit automatically.** Only commit when the user explicitly requests it (e.g. "commit", "create commits"). Leave changes staged/unstaged in the working tree otherwise
-1. Small units. One context/worker/endpoint per change — never big-bang2. **TDD (red-green-refactor), layer-adapted:**
+1. Small units. One context/worker/endpoint per change — never big-bang
+2. **TDD (red-green-refactor), layer-adapted:**
    - Domain/use cases: unit test FIRST (type-driven — compile errors define the interface), then implement
    - Repos/workers: integration spec FIRST (round-trip, NULL columns, constraints, status transitions, idempotency), then implement; batch the slow DB cycles
    - Handlers: `app.Test` assertions on status + DTO shape; OpenAPI (`api/openapi.yaml`) is the contract
@@ -126,15 +127,24 @@ is the top checklist in `M3_Plan.md`.
 
 ## Definition of Done (per phase)
 
-- [ ] Doc deliverables implemented per `AI_Interviewer_Phases.md` (full design doc, not just the deliverable table)
+- [ ] Doc deliverables implemented per `docs/engineering/roadmap.md` (full design doc, not just the deliverable table)
 - [ ] Doc testing criteria executed with the required artifacts (fixtures/harnesses) — mark results in the phase doc
-- [ ] `make check` green
+- [ ] `make check` green (includes OpenAPI drift guard + docs lint)
 - [ ] `make coverage` green (floors: domain ≥70%, others ≥50%)
 - [ ] Integration tests green (`make test-integration-dev`) — env-gated tests run in CI
 - [ ] Schema change = migration 00X + repo + domain in the SAME change; fresh-DB boot verified (`make dev` from clean volume)
 - [ ] Worker pipeline: happy path + failure path verified (status machine states observable via API)
 - [ ] New API surface smoke-tested (`make smoke`); OpenAPI (`api/openapi.yaml`) updated
 - [ ] Carryover section updated: closed items marked, new deferrals recorded with dates
+- [ ] Docs affected by the change updated per `docs/README.md` index (status + last-reviewed refreshed)
+
+## Documentation governance
+
+- **One fact, one home.** Pricing → `docs/product/pricing.md`; beta status → `docs/engineering/beta-gate.md`; evaluation schema + WS frames + limits → `docs/engineering/schemas.md`; protocol contract → `api/openapi.yaml`. Everything else links.
+- **Review findings append to `docs/FINDINGS.md`** — never create a new plan file for findings. Plans may group ledger rows but never own statuses.
+- **Every scope flip or D-decision becomes an ADR** in `docs/adr/` the same day (template there); use `git mv`, one concern per commit, archive closed plans under `docs/plans/archive/`.
+- **Compliance/policy docs describe reality** — unimplemented controls are marked Target-Qx, never present tense.
+- **Language:** English-only for repo documentation.
 
 ## Conventions (learned the hard way — follow, don't rediscover)
 
@@ -174,6 +184,10 @@ is the top checklist in `M3_Plan.md`.
 - Role rank: a user may only create roles AT OR BELOW their own rank (admin > recruiter > interviewer/member) — no recruiter→admin escalation (`canCreateRole` in `create_user.go`)
 - WS Origin allowlist: `INTIVAI_ALLOWED_ORIGINS` guards the chat socket (CSWSH); non-browser clients must send a matching Origin when the list is set
 
+### Frontend
+- **No TDZ in Components:** All static lookup tables (e.g. currency maps, badge styles, static option arrays) and pure formatting utilities MUST be declared at the top-level module scope outside React component render bodies to prevent Temporal Dead Zone (`ReferenceError`) runtime crashes.
+- **Strict Types:** `any` strictly forbidden in TypeScript. Use domain-specific interface definitions from `types/api.ts`.
+
 ### Interviews (M3 realtime)
 - WS framing: single writer goroutine (all frames through one channel); LLM streaming in its own goroutine with ctx cancel → `interrupt` stops the stream mid-response
 - One active connection per interview (`sessionRegistry`); second socket rejected
@@ -185,6 +199,11 @@ is the top checklist in `M3_Plan.md`.
 - Unit (pure domain): scoring engine, semantic, prompt validation, job/iam/cv domains, CVService compensation, PDF extraction, DTO json-tag contract — always run `make check`
 - Integration (env-gated, skip without `TEST_DATABASE_URL`): RLS isolation, pg memory bank, re-score savepoint, repo round-trips (NULL/jsonb), score + extract worker pipelines, chat flow (ticket → start → answer → tokens → next; interrupt; second-connection rejection; session mismatch; LLM-error advance), interview service flow (ticket states, expiry/revoke, compose rails). Run with `make test-integration-dev`; executed in CI with real postgres+redis services
 - New repo/worker logic → integration test (that is where this project's bugs lived)
+- E2E & Browser Testing (Playwright):
+  - **Single-Worker Execution:** Set `workers: 1` in `playwright.config.ts` when running against a local shared backend/DB instance to prevent session token collisions and state mutation conflicts.
+  - **Form State Settling:** Always wait for navigation or state assertions (e.g. `await expect(page).toHaveURL(/.*\/dashboard/)`) after login/form submits before subsequent `page.goto()` calls.
+  - **Consumable Tokens:** For single-use tokens (OTP, magic links), generate fresh tokens via the API or inject signed JWTs directly into `localStorage`.
+  - **Valid PDF Fixtures:** Never use arbitrary truncated byte strings; always use `buildMinimalPDF` to generate valid ISO 32000-1 cross-reference tables.
 
 ## Environment
 
@@ -192,4 +211,22 @@ is the top checklist in `M3_Plan.md`.
 - FE dev: `frontend/` Vite on :5173 (proxies `/api` + WS to :8081); `INTIVAI_ALLOWED_ORIGINS` must include the FE origin (CSWSH + CORS)
 - Docker: BuildKit is enabled (no `DOCKER_BUILDKIT=0`) — verified working for the app, sandboxd, and sandbox execution images
 - Tesseract OCR in image: needs `tesseract-ocr-data-eng` + `poppler-utils` — do not remove
-- DeepSeek key: `INTIVAI_DEEPSEEK_API_KEY`; absent → extract marks `failed_extract` honestly (use `POST /cvs/:id/extract` to retry after key is set)
+- LLM API key: `INTIVAI_LLM_API_KEY`; absent → extract marks `failed_extract` honestly (use `POST /cvs/:id/extract` to retry after key is set)
+
+<!-- caveman-begin -->
+Respond terse like smart caveman. All technical substance stay. Only fluff die.
+
+Rules:
+- Drop: articles (a/an/the), filler (just/really/basically), pleasantries, hedging
+- Fragments OK. Short synonyms. Technical terms exact. Code unchanged.
+- Pattern: [thing] [action] [reason]. [next step].
+- Not: "Sure! I'd be happy to help you with that."
+- Yes: "Bug in auth middleware. Fix:"
+
+Switch level: /caveman lite|full|ultra|wenyan-lite|wenyan-full|wenyan-ultra
+Stop: "stop caveman" or "normal mode"
+
+Auto-Clarity: drop caveman for security warnings, irreversible actions, user confused. Resume after.
+
+Boundaries: code/commits/PRs written normal.
+<!-- caveman-end -->

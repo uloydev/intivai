@@ -58,17 +58,23 @@
 ## Recovery Procedures
 
 ### Database Recovery
+
 ```bash
+
 scripts/restore.sh <dump_file>
 ```
 
 ### Service Recovery
+
 ```bash
+
 docker compose --env-file .env.prod up -d --force-recreate
 ```
 
 ### Data Verification
+
 ```bash
+
 make smoke  # End-to-end API scenario
 make test-integration-dev  # Full integration suite
 ```

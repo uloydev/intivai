@@ -1,0 +1,9 @@
+# Default owner for everything
+*                       @uloydev
+
+# Documentation and compliance require owner review
+/docs/                  @uloydev
+/CHANGELOG.md           @uloydev
+/README.md              @uloydev
+/CONTEXT.md             @uloydev
+/api/openapi.yaml       @uloydev

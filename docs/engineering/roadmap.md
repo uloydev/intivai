@@ -8,6 +8,7 @@
 ## Dependency Map
 
 ```
+
 Phase 0: Customer Discovery ◄── VALIDATE BEFORE CODING
     │
     ▼
@@ -112,7 +113,9 @@ willingness) is the primary launch signal. Beta = validation vehicle.
 | **API endpoints** | `POST /cvs`, `GET /cvs/:id`, `POST /jobs`, `GET /jobs`, `POST /screenings`, `POST /orgs/:id/contexts`, `PUT /orgs/:id/prompt` | `api/` in each context |
 
 ### CV Flow (End-to-End)
+
 ```
+
 POST /api/v1/cvs (upload PDF)
   → file saved to MinIO
   → queue: parse_cv
@@ -135,6 +138,7 @@ POST /api/v1/cvs (upload PDF)
 CV/extract done → worker syncs a semantic summary into the tenant bank:
 
 ```go
+
 // internal/memory/application/sync_worker.go
 func (s *SyncWorker) SyncCandidate(ctx context.Context, orgID, candidateID, summary string) error {
     mn := s.mnemosyne.ForBank(orgID) // banks/<org_id>/mnemosyne.db
@@ -189,7 +193,9 @@ rules are specified once in [`design-decisions.md`](design-decisions.md)
 | **Candidate chat UI (FE)** | Browser WS client: ticket connect, answer/stream, interrupt, resume, consent checkbox at start | `frontend/chat.tsx` |
 
 ### Chat Flow
+
 ```
+
 ┌─────────┐  WebSocket   ┌──────────────┐   HTTP/SSE    ┌──────────────┐
 │ Browser │ ◄──────────► │  Go Server   │ ◄──────────► │ LLM          │
 │ (React) │              │  (Fiber+WS)  │              │ Flash API    │
@@ -267,6 +273,7 @@ truth; design rationale in [`design-decisions.md`](design-decisions.md) §2/§5.
 Interview selesai → sync summary ke Mnemosyne → reflect lintas interview jadi mungkin:
 
 ```go
+
 // internal/evaluation/application/reflect.go
 // 1. Sync interview summary into the tenant bank
 mn := s.mnemosyne.ForBank(orgID.String())
@@ -323,7 +330,9 @@ similar, _ := mn.Recall(ctx,
 | **Frontend** | WebRTC client (getUserMedia, peer connection) | `frontend/pages/interview/voice.tsx` |
 
 ### Voice Pipeline
+
 ```
+
 Browser mic → Opus → WebRTC (Pion) → PCM → VAD (silero-vad) → segment → Whisper STT
                                                     │
                                                     ▼
@@ -337,6 +346,7 @@ Browser mic → Opus → WebRTC (Pion) → PCM → VAD (silero-vad) → segment 
 ```
 
 ### Latency Budget
+
 | Stage | Target |
 |-------|--------|
 | VAD (silero-vad, CPU) | <0.1s per segment |
@@ -389,7 +399,9 @@ tuning. SPLIT for beta: P6a ships with the beta gate, P6b later.
 | **Compliance** | SOC 2 prep, GDPR consent docs (consent capture ships in P4a) |
 
 ### Monitoring Dashboard (Grafana)
+
 ```
+
 ┌─────────────────────────────────────────────────────┐
 │  Active Interviews: 12    │  Avg Latency: 1.2s       │
 │  LLM Tokens/min: 4,521    │  Queue Depth: 3          │
@@ -415,6 +427,7 @@ tuning. SPLIT for beta: P6a ships with the beta gate, P6b later.
 ## Timeline Summary
 
 ```
+
 Week 1-2   〓〓 Phase 0: Customer Discovery (10 recruiters, 5 pilots → beta cohort)
 Week 3-4   〓〓 Phase 1: Foundation (+ Mnemosyne bank setup)
 Week 5-7   〓〓〓 Phase 2: Core Business Logic (+ semantic CV index, company context, tenant prompt)
@@ -437,6 +450,7 @@ feedback decides what pilots actually use.
 ## Phase Dependencies
 
 ```
+
 Phase 0 ──► Phase 1 ──► Phase 2 ──► Phase 3 ──► Phase 4
                   │                       │
                   │                       │
