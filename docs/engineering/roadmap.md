@@ -1,5 +1,10 @@
 # AI Interviewer — Development Phases
 
+> Status: current · Last-reviewed: 2026-08-24 · Owner: EM
+> Numbering legend: phases are P0–P6 (with splits P4a/P4b, P6a/P6b). Old
+> milestone names M1–M4 appear only inside archived plans (`docs/plans/`)
+> and map 1:1 to P1–P4a. Beta gate status lives in [`beta-gate.md`](beta-gate.md).
+
 ## Dependency Map
 
 ```
@@ -99,7 +104,7 @@ willingness) is the primary launch signal. Beta = validation vehicle.
 | Area | What | Files |
 |------|------|-------|
 | **Job context** | Job entity, skill requirements, create/update/list | `internal/job/` |
-| **CV context** | CV upload, PDF text extraction (`ledongthuc/pdf`), DeepSeek structured extraction, embedding (deferred — column + HNSW ready) | `internal/cv/` |
+| **CV context** | CV upload, PDF text extraction (`ledongthuc/pdf`), LLM structured extraction, embedding (deferred — column + HNSW ready) | `internal/cv/` |
 | **Screening context** | Scoring engine, weighted algorithm, passing threshold | `internal/screening/` |
 | **Company context** | Upload file/text, versioning, hash dedup, index into the tenant's Mnemosyne bank | `internal/context/` |
 | **Tenant prompt** | Set/get tenant system prompt, validation, versioning, default fallback | `internal/context/` |
@@ -115,7 +120,7 @@ POST /api/v1/cvs (upload PDF)
     → if scanned → pdftoppm rasterize + Tesseract OCR
     → save raw text
   → queue: extract_cv
-    → DeepSeek structured output → ResumeData
+    → LLM structured output → ResumeData
     → save structured (+ embedding when local fastembed lands, M2.5)
   → queue: score_cv (for each active JD)
     → weighted scoring algorithm
@@ -150,26 +155,14 @@ What gets indexed: semantic summaries (not raw PII) — cross-candidate recall b
 ---
 
 ### Scoring Engine
-```go
-// Implemented weights (internal/screening/domain/scoring.go). Total is
-// normalized to a 0-100 scale (weights sum to 1.0, threshold default 50).
-type ScoringWeights struct {
-    SkillsMatch      float64 // 0.35
-    ExperienceYears  float64 // 0.20
-    SemanticMatch    float64 // 0.25 (keyword overlap now; embedding cosine when fastembed lands, M2.5)
-    Education        float64 // 0.10
-    Certifications   float64 // 0.10
-}
 
-type ScoreResult struct {
-    Total      float64            `json:"total"`
-    Breakdown  map[string]float64 `json:"breakdown"`
-    Passed     bool               `json:"passed"`
-}
-```
+Implemented in `internal/screening/domain/scoring.go` — weights
+(0.35/0.20/0.25/0.10/0.10), per-tenant override resolution and normalization
+rules are specified once in [`design-decisions.md`](design-decisions.md)
+§1.4–1.5. Total is normalized to 0–100; threshold default 50 (job > org > default).
 
 ### Testing Criteria
-- [x] PDF upload → extracted text + structured data obtained (parse verified live; extract needs `INTIVAI_DEEPSEEK_API_KEY`, failure state `failed_extract` honest + `POST /cvs/:id/extract` retry)
+- [x] PDF upload → extracted text + structured data obtained (parse verified live; extract needs `INTIVAI_LLM_API_KEY`, failure state `failed_extract` honest + `POST /cvs/:id/extract` retry)
 - [x] CV score matches expected weighted calculation (unit + integration verified)
 - [x] Same CV scored against 2 different JDs produces different scores (engine unit-tested)
 - [x] Async jobs complete successfully (parse → extract → score pipeline live-verified; failure paths integration-tested)
@@ -179,14 +172,14 @@ type ScoreResult struct {
 
 ## Phase 3: Chat Interview (Week 8-10)
 
-**Goal:** Real-time chat interview via WebSocket with DeepSeek Flash
+**Goal:** Real-time chat interview via WebSocket with LLM
 
 ### Deliverables
 
 | Area | What | Files |
 |------|------|-------|
 | **Interview domain** | Interview entity, Question VO, Answer VO | `internal/interview/domain/` |
-| **LLM provider** | DeepSeek adapter (`deepseek-chat`, streaming + structured output) — shared in `internal/llm/` | `internal/llm/` |
+| **LLM provider** | LLM adapter (`MiniMax-M2.7-highspeed`, streaming + structured output) — shared in `internal/llm/` | `internal/llm/` |
 | **Question generator** | CV-gap-based question strategy, bias detection | `internal/interview/domain/service/question_generator.go` |
 | **Prompt composer** | Compose interview system prompt: global default + tenant prompt + company context + safety rails (pinned last) | `internal/interview/domain/service/prompt_composer.go` |
 | **WebSocket hub** | Connection management, heartbeat, room/channel per interview | `internal/interview/api/chat_handler.go` |
@@ -198,7 +191,7 @@ type ScoreResult struct {
 ### Chat Flow
 ```
 ┌─────────┐  WebSocket   ┌──────────────┐   HTTP/SSE    ┌──────────────┐
-│ Browser │ ◄──────────► │  Go Server   │ ◄──────────► │ DeepSeek     │
+│ Browser │ ◄──────────► │  Go Server   │ ◄──────────► │ LLM          │
 │ (React) │              │  (Fiber+WS)  │              │ Flash API    │
 └─────────┘              └──────┬───────┘              └──────────────┘
                                │
@@ -210,29 +203,17 @@ type ScoreResult struct {
 ```
 
 ### WebSocket Protocol
-```json
-// Server → Client
-{"type": "interview.start", "session_id": "iv_abc", "total_questions": 5}
-{"type": "question", "content": "Tell me about a time...", "idx": 1}
-{"type": "token", "content": "Great"}    // streaming LLM response
-{"type": "token", "content": " answer"}
-{"type": "response", "content": "Great answer! Next question..."}
-{"type": "evaluation", "scores": {...}}
-{"type": "error", "message": "..."}
 
-// Client → Server
-{"type": "answer", "content": "In my previous role...", "idx": 1}
-{"type": "interrupt"}     // stop AI mid-response
-{"type": "ping"}
-{"type": "resume", "session_id": "iv_abc"}  // reconnect
-```
+The frame protocol is defined in `api/openapi.yaml` (WS chat + voice path
+descriptions) with a human-readable summary in
+[`schemas.md`](schemas.md) — not duplicated here.
 
-**Auth:** candidate upgrade uses a WS ticket (10-min JWT, bound to session_id + interview_id) — see Research §3. Internal JWT is NOT used for candidates.
+**Auth:** candidate upgrade uses a WS ticket (10-min JWT, bound to session_id + interview_id). Internal JWT is NOT used for candidates.
 
 ### Testing Criteria
 - [x] WebSocket connects and handshake completes (candidate uses WS ticket, not JWT)
 - [x] WS upgrade without a valid ticket is rejected
-- [x] DeepSeek Flash returns streaming response (live-verified with real key)
+- [x] LLM returns streaming response (live-verified with real key)
 - [x] Questions generated based on CV gaps
 - [x] Selected questions persisted to the question bank (reuse + audit)
 - [x] Answers stored in PostgreSQL
@@ -240,7 +221,7 @@ type ScoreResult struct {
 - [x] Bias detection catches prohibited questions
 - [x] Idle timeout disconnects after 5 minutes (ws read deadline; clock injectable)
 - [x] 100 concurrent WebSocket connections stable (cmd/loadcheck: 100/100 pass)
-- [x] Browser candidate interview runs end-to-end (Playwright happy path, real DeepSeek: register → job → CV → extract → passed → interview → invite → consent → chat → streamed reply)
+- [x] Browser candidate interview runs end-to-end (Playwright happy path, real LLM: register → job → CV → extract → passed → interview → invite → consent → chat → streamed reply)
 - [x] System prompt composer: tenant prompt + company context + safety rails composed correctly (composed once per connection)
 - [x] Safety rails always last (tenant cannot override)
 - [x] Interrupt stops the AI mid-response (streaming goroutine + ctx cancel; live-verified)
@@ -278,30 +259,8 @@ empty scores). P4b stays post-MVP.
 
 ### Evaluation Schema
 
-**Canonical — Research §2 & §5 must follow this schema (single source of truth).**
-```json
-{
-  "overall_score": 78,
-  "dimensions": {
-    "technical": { "score": 82, "weight": 0.4 },
-    "communication": { "score": 75, "weight": 0.2 },
-    "problem_solving": { "score": 80, "weight": 0.25 },
-    "culture_fit": { "score": 70, "weight": 0.15 }
-  },
-  "per_question": [
-    {
-      "question_idx": 1,
-      "score": 85,
-      "rationale": "Strong understanding of distributed systems",
-      "strengths": ["Clear explanation", "Used real examples"],
-      "weaknesses": []
-    }
-  ],
-  "strengths": ["Go expertise", "System design", "Communication"],
-  "weaknesses": ["Limited cloud experience"],
-  "recommendation": "proceed"
-}
-```
+Canonical schema lives in [`schemas.md`](schemas.md) — single source of
+truth; design rationale in [`design-decisions.md`](design-decisions.md) §2/§5.
 
 ### Cross-Interview Reflect (Phase 4)
 
@@ -340,16 +299,12 @@ similar, _ := mn.Recall(ctx,
 
 ## Phase 5: Voice Interview (Week 13-16) — POST-MVP, ONLY with a paying customer
 
-> **DEFERRED (2026-08-18, design decision via grilling session):** the working
-> tree ships a gated demo of this phase — WS route (ticket + org-checked),
-> Pion signaling (SDP offer/answer + ICE aligned with the FE), VAD/STT/TTS
-> adapters, and an FE voice page at `/voice/:id` (URL-only, not in nav). The
-> MVP demo path delivers TTS audio to the client as base64 `audio` WS frames;
-> **real Opus decoding (mic → STT) and Opus-over-RTP (TTS → speaker) remain
-> unimplemented.** Full Phase 5 lands only when a paying customer requires it
-> (WHY: per original phase gate — no paying customer; WHAT: voice pipeline,
-> TURN, recording; WHEN: on first paying customer request). The gated demo
-> stays in the tree as a sales demo until then.
+> Scope history and final decision: **ADR-0006**. Short version: deferred
+> (2026-08-18), briefly re-pivoted as MVP (P4_Plan D6), settled as
+> demo-only/out-of-critical-path — the WS route, Pion signaling, VAD/STT/TTS
+> adapters, and an FE voice page ship as a gated sales demo; real Opus
+> decode/encode remains unimplemented and the route is NOT mounted in
+> main.go. Full Phase 5 lands only when a paying customer requires it.
 
 **Goal:** Real-time voice interview via WebRTC + Whisper STT + Edge TTS
 
@@ -372,7 +327,7 @@ similar, _ := mn.Recall(ctx,
 Browser mic → Opus → WebRTC (Pion) → PCM → VAD (silero-vad) → segment → Whisper STT
                                                     │
                                                     ▼
-                                            DeepSeek Flash (LLM)
+                                            LLM (LLM)
                                                     │
                                                     ▼
                                             Edge TTS API
@@ -386,7 +341,7 @@ Browser mic → Opus → WebRTC (Pion) → PCM → VAD (silero-vad) → segment 
 |-------|--------|
 | VAD (silero-vad, CPU) | <0.1s per segment |
 | Whisper STT (tiny=dev; small/large-v3=production) | 2-3s per 5s audio |
-| DeepSeek Flash generate | 0.5-1.5s |
+| LLM generate | 0.5-1.5s |
 | Edge TTS | 0.3-0.5s |
 | WebRTC network | 0.1-0.2s |
 | **Total per turn** | **~3-5s** |
@@ -396,7 +351,7 @@ Browser mic → Opus → WebRTC (Pion) → PCM → VAD (silero-vad) → segment 
 - [x] VAD segmentation: energy-based VAD / speech detector
 - [x] Audio streaming & handling via WebRTC / WebSocket signaling
 - [x] Whisper STT adapter (whisper.cpp docker sidecar)
-- [x] DeepSeek generates response
+- [x] LLM generates response
 - [x] Edge TTS returns audio
 - [x] Audio played back in browser
 - [ ] TURN server fallback works (UDP blocked)
@@ -416,7 +371,7 @@ tuning. SPLIT for beta: P6a ships with the beta gate, P6b later.
 |------|------|
 | **Deployment** | Docker Compose on VPS, domain + TLS, env management; push pipeline (GitHub Actions → build → deploy) |
 | **Backup & DR** | Postgres daily dump to MinIO + rclone to B2; Mnemosyne bank backup; restore test run monthly (`scripts/backup.sh`, `scripts/restore.sh`, `make backup`, `make restore`) |
-| **Health checks** | `/health`, `/ready` (DB, Redis, MinIO, DeepSeek reachability), `/live` |
+| **Health checks** | `/health`, `/ready` (DB, Redis, MinIO, LLM reachability), `/live` |
 | **Graceful shutdown** | SIGTERM: WS drain + LLM request drain (implemented — verify live) |
 | **Rate limiting** | Per-tenant sliding window + auth limits (implemented — tune limits for beta) |
 | **Structured logging** | JSON logs with request ID + tenant ID (implemented — verify retention/rotation) |
@@ -442,7 +397,7 @@ tuning. SPLIT for beta: P6a ships with the beta gate, P6b later.
 ├─────────────────────────────────────────────────────┤
 │  Response Time p50: 450ms  p95: 1.2s  p99: 2.8s     │
 │  WebSocket Connections: 47  Active Voice: 3          │
-│  DeepSeek API Cost: $2.34  Storage: 1.2GB            │
+│  LLM API Cost: $2.34  Storage: 1.2GB            │
 └─────────────────────────────────────────────────────┘
 ```
 

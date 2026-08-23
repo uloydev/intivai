@@ -1,5 +1,9 @@
 # M3 Plan — Chat Interview (Phase 3)
 
+> Status: archived 2026-08-24 (phase closed; Beta Gate extracted to
+> docs/engineering/beta-gate.md). Frozen snapshot — do not edit; open items
+> live in docs/FINDINGS.md.
+
 Scope from `AI_Interviewer_Phases.md` §Phase 3 (Week 8-10). Status tracking for
 deliverables and doc testing criteria — mark boxes as executed, not just coded.
 
@@ -36,7 +40,7 @@ deliverables and doc testing criteria — mark boxes as executed, not just coded
 | WS ticket auth: 10-min JWT bound to session+interview (Research §3); candidates never use internal JWT | `internal/iam/` + interview api | [x] ws_ticket rejected on API routes, accepted on chat |
 | Repos: interview, invitation token, question bank | `internal/interview/infrastructure/persistence/` | [x] round-trip + token lifecycle integration-tested |
 
-LLM provider already exists (`internal/llm`, DeepSeek streaming + structured
+LLM provider already exists (`internal/llm`, LLM streaming + structured
 output) — verify `ChatStream` against the interview flow.
 
 ## Migration 006 (expected)
@@ -69,13 +73,13 @@ output) — verify `ChatStream` against the interview flow.
 7. [x] Handlers + WS handler: chat flow integration test (ticket → start → question → answer → tokens → next; bad ticket rejected)
 8. [x] Idle timeout: injectable clock; ws read deadline uses it
 
-Remaining for M3 done-criteria: sliding-window context management (tiktoken), 100-conn load check, smoke extension with interview endpoints, live DeepSeek streaming verification (needs API key).
+Remaining for M3 done-criteria: sliding-window context management (tiktoken), 100-conn load check, smoke extension with interview endpoints, live LLM streaming verification (needs API key).
 
 ## Doc testing criteria (execute, then check)
 
 - [x] WS connects, handshake completes (candidate uses WS ticket, not JWT)
 - [x] WS upgrade without a valid ticket is rejected
-- [x] DeepSeek Flash returns streaming response (live-verified with real key)
+- [x] LLM returns streaming response (live-verified with real key)
 - [x] Questions generated based on CV gaps
 - [x] Selected questions persisted to question bank (reuse + audit)
 - [x] Answers stored in PostgreSQL
@@ -120,7 +124,7 @@ candidate chat UI becomes a P3 deliverable. Beta = Phase 0 cohort (5 pilots).
 | 4 | P4a FE: recruiter dashboard-lite (CV/job upload, interview list, result view) | [x] |
 | 5 | Invite flow: shareable interview URL from invitation token | [x] |
 | 6 | Consent capture: `consent_given` recorded at interview start | [x] |
-| 7 | Live DeepSeek streaming verified with real key (smoke + Playwright E2E) | [x] |
+| 7 | Live LLM streaming verified with real key (smoke + Playwright E2E) | [x] |
 | 8 | Fresh-volume boot 001–007 (`make dev` from clean volume) | [x] |
 | 9 | Deploy: compose on VPS, domain + TLS, env management, push pipeline | [~] pipeline + overlay ready; needs VPS/domain/secrets |
 | 10 | Backup & DR: postgres dump + MinIO mirror → backup bucket; restore test executed | [~] scripts ready; needs host cron + first restore test |

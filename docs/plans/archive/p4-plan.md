@@ -1,8 +1,12 @@
 # P4 Plan — Beta Launch Build (P4a + Candidate/Recruiter FE + P6a)
 
+> Status: archived 2026-08-24 (workstreams A–C delivered; see
+> docs/engineering/beta-gate.md for remaining gate items). D5/D6 decisions
+> recorded as docs/adr/0007 and docs/adr/0006. Frozen snapshot — do not edit.
+
 Scope: re-scoped MVP (Phases doc): evaluation core + recruiter visibility
 (P4a), candidate chat UI (P3 FE deliverable), beta ops (P6a). Exit =
-**Beta Gate** (M3_Plan.md, 14 items). Plan owner: EM.
+**Beta Gate** (now docs/engineering/beta-gate.md, 14 items). Plan owner: EM.
 
 ---
 
@@ -167,7 +171,7 @@ passed → pill-passed; rejected/failed → pill-rejected; new → pill-neutral.
 - Playwright E2E happy path: login → create job → upload CV (fixture PDF) →
   poll to extracted → candidate passed → create interview → copy invite →
   consent → chat (answer + tokens) → evaluation frame → result visible
-  (mirrors scripts/smoke.sh; needs stack + INTIVAI_DEEPSEEK_API_KEY)
+  (mirrors scripts/smoke.sh; needs stack + INTIVAI_LLM_API_KEY)
 - a11y + responsive pass (Master checklist), reduced-motion, dark mode toggle
   (recruiter shell only; candidate stays light)
 
@@ -192,7 +196,7 @@ passed → pill-passed; rejected/failed → pill-rejected; new → pill-neutral.
 | TLS | Caddy sidecar container (auto cert, reverse proxy :443 → app:8080) |
 | Backups | Cron (host) or sidecar: `pg_dump` → `mc mirror` MinIO (bucket `intivai-backups`); retention 14d; restore script `scripts/restore.sh` + documented monthly restore test (Beta Gate #10) |
 | Alerting | Sentry Go SDK (DSN env, no-op without DSN) — error capture; health/ready already present |
-| Env mgmt | `.env.prod` (never committed), secrets checklist: JWT secret, DB URLs, DeepSeek key, MinIO keys |
+| Env mgmt | `.env.prod` (never committed), secrets checklist: JWT secret, DB URLs, LLM API key, MinIO keys |
 | Fresh-volume boot | `make dev` from clean volume after all migrations 001–007 + A4 consent (no new migration expected; verify) |
 
 **DECISION D5 (2026-08-10): backups target MinIO only — no offsite copy.**
@@ -225,7 +229,7 @@ The Voice MVP, Bulk CV Upload, Public Board, and Candidate Passports are now par
 | | **Total** | **~11 d** |
 
 Blocking order: 1–4 (backend) → 5–8 (FE; 6–7 parallelizable after 5) → 9 can
-start after 3. Live DeepSeek verification + fresh-volume boot run during 2 and 10.
+start after 3. Live LLM verification + fresh-volume boot run during 2 and 10.
 
 ---
 
