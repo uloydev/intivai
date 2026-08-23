@@ -62,7 +62,7 @@ Browser (React SPA) ──► Caddy (prod: TLS + static + /api proxy)
 
 - **Backend**: modular monolith, DDD + hexagonal per context (IAM, job, cv,
   screening, context, interview, evaluation, memory, llm). Details:
-  `AI_Interviewer_Project_Structure.md`.
+  `docs/engineering/architecture.md`.
 - **Multi-tenancy**: RLS `FORCE` on all org tables; app connects as the
   least-privilege `intivai_app` role; pre-auth lookups via SECURITY DEFINER
   functions owned by a BYPASSRLS role. Migrations run separately

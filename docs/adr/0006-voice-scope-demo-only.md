@@ -6,7 +6,7 @@
 
 ## Context
 
-Voice was originally gated on a paying customer (`AI_Interviewer_Phases.md` Phase 5), briefly re-pivoted INTO the MVP (P4_Plan carryover D6, "Product Pivot"), then flagged by the 2026-08-19 four-lens review: the shipped voice page reads recruiter tokens, WS never authenticates, STT/LLM are mocked, Opus decode/encode is unimplemented, and the route is not mounted in production. Three documents carried three different scope states.
+Voice was originally gated on a paying customer (`docs/engineering/roadmap.md`, originally AI_Interviewer_Phases.md), briefly re-pivoted INTO the MVP (P4 plan carryover D6 — docs/plans/archive/p4-plan.md, "Product Pivot"), then flagged by the 2026-08-19 four-lens review: the shipped voice page reads recruiter tokens, WS never authenticates, STT/LLM are mocked, Opus decode/encode is unimplemented, and the route is not mounted in production. Three documents carried three different scope states.
 
 ## Decision
 
