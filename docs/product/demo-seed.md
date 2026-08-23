@@ -1,6 +1,16 @@
-# Intivai Demo Seed Data & Example Candidate Resumes (`EXAMPLES.md`)
+# Intivai Demo Seed Data & Example Candidate Resumes
+
+> Status: current · Last-reviewed: 2026-08-24 · Owner: EM
+>
+> **DEV/DEMO ONLY.** Every credential, token, and OTP in this document
+> (`password123`, `123456`, `demo-magic-token-*`, `demo-invitation-token-*`)
+> is seeded by `make seed` for local development and demos. These values must
+> NEVER exist in staging or production — the seeder is dev-only and prod
+> deploys must not run it (verify before any customer-facing environment).
 
 This guide explains the comprehensive demo scenario seeded into Intivai for organization **Demo Corp** (`slug: demo`). It outlines all **12 engineering job requisitions**, their corresponding **passing candidate CV profiles & PDF fixtures**, screening rubrics, evaluation scorecards, and interactive portal authentication links.
+
+Fixtures verified 2026-08-24: `fixtures/cvs/*.pdf`, `scripts/seeds/demo/cvs/`, `frontend/generate_cv_pdfs.mjs` all present.
 
 ---
 
