@@ -45,6 +45,7 @@ help:
 # Full pre-commit gate (unit-level): gofmt + lint + vet + build + unit tests.
 check:
 	@test -z "$$(gofmt -l .)" || { echo "gofmt violations:"; gofmt -l .; exit 1; }
+	@../scripts/check-openapi-drift.sh
 	$(MAKE) lint vet build test
 
 # Regenerate the sandbox gRPC stubs from proto/sandbox.proto
