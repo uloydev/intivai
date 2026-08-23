@@ -1,0 +1,1750 @@
+openapi: 3.1.0
+info:
+  title: Intivai API
+  version: 1.0.0
+  description: |
+    AI-powered hiring platform API — job board, CV screening, automated interviews, and evaluation.
+
+security:
+  - BearerAuth: []
+
+tags:
+  - name: Health
+    description: Liveness and readiness probes
+  - name: Auth
+    description: Organisation registration and login
+  - name: Jobs
+    description: Job posting CRUD (authenticated)
+  - name: Candidates
+    description: CV upload, candidate management, and candidate reports
+  - name: Screening
+    description: Application creation and stage management
+  - name: Contexts
+    description: Company context uploads and prompt configuration
+  - name: Interviews
+    description: Interview lifecycle, WebSocket chat, and voice
+  - name: Evaluation
+    description: Interview evaluation, reports, and decision overrides
+  - name: Webhooks
+    description: Outbound webhook configuration and delivery logs
+  - name: Sandbox
+    description: Code execution and AI code review
+  - name: Candidate Portal
+    description: Public job board, candidate OTP auth, and GDPR portal
+
+servers:
+  - url: http://localhost:8081
+    description: Local dev
+  - url: https://api.intivai.com
+    description: Production
+
+paths:
+  # ── Health ──────────────────────────────────────────────────────────────
+  /health:
+    get:
+      tags: [Health]
+      summary: Liveness probe
+      security: []
+      responses:
+        "200":
+          description: OK
+
+  /live:
+    get:
+      tags: [Health]
+      summary: Liveness check
+      security: []
+      responses:
+        "200":
+          description: OK
+
+  /ready:
+    get:
+      tags: [Health]
+      summary: Readiness probe (checks Postgres, Redis, MinIO)
+      security: []
+      responses:
+        "200":
+          description: All dependencies healthy
+        "503":
+          description: One or more dependencies unavailable
+
+  # ── Auth ────────────────────────────────────────────────────────────────
+  /api/v1/auth/register:
+    post:
+      tags: [Auth]
+      summary: Register a new organisation with admin user
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, slug, admin_email, admin_password]
+              properties:
+                name:
+                  type: string
+                slug:
+                  type: string
+                admin_email:
+                  type: string
+                  format: email
+                admin_password:
+                  type: string
+                  minLength: 8
+      responses:
+        "201":
+          description: Organisation created
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
+  /api/v1/auth/login:
+    post:
+      tags: [Auth]
+      summary: Authenticate with org slug, email, and password
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [org_slug, email, password]
+              properties:
+                org_slug:
+                  type: string
+                email:
+                  type: string
+                  format: email
+                password:
+                  type: string
+      responses:
+        "200":
+          description: JWT token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/me:
+    get:
+      tags: [Auth]
+      summary: Current user info
+      responses:
+        "200":
+          description: Actor details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MeResponse"
+
+  /api/v1/users:
+    post:
+      tags: [Auth]
+      summary: Create a user in the current organisation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, role, password]
+              properties:
+                email:
+                  type: string
+                  format: email
+                role:
+                  type: string
+                  enum: [admin, recruiter, interviewer, member]
+                password:
+                  type: string
+                  minLength: 8
+      responses:
+        "201":
+          description: User created
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
+  # ── Jobs (authed) ──────────────────────────────────────────────────────
+  /api/v1/jobs:
+    post:
+      tags: [Jobs]
+      summary: Create a job posting
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/JobRequest"
+      responses:
+        "201":
+          description: Job created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Job"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
+    get:
+      tags: [Jobs]
+      summary: List jobs for the current organisation
+      responses:
+        "200":
+          description: Job list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Job"
+
+  /api/v1/jobs/{id}:
+    get:
+      tags: [Jobs]
+      summary: Get a job by ID
+      parameters:
+        - $ref: "#/components/parameters/JobID"
+      responses:
+        "200":
+          description: Job detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Job"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+    patch:
+      tags: [Jobs]
+      summary: Update a job (partial, PATCH semantics)
+      parameters:
+        - $ref: "#/components/parameters/JobID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/JobRequest"
+      responses:
+        "200":
+          description: Updated job
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Job"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
+  # ── CVs / Candidates ───────────────────────────────────────────────────
+  /api/v1/cvs:
+    post:
+      tags: [Candidates]
+      summary: Upload a single CV (multipart PDF)
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                name:
+                  type: string
+                email:
+                  type: string
+      responses:
+        "201":
+          description: Candidate created
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
+    get:
+      tags: [Candidates]
+      summary: List all candidates in the organisation
+      responses:
+        "200":
+          description: Candidate list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Candidate"
+
+  /api/v1/cvs/bulk:
+    post:
+      tags: [Candidates]
+      summary: Upload multiple CVs (multipart, files[] field)
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [files]
+              properties:
+                files:
+                  type: array
+                  items:
+                    type: string
+                    format: binary
+      responses:
+        "201":
+          description: Bulk upload result
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
+  /api/v1/cvs/{id}:
+    get:
+      tags: [Candidates]
+      summary: Get a candidate by ID
+      parameters:
+        - $ref: "#/components/parameters/CandidateID"
+      responses:
+        "200":
+          description: Candidate detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Candidate"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+    delete:
+      tags: [Candidates]
+      summary: Delete a candidate (and all related data)
+      parameters:
+        - $ref: "#/components/parameters/CandidateID"
+      responses:
+        "204":
+          description: Deleted
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/cvs/{id}/extract:
+    post:
+      tags: [Candidates]
+      summary: Re-trigger LLM extraction for a candidate's CV
+      parameters:
+        - $ref: "#/components/parameters/CandidateID"
+      responses:
+        "200":
+          description: Extraction queued
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/candidates/{id}:
+    delete:
+      tags: [Candidates]
+      summary: Delete a candidate (alias for DELETE /cvs/:id)
+      parameters:
+        - $ref: "#/components/parameters/CandidateID"
+      responses:
+        "204":
+          description: Deleted
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/candidates/{id}/report:
+    get:
+      tags: [Evaluation]
+      summary: Candidate report with interview summaries
+      parameters:
+        - $ref: "#/components/parameters/CandidateID"
+      responses:
+        "200":
+          description: Candidate report
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # ── Screening / Applications ───────────────────────────────────────────
+  /api/v1/screenings:
+    post:
+      tags: [Screening]
+      summary: Create a screening (application) for a candidate against a job
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [candidate_id, job_id]
+              properties:
+                candidate_id:
+                  type: string
+                  format: uuid
+                job_id:
+                  type: string
+                  format: uuid
+      responses:
+        "201":
+          description: Screening created
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
+  /api/v1/applications:
+    get:
+      tags: [Screening]
+      summary: List applications (optionally filter by job_id)
+      parameters:
+        - name: job_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Application list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Application"
+
+  /api/v1/applications/{id}:
+    patch:
+      tags: [Screening]
+      summary: Update application stage or recruiter notes
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                stage:
+                  type: string
+                  description: Lifecycle stage (e.g. screening, interview, offer, rejected)
+                recruiter_notes:
+                  type: string
+      responses:
+        "200":
+          description: Updated application
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
+  # ── Contexts ───────────────────────────────────────────────────────────
+  /api/v1/orgs/{orgId}/contexts:
+    post:
+      tags: [Contexts]
+      summary: Upload company context (text JSON body or multipart file)
+      parameters:
+        - $ref: "#/components/parameters/OrgID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [content]
+              properties:
+                content:
+                  type: string
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        "201":
+          description: Context uploaded
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
+    get:
+      tags: [Contexts]
+      summary: List company contexts for the organisation
+      parameters:
+        - $ref: "#/components/parameters/OrgID"
+      responses:
+        "200":
+          description: Context list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Context"
+
+  /api/v1/orgs/{orgId}/contexts/{contextID}:
+    delete:
+      tags: [Contexts]
+      summary: Delete a company context
+      parameters:
+        - $ref: "#/components/parameters/OrgID"
+        - name: contextID
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Context deleted
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
+  /api/v1/orgs/{orgId}/prompt:
+    put:
+      tags: [Contexts]
+      summary: Set the system prompt for the organisation
+      parameters:
+        - $ref: "#/components/parameters/OrgID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [system_prompt]
+              properties:
+                system_prompt:
+                  type: string
+      responses:
+        "200":
+          description: Prompt updated
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
+    get:
+      tags: [Contexts]
+      summary: Get the current system prompt
+      parameters:
+        - $ref: "#/components/parameters/OrgID"
+      responses:
+        "200":
+          description: Current prompt
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  system_prompt:
+                    type: string
+
+  # ── Interviews ─────────────────────────────────────────────────────────
+  /api/v1/interviews:
+    post:
+      tags: [Interviews]
+      summary: Create an interview for an application
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [application_id]
+              properties:
+                application_id:
+                  type: string
+                  format: uuid
+                question_count:
+                  type: integer
+                  default: 5
+      responses:
+        "201":
+          description: Interview created
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
+    get:
+      tags: [Interviews]
+      summary: List interviews for the organisation
+      responses:
+        "200":
+          description: Interview list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/InterviewSummary"
+
+  /api/v1/interviews/{id}:
+    get:
+      tags: [Interviews, Evaluation]
+      summary: Get full interview detail including evaluation
+      parameters:
+        - $ref: "#/components/parameters/InterviewID"
+      responses:
+        "200":
+          description: Interview detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InterviewDetail"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/interviews/{id}/report/pdf:
+    get:
+      tags: [Evaluation]
+      summary: Download interview PDF report
+      parameters:
+        - $ref: "#/components/parameters/InterviewID"
+      responses:
+        "200":
+          description: PDF report
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/interviews/{id}/decision:
+    put:
+      tags: [Evaluation]
+      summary: Override interview decision (recruiter)
+      parameters:
+        - $ref: "#/components/parameters/InterviewID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [recommendation, reason]
+              properties:
+                recommendation:
+                  type: string
+                reason:
+                  type: string
+      responses:
+        "200":
+          description: Decision updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: updated
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
+  # ── Candidate Interview Endpoints (public, invitation-token gated) ─────
+  /api/v1/candidate/interviews/{id}/consent:
+    post:
+      tags: [Candidate Portal]
+      summary: Record GDPR consent before interview starts
+      parameters:
+        - $ref: "#/components/parameters/InterviewID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [invitation_token]
+              properties:
+                invitation_token:
+                  type: string
+      responses:
+        "200":
+          description: Consent recorded
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  consent_given:
+                    type: boolean
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
+  /api/v1/candidate/interviews/{id}/ticket:
+    post:
+      tags: [Candidate Portal]
+      summary: Exchange invitation token for a WebSocket ticket
+      parameters:
+        - $ref: "#/components/parameters/InterviewID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [invitation_token]
+              properties:
+                invitation_token:
+                  type: string
+      responses:
+        "200":
+          description: Ticket issued (short-lived ws_ticket JWT)
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
+  /api/v1/candidate/interviews/{id}/request-human:
+    post:
+      tags: [Candidate Portal]
+      summary: Candidate requests a human interviewer
+      parameters:
+        - $ref: "#/components/parameters/InterviewID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [invitation_token]
+              properties:
+                invitation_token:
+                  type: string
+      responses:
+        "200":
+          description: Request recorded
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+
+  /api/v1/candidate/interviews/{id}/telemetry:
+    post:
+      tags: [Candidate Portal]
+      summary: Submit proctoring telemetry (HTTP fallback for WS telemetry)
+      parameters:
+        - $ref: "#/components/parameters/InterviewID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [event_type]
+              properties:
+                invitation_token:
+                  type: string
+                ticket:
+                  type: string
+                event_type:
+                  type: string
+                  enum: [tab_switch, paste, focus_lost, focus_regained, window_resize, audio_anomaly]
+                timestamp:
+                  type: string
+                  format: date-time
+                question_idx:
+                  type: integer
+                details:
+                  $ref: "#/components/schemas/TelemetryDetails"
+      responses:
+        "200":
+          description: Telemetry recorded
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+
+  /api/v1/candidate/interviews/{id}/chat:
+    get:
+      tags: [Interviews]
+      summary: WebSocket chat (candidate interview session)
+      description: |
+        Upgrade to WebSocket. Requires a ws_ticket via `?ticket=` query param or `Authorization: Bearer <ticket>`.
+
+        **Server → client frames:** interview.start, question, token, response, evaluation, error, pong, code.result
+        **Client → server frames:** answer, interrupt, ping, resume, telemetry, code.change, code.run
+      parameters:
+        - $ref: "#/components/parameters/InterviewID"
+        - name: ticket
+          in: query
+          schema:
+            type: string
+      responses:
+        "101":
+          description: WebSocket upgrade
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/interviews/{id}/voice:
+    get:
+      tags: [Interviews]
+      summary: WebSocket voice session (WebRTC signaling)
+      description: |
+        Upgrade to WebSocket for WebRTC voice interview. Accepts a ws_ticket (candidate) or recruiter auth token.
+
+        **Server → client frames:** offer, answer, audio (base64), error
+        **Client → server frames:** offer, candidate (ICE)
+      parameters:
+        - $ref: "#/components/parameters/InterviewID"
+      responses:
+        "101":
+          description: WebSocket upgrade
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  # ── Webhooks ───────────────────────────────────────────────────────────
+  /api/v1/webhooks:
+    post:
+      tags: [Webhooks]
+      summary: Create a webhook endpoint
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WebhookRequest"
+      responses:
+        "201":
+          description: Webhook created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Webhook"
+
+    get:
+      tags: [Webhooks]
+      summary: List webhooks for the organisation
+      responses:
+        "200":
+          description: Webhook list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Webhook"
+
+  /api/v1/webhooks/{id}:
+    get:
+      tags: [Webhooks]
+      summary: Get a webhook by ID
+      parameters:
+        - $ref: "#/components/parameters/WebhookID"
+      responses:
+        "200":
+          description: Webhook detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Webhook"
+
+    patch:
+      tags: [Webhooks]
+      summary: Update a webhook (partial)
+      parameters:
+        - $ref: "#/components/parameters/WebhookID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WebhookRequest"
+      responses:
+        "200":
+          description: Updated webhook
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Webhook"
+
+    delete:
+      tags: [Webhooks]
+      summary: Delete a webhook
+      parameters:
+        - $ref: "#/components/parameters/WebhookID"
+      responses:
+        "204":
+          description: Deleted
+
+  /api/v1/webhooks/{id}/deliveries:
+    get:
+      tags: [Webhooks]
+      summary: List delivery attempts for a webhook
+      parameters:
+        - $ref: "#/components/parameters/WebhookID"
+      responses:
+        "200":
+          description: Delivery list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/WebhookDelivery"
+
+  # ── Sandbox ────────────────────────────────────────────────────────────
+  /api/v1/sandbox/execute:
+    post:
+      tags: [Sandbox]
+      summary: Execute code in a sandbox (recruiter-side)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ExecutionRequest"
+      responses:
+        "200":
+          description: Execution result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExecutionResult"
+
+  /api/v1/sandbox/evaluate:
+    post:
+      tags: [Sandbox]
+      summary: Execute code and get an AI code review
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [language, code, problem]
+              properties:
+                language:
+                  $ref: "#/components/schemas/Language"
+                code:
+                  type: string
+                problem:
+                  type: string
+      responses:
+        "200":
+          description: Execution result with AI review
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ExecutionResult"
+                  - type: object
+                    properties:
+                      ai_code_review:
+                        $ref: "#/components/schemas/AICodeReview"
+
+  # ── Candidate Portal (public) ─────────────────────────────────────────
+  /api/v1/public/jobs:
+    get:
+      tags: [Candidate Portal]
+      summary: List published jobs (public job board)
+      security: []
+      parameters:
+        - name: org
+          in: query
+          schema:
+            type: string
+          description: Filter by org slug
+      responses:
+        "200":
+          description: Public job list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/PublicJob"
+
+  /api/v1/public/jobs/{id}:
+    get:
+      tags: [Candidate Portal]
+      summary: Get a public job detail
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/JobID"
+      responses:
+        "200":
+          description: Public job detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PublicJob"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/public/jobs/{id}/apply:
+    post:
+      tags: [Candidate Portal]
+      summary: "Apply to a job (multipart: name, email, file)"
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/JobID"
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [name, email, file]
+              properties:
+                name:
+                  type: string
+                email:
+                  type: string
+                  format: email
+                file:
+                  type: string
+                  format: binary
+                  description: Resume PDF (max 10MB)
+      responses:
+        "201":
+          description: Application submitted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PublicApplyResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
+  /api/v1/public/candidate/auth/otp:
+    post:
+      tags: [Candidate Portal]
+      summary: Request an OTP verification code
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email:
+                  type: string
+                  format: email
+      responses:
+        "200":
+          description: OTP sent
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  email:
+                    type: string
+                  expires_in:
+                    type: integer
+                    description: Seconds until OTP expires
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+
+  /api/v1/public/candidate/auth/verify:
+    post:
+      tags: [Candidate Portal]
+      summary: Verify OTP code or magic link token → get candidate JWT
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - type: object
+                  required: [email, code]
+                  properties:
+                    email:
+                      type: string
+                      format: email
+                    code:
+                      type: string
+                      description: 6-digit OTP code
+                - type: object
+                  required: [token]
+                  properties:
+                    token:
+                      type: string
+                      description: Magic link token
+      responses:
+        "200":
+          description: Candidate JWT issued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CandidateAuthResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/public/candidate-review/{token}:
+    get:
+      tags: [Candidate Portal]
+      summary: Review extracted profile data (confirmation link from email)
+      security: []
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Extracted profile data
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/public/candidate-review/{token}/confirm:
+    post:
+      tags: [Candidate Portal]
+      summary: Confirm or edit extracted profile data
+      security: []
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: ResumeData fields (name, email, experience, skills, etc.)
+      responses:
+        "200":
+          description: Profile confirmed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: confirmed
+
+  # ── Candidate Portal (authenticated with candidate JWT) ────────────────
+  /api/v1/candidate/portal/applications:
+    get:
+      tags: [Candidate Portal]
+      summary: List my applications (candidate JWT required)
+      responses:
+        "200":
+          description: Application list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Application"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/candidate/portal/export:
+    get:
+      tags: [Candidate Portal]
+      summary: GDPR Art.15 data export (candidate JWT required)
+      responses:
+        "200":
+          description: Full data dump
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  email:
+                    type: string
+                  applications:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Application"
+                  generated_at:
+                    type: string
+                    format: date-time
+
+  /api/v1/candidate/portal/me:
+    delete:
+      tags: [Candidate Portal]
+      summary: GDPR Art.17 right-to-erasure (candidate JWT required)
+      responses:
+        "200":
+          description: Data erased
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+
+# ── Components ──────────────────────────────────────────────────────────
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        Auth token from POST /api/v1/auth/login. Some endpoints also accept a candidate JWT
+        (issued via POST /api/v1/public/candidate/auth/verify) or a ws_ticket for WebSocket access.
+
+  parameters:
+    JobID:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+    CandidateID:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+    InterviewID:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+    WebhookID:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+    OrgID:
+      name: orgId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+  schemas:
+    Language:
+      type: string
+      enum: [go, python, typescript, javascript]
+
+    LoginResponse:
+      type: object
+      properties:
+        token:
+          type: string
+        user_id:
+          type: string
+          format: uuid
+        org_id:
+          type: string
+          format: uuid
+        role:
+          type: string
+
+    MeResponse:
+      type: object
+      properties:
+        user_id:
+          type: string
+          format: uuid
+        org_id:
+          type: string
+          format: uuid
+        role:
+          type: string
+        time:
+          type: string
+          format: date-time
+
+    JobRequest:
+      type: object
+      properties:
+        title:
+          type: string
+        description:
+          type: string
+        location:
+          type: string
+        employment_type:
+          type: string
+        salary_min:
+          type: integer
+        salary_max:
+          type: integer
+        currency:
+          type: string
+        required_skills:
+          type: array
+          items:
+            type: string
+        min_experience:
+          type: integer
+        responsibilities:
+          type: array
+          items:
+            type: string
+        requirements:
+          type: array
+          items:
+            type: string
+        nice_to_haves:
+          type: array
+          items:
+            type: string
+        benefits:
+          type: array
+          items:
+            type: string
+        scoring_weights:
+          type: object
+          additionalProperties:
+            type: number
+        min_score_to_proceed:
+          type: number
+        status:
+          type: string
+        is_published:
+          type: boolean
+
+    Job:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        org_id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        description:
+          type: string
+        location:
+          type: string
+        employment_type:
+          type: string
+        salary_min:
+          type: integer
+          nullable: true
+        salary_max:
+          type: integer
+          nullable: true
+        currency:
+          type: string
+        required_skills:
+          type: array
+          items:
+            type: string
+        min_experience:
+          type: integer
+        responsibilities:
+          type: array
+          items:
+            type: string
+        requirements:
+          type: array
+          items:
+            type: string
+        nice_to_haves:
+          type: array
+          items:
+            type: string
+        benefits:
+          type: array
+          items:
+            type: string
+        scoring_weights:
+          type: object
+          additionalProperties:
+            type: number
+        min_score_to_proceed:
+          type: number
+          nullable: true
+        status:
+          type: string
+        is_published:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    PublicJob:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        description:
+          type: string
+        location:
+          type: string
+        employment_type:
+          type: string
+        salary_min:
+          type: integer
+          nullable: true
+        salary_max:
+          type: integer
+          nullable: true
+        currency:
+          type: string
+        required_skills:
+          type: array
+          items:
+            type: string
+        min_experience:
+          type: integer
+
+    Candidate:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        org_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        email:
+          type: string
+        extracted_data:
+          type: object
+          nullable: true
+        extraction_status:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    Application:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        candidate_id:
+          type: string
+          format: uuid
+        job_id:
+          type: string
+          format: uuid
+        stage:
+          type: string
+        recruiter_notes:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    Context:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        org_id:
+          type: string
+          format: uuid
+        content_type:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    InterviewSummary:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        application_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+        question_count:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+
+    InterviewDetail:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        application_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+        question_count:
+          type: integer
+        evaluation:
+          type: object
+          nullable: true
+          properties:
+            scores:
+              type: object
+              additionalProperties:
+                type: number
+            overall:
+              type: number
+            recommendation:
+              type: string
+        transcript:
+          type: array
+          items:
+            type: object
+        created_at:
+          type: string
+          format: date-time
+
+    WebhookRequest:
+      type: object
+      required: [url, events]
+      properties:
+        url:
+          type: string
+          format: uri
+        events:
+          type: array
+          items:
+            type: string
+          description: "Event types to subscribe to (e.g. interview.completed)"
+        secret:
+          type: string
+        active:
+          type: boolean
+
+    Webhook:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        url:
+          type: string
+          format: uri
+        events:
+          type: array
+          items:
+            type: string
+        secret:
+          type: string
+        active:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+
+    WebhookDelivery:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        webhook_id:
+          type: string
+          format: uuid
+        event:
+          type: string
+        final_status:
+          type: string
+        attempts:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+
+    ExecutionRequest:
+      type: object
+      required: [language, code]
+      properties:
+        language:
+          $ref: "#/components/schemas/Language"
+        code:
+          type: string
+        stdin:
+          type: string
+        test_cases:
+          type: array
+          items:
+            $ref: "#/components/schemas/TestCase"
+        timeout_sec:
+          type: integer
+          description: Max 5 seconds (default)
+
+    TestCase:
+      type: object
+      properties:
+        id:
+          type: string
+        input:
+          type: string
+        expected_output:
+          type: string
+        hidden:
+          type: boolean
+
+    ExecutionResult:
+      type: object
+      properties:
+        stdout:
+          type: string
+        stderr:
+          type: string
+        exit_code:
+          type: integer
+        duration_ms:
+          type: integer
+          format: int64
+        memory_kb:
+          type: integer
+          format: int64
+        test_results:
+          type: array
+          items:
+            $ref: "#/components/schemas/TestCaseResult"
+        all_passed:
+          type: boolean
+        error:
+          type: string
+
+    TestCaseResult:
+      type: object
+      properties:
+        test_case:
+          $ref: "#/components/schemas/TestCase"
+        actual_output:
+          type: string
+        passed:
+          type: boolean
+        duration_ms:
+          type: integer
+          format: int64
+        error:
+          type: string
+
+    AICodeReview:
+      type: object
+      properties:
+        time_complexity:
+          type: string
+        space_complexity:
+          type: string
+        quality_score:
+          type: integer
+          description: 0-100
+        summary:
+          type: string
+        strengths:
+          type: array
+          items:
+            type: string
+        improvements:
+          type: array
+          items:
+            type: string
+
+    PublicApplyResponse:
+      type: object
+      properties:
+        candidate_id:
+          type: string
+          format: uuid
+        job_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+        message:
+          type: string
+        portal_token:
+          type: string
+          description: One-time magic token for candidate portal access
+
+    CandidateAuthResponse:
+      type: object
+      properties:
+        token:
+          type: string
+          description: Candidate JWT (valid 7 days)
+        email:
+          type: string
+        expires_at:
+          type: string
+          format: date-time
+
+    TelemetryDetails:
+      type: object
+      properties:
+        pasted_text_length:
+          type: integer
+        window_width:
+          type: integer
+        window_height:
+          type: integer
+        audio_status:
+          type: string
+
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+
+  responses:
+    BadRequest:
+      description: Invalid input
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+
+    Unauthorized:
+      description: Authentication required or invalid token
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+
+    TooManyRequests:
+      description: Rate limit exceeded
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
