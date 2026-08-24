@@ -1,0 +1,1 @@
+ALTER TABLE interviews ADD COLUMN IF NOT EXISTS human_requested BOOLEAN DEFAULT false;
