@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react"
+import { useMutation } from "@tanstack/react-query"
 import { Link, useParams, useSearchParams } from "react-router-dom"
 import {
   Sparkle,
@@ -11,12 +12,16 @@ import {
   ArrowClockwise,
   Target,
   ChatCircleDots,
+  ArrowRight,
+  UserFocus,
 } from "@phosphor-icons/react"
 import { Code2 } from "lucide-react"
 import type { PacingTelemetry } from "@/lib/ws"
 import { useChatSession } from "@/lib/useChatSession"
 import { useProctoring } from "@/lib/useProctoring"
 import { aiReview, runCode } from "@/lib/sandbox"
+import { createTrailingDebounce } from "@/lib/debounce"
+import { getStoredInvitationToken } from "@/lib/interview-ticket"
 import { TimerGate } from "@/components/interview/TimerGate"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
@@ -25,6 +30,7 @@ import { Badge } from "@/components/ui/badge"
 import { CodingSandbox } from "@/components/sandbox/CodingSandbox"
 import { Markdown } from "@/components/markdown/Markdown"
 import { cn } from "@/lib/utils"
+import { api } from "@/lib/api"
 import { toast } from "sonner"
 import type { SandboxLanguage, SandboxTestCase } from "@/types/api"
 
@@ -35,6 +41,7 @@ export function ChatPage() {
 
   const [input, setInput] = useState("")
   const [showSandbox, setShowSandbox] = useState(false)
+  const [isInterrupting, setIsInterrupting] = useState(false)
   const pastedFlagRef = useRef(false)
   const scrollRef = useRef<HTMLDivElement>(null)
   const answerRef = useRef<HTMLTextAreaElement>(null)
@@ -59,7 +66,41 @@ export function ChatPage() {
     onQuestion: resetPacing,
   })
 
-  const { bubbles, streaming, total, currentIdx, currentQuestionText, sessionRemainingSec, timeLimitSec, archetype, evaluation, reconnecting, disconnected, expired, pendingAnswer } = session
+  // G11: code-change frames are debounced (300ms trailing) so keystrokes do
+  // not flood the socket; submit flushes the latest editor state first.
+  const debouncedCodeChangeRef = useRef(
+    createTrailingDebounce((lang: SandboxLanguage, code: string) => {
+      session.sendCodeChange(lang, code, currentIdxRef.current)
+    }, 300),
+  )
+  useEffect(() => () => debouncedCodeChangeRef.current.cancel(), [])
+
+  useEffect(() => {
+    if (!session.streaming) setIsInterrupting(false)
+  }, [session.streaming])
+
+  const {
+    bubbles,
+    streaming,
+    total,
+    currentIdx,
+    currentQuestionText,
+    sessionRemainingSec,
+    timeLimitSec,
+    archetype,
+    topicTurn,
+    maxTopicTurns,
+    isTopicComplete,
+    evaluation,
+    reconnecting,
+    disconnected,
+    expired,
+    pendingAnswer,
+  } = session
+
+  // Live question idx for the stable debounced sender callback.
+  const currentIdxRef = useRef(currentIdx)
+  currentIdxRef.current = currentIdx
 
   const { trackPaste } = useProctoring({
     interviewId: id,
@@ -108,25 +149,35 @@ export function ChatPage() {
     }
   }
 
-  const sendAnswer = () => {
+  const sendWithAction = (action: "reply" | "advance") => {
     const trimmed = input.trim()
-    if (!trimmed || streaming || pendingAnswer || !!evaluation || expired || disconnected) return
-    const sent = session.submitAnswer(trimmed, collectPacingTelemetry())
+    if ((action === "reply" && !trimmed) || streaming || pendingAnswer || !!evaluation || expired || disconnected) return
+    // G11: the pending debounced code-change goes out BEFORE the answer so
+    // the server snapshots the latest editor state for this question.
+    debouncedCodeChangeRef.current.flush()
+    const sent = session.submitAnswer(trimmed, action, collectPacingTelemetry())
     setInput("")
     if (!sent) {
-      // Socket not open (reconnect window) — never leave the input disabled
-      // with a silently dropped answer.
       toast.error("Connection lost — your answer was not sent. Please try again.")
     }
   }
+
+  const sendAnswer = () => sendWithAction("reply")
+  const advanceTopic = () => sendWithAction("advance")
 
   const handleTimerExpire = () => {
     if (streaming || pendingAnswer || !!evaluation || expired || disconnected) return
     const trimmed = input.trim()
     const submissionText = trimmed.length > 0 ? trimmed : "My time for this question ran out — nothing was submitted."
-    session.submitAnswer(submissionText, collectPacingTelemetry())
+    const action = isTopicComplete ? "advance" : "reply"
+    // G11: honest toast — only claim auto-submission when it actually left.
+    const sent = session.submitAnswer(submissionText, action, collectPacingTelemetry())
     setInput("")
-    toast.info("Stage time limit elapsed. Response auto-submitted.")
+    if (sent) {
+      toast.info("Stage time limit elapsed. Response auto-submitted.")
+    } else {
+      toast.error("Stage time limit elapsed — but the connection is down, so nothing was submitted. Reconnect and try again.")
+    }
   }
 
   const handleExecuteSandbox = (language: SandboxLanguage, code: string, testCases: SandboxTestCase[]) =>
@@ -134,6 +185,25 @@ export function ChatPage() {
 
   const handleAIReview = (language: SandboxLanguage, code: string) =>
     aiReview(language, code, currentQuestionText || "Technical Interview Problem")
+
+  const [showHumanRequest, setShowHumanRequest] = useState(false)
+  const [humanRequested, setHumanRequested] = useState(false)
+  const requestHumanMutation = useMutation({
+    mutationFn: () => {
+      // G11: the endpoint validates the INVITATION token, not the ws_ticket —
+      // send the stored invitation_token under its own key.
+      const invitationToken = id ? (getStoredInvitationToken(id) ?? "") : ""
+      return api.post<unknown>(`/candidate/interviews/${id}/request-human`, {
+        invitation_token: invitationToken,
+      })
+    },
+    onSuccess: () => {
+      setHumanRequested(true)
+      setShowHumanRequest(false)
+      toast.success("Your request has been noted. A team member will follow up.")
+    },
+    onError: () => toast.error("Failed to submit request"),
+  })
 
   return (
     <div className="flex h-screen flex-col bg-background text-foreground selection:bg-primary/20 selection:text-primary">
@@ -154,8 +224,8 @@ export function ChatPage() {
                   disconnected
                     ? "bg-red-500"
                     : reconnecting
-                    ? "bg-amber-400 animate-pulse"
-                    : "bg-emerald-500"
+                    ? "bg-warning animate-pulse"
+                    : "bg-success"
                 )}
               />
               <span>{disconnected ? "Connection Lost" : reconnecting ? "Reconnecting…" : "Real-Time AI Session"}</span>
@@ -179,12 +249,12 @@ export function ChatPage() {
             <div className="flex items-center gap-3">
               <div className="text-right">
                 <span className="font-display text-xs font-bold text-foreground">
-                  Question {currentIdx} of {total}
+                  Question {currentIdx} of {Math.max(total, currentIdx)}
                 </span>
                 <div className="h-1.5 w-24 rounded-full bg-muted mt-1 overflow-hidden">
                   <div
                     className="h-full bg-primary transition-all duration-500"
-                    style={{ width: `${(currentIdx / total) * 100}%` }}
+                    style={{ width: `${Math.min(100, (currentIdx / Math.max(total, currentIdx)) * 100)}%` }}
                   />
                 </div>
               </div>
@@ -201,7 +271,7 @@ export function ChatPage() {
         </div>
       )}
       {reconnecting && (
-        <div className="bg-amber-500/10 border-b border-amber-500/20 px-4 py-2 text-center text-xs font-medium text-amber-600 dark:text-amber-400 flex items-center justify-center gap-2 animate-pulse">
+        <div className="bg-warning/10 border-b border-warning/20 px-4 py-2 text-center text-xs font-medium text-warning flex items-center justify-center gap-2 animate-pulse">
           <ArrowClockwise className="h-4 w-4 animate-spin" /> Connection lost — resuming session…
         </div>
       )}
@@ -231,7 +301,7 @@ export function ChatPage() {
               sessionRemainingSec={sessionRemainingSec}
               timeLimitSec={timeLimitSec}
               currentIdx={currentIdx}
-              total={total}
+              total={Math.max(total, currentIdx)}
               archetype={archetype}
               active={!evaluation && !expired}
               isProcessing={streaming || pendingAnswer}
@@ -242,28 +312,31 @@ export function ChatPage() {
       )}
 
       {/* Main Workspace Body: Single or Split View */}
-      <div className="flex-1 flex min-h-0 overflow-hidden">
+      <div className={cn(
+        "flex-1 flex min-h-0 overflow-hidden",
+        showSandbox ? "flex-col lg:flex-row" : "flex-col"
+      )}>
         {/* Chat Conversation Column */}
         <div
           className={cn(
             "flex flex-col h-full overflow-hidden transition-all duration-300",
-            showSandbox ? "w-[45%] border-r border-border" : "w-full max-w-4xl mx-auto"
+            showSandbox ? "lg:w-[45%] lg:border-r lg:border-border border-b lg:border-b-0" : "w-full max-w-4xl mx-auto"
           )}
         >
           {/* Active Question Context Pill (if active) */}
           {currentQuestionText && !evaluation && (
-            <div className="border-b border-border/50 bg-muted/20 px-4 py-2 flex items-center justify-between text-xs shrink-0">
-              <div className="flex items-center gap-2 overflow-hidden">
-                <Badge variant="outline" className="border-primary/30 text-primary bg-primary/5 font-mono text-[10px] shrink-0">
-                  Target Q{currentIdx}
+            <div className="border-b border-primary/20 bg-primary/5 px-4 py-2.5 flex items-center justify-between text-xs shrink-0 shadow-xs">
+              <div className="flex items-center gap-2 overflow-hidden flex-1 mr-2">
+                <Badge variant="outline" className="border-primary/40 text-primary bg-primary/10 font-mono text-[10px] shrink-0 font-bold">
+                  Q{currentIdx}
                 </Badge>
-                <span className="text-muted-foreground truncate font-medium">
+                <span className="text-foreground/90 truncate font-medium text-xs">
                   {currentQuestionText}
                 </span>
               </div>
-              <span className="text-[10px] text-emerald-500 font-semibold uppercase tracking-wider shrink-0 ml-2">
-                Active Problem
-              </span>
+              <Badge variant="secondary" className="text-[10px] bg-success/10 text-success font-semibold uppercase tracking-wider shrink-0 border border-success/20">
+                Active Challenge
+              </Badge>
             </div>
           )}
 
@@ -310,14 +383,21 @@ export function ChatPage() {
 
                 {/* Question Message Card */}
                 {b.kind === "question" && (
-                  <div className="max-w-[85%] rounded-2xl border border-primary/30 bg-card p-4 space-y-2 shadow-sm">
+                  <div className={cn(
+                    "max-w-[85%] rounded-2xl border bg-card p-4 space-y-2 shadow-sm",
+                    b.isProbe ? "border-dashed border-warning/40" : "border-primary/30"
+                  )}>
                     <div className="flex items-center justify-between border-b border-border/40 pb-1.5">
                       <span className="font-display font-bold text-xs text-primary flex items-center gap-1.5">
                         <Sparkle className="h-3.5 w-3.5" weight="fill" />
-                        Question {b.idx || currentIdx} {total > 0 ? `of ${total}` : ""}
+                        {b.isProbe ? (
+                          <span>Adaptive Follow-Up Probe ({b.idx || currentIdx} of {Math.max(total, b.idx || currentIdx)})</span>
+                        ) : (
+                          <span>Question {b.idx || currentIdx} {total > 0 ? `of ${Math.max(total, b.idx || currentIdx)}` : ""}</span>
+                        )}
                       </span>
                       <Badge variant="outline" className="text-[10px] text-muted-foreground border-border/60">
-                        Technical Challenge
+                        {b.isProbe ? "Follow-Up Probe" : "Technical Challenge"}
                       </Badge>
                     </div>
                     <Markdown content={b.content} />
@@ -366,10 +446,20 @@ export function ChatPage() {
             ))}
           </div>
 
+          {/* Scroll-to-bottom FAB */}
+          <button
+            type="button"
+            onClick={() => scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" })}
+            className="absolute bottom-20 right-4 z-10 flex h-8 w-8 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg transition-opacity hover:opacity-90 md:hidden"
+            aria-label="Scroll to bottom"
+          >
+            <ArrowRight className="h-4 w-4 rotate-90" />
+          </button>
+
           {/* Bottom Bar: Evaluation or Answer Input */}
           {evaluation ? (
             <div className="border-t border-border/80 bg-card/70 backdrop-blur-xl p-5 space-y-3">
-              <div className="flex items-center gap-2 text-emerald-500 font-display font-bold text-sm">
+              <div className="flex items-center gap-2 text-success font-display font-bold text-sm">
                 <CheckCircle className="h-5 w-5" weight="fill" />
                 <span>Interview Complete</span>
               </div>
@@ -391,7 +481,26 @@ export function ChatPage() {
               </Button>
             </div>
           ) : (
-            <div className="border-t border-border/60 bg-background/80 backdrop-blur-xl p-3.5">
+            <div className="border-t border-border/60 bg-background/80 backdrop-blur-xl p-3.5 sticky bottom-0 z-10">
+              {/* Turn progress indicator */}
+              {!isTopicComplete && currentIdx > 0 && (
+                <div className="flex items-center justify-between mb-2 px-0.5">
+                  <span className="text-[11px] text-muted-foreground font-medium">
+                    Topic Discussion — Turn {topicTurn} of {maxTopicTurns}
+                  </span>
+                  <div className="flex gap-1">
+                    {Array.from({ length: maxTopicTurns }).map((_, i) => (
+                      <div
+                        key={i}
+                        className={cn(
+                          "h-1.5 w-5 rounded-full transition-all",
+                          i < topicTurn ? "bg-primary" : "bg-muted"
+                        )}
+                      />
+                    ))}
+                  </div>
+                </div>
+              )}
               <Label htmlFor="chat-input" className="sr-only">
                 Your answer
               </Label>
@@ -431,55 +540,137 @@ export function ChatPage() {
                   }}
                   placeholder={
                     streaming
-                      ? "AI Interviewer is formulating feedback & question..."
-                      : `Type your answer to Question ${currentIdx || 1}... (Press Enter to submit, Shift+Enter for new line)`
+                      ? "AI Interviewer is responding…"
+                      : !isTopicComplete && topicTurn < maxTopicTurns
+                      ? `Ask a clarification or continue your answer... (Enter to reply, Shift+Enter for new line)`
+                      : `Type your answer to Question ${currentIdx || 1}... (Enter to submit)`
                   }
                   rows={2}
                   disabled={streaming || pendingAnswer || !!evaluation || expired || disconnected}
                   className="min-h-[48px] resize-none bg-card rounded-xl border-border/60 text-xs sm:text-sm p-2.5 focus-visible:ring-primary"
                 />
-                {streaming ? (
-                  <Button
-                    variant="outline"
-                    size="icon"
-                    className="h-[48px] w-[48px] rounded-xl border-destructive/30 text-destructive hover:bg-destructive/10 shrink-0"
-                    title="Skip AI speech / Advance immediately"
-                    aria-label="Stop response"
-                    onClick={() => session.interrupt()}
-                  >
-                    <Stop className="h-5 w-5" weight="fill" />
-                  </Button>
-                ) : (
-                  <Button
-                    variant="gradient"
-                    size="icon"
-                    className="h-[48px] w-[48px] rounded-xl shadow-md shadow-primary/20 shrink-0"
-                    title="Submit answer (Enter)"
-                    onClick={sendAnswer}
-                    disabled={!input.trim() || pendingAnswer || expired || disconnected}
-                  >
-                    <PaperPlaneRight className="h-5 w-5" weight="bold" />
-                  </Button>
-                )}
+                <div className="flex flex-col gap-1.5 shrink-0">
+                  {streaming ? (
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      className="h-[48px] w-[48px] rounded-xl border-destructive/30 text-destructive hover:bg-destructive/10"
+                      title="Skip AI speech / Advance immediately"
+                      aria-label="Stop response"
+                      onClick={() => {
+                        if (isInterrupting) return
+                        setIsInterrupting(true)
+                        session.interrupt()
+                      }}
+                      disabled={isInterrupting}
+                    >
+                      <Stop className="h-5 w-5" weight="fill" />
+                    </Button>
+                  ) : (
+                    <>
+                      {/* Primary: Send Reply / Clarification (in-topic dialogue) */}
+                      <Button
+                        variant="gradient"
+                        size="icon"
+                        className="h-[48px] w-[48px] rounded-xl shadow-md shadow-primary/20"
+                        title="Send reply / clarify (Enter)"
+                        aria-label="Send reply"
+                        onClick={sendAnswer}
+                        disabled={!input.trim() || pendingAnswer || expired || disconnected}
+                      >
+                        <PaperPlaneRight className="h-5 w-5" weight="bold" />
+                      </Button>
+                      {/* Secondary: Complete topic & advance (only visible if in multi-turn mode) */}
+                      {!isTopicComplete && currentIdx > 0 && (
+                        <Button
+                          variant="outline"
+                          size="icon"
+                          className="h-9 w-[48px] rounded-xl border-success/40 text-success hover:bg-success/10 text-[10px] leading-tight"
+                          title="Complete this topic & advance to next question"
+                          aria-label="Complete topic and advance"
+                          onClick={advanceTopic}
+                          disabled={pendingAnswer || expired || disconnected}
+                        >
+                          <ArrowRight className="h-4 w-4" weight="bold" />
+                        </Button>
+                      )}
+                    </>
+                  )}
+                </div>
               </div>
+              {/* Hint text */}
+              {!streaming && !isTopicComplete && currentIdx > 0 && (
+                <p className="text-[10px] text-muted-foreground mt-1.5 px-0.5">
+                  <span className="font-medium text-foreground/60">↵ Reply / Clarify</span>
+                  {" · "}
+                  <span className="font-medium text-success/80">→ Complete topic &amp; next question</span>
+                </p>
+              )}
+              {/* Request Human Interviewer */}
+              {!humanRequested && !expired && (
+                <button
+                  type="button"
+                  onClick={() => setShowHumanRequest(true)}
+                  className="text-[10px] text-muted-foreground hover:text-foreground mt-1.5 px-0.5 underline-offset-2 hover:underline flex items-center gap-1 transition-colors"
+                >
+                  <UserFocus className="h-3 w-3" /> Prefer a human interviewer?
+                </button>
+              )}
+              {humanRequested && (
+                <p className="text-[10px] text-success mt-1.5 px-0.5 flex items-center gap-1">
+                  <CheckCircle className="h-3 w-3" /> Human interviewer requested — a team member will follow up.
+                </p>
+              )}
             </div>
           )}
         </div>
 
         {/* Right Split Column: Live Coding Sandbox */}
         {showSandbox && (
-          <div className="w-[55%] h-full overflow-hidden flex flex-col bg-neutral-950">
+          <div className="lg:w-[55%] h-[40vh] lg:h-full overflow-hidden flex flex-col bg-neutral-950">
             <CodingSandbox
               questionIdx={currentIdx}
               onExecute={handleExecuteSandbox}
               onRequestAIReview={handleAIReview}
               onCodeChange={(lang, code) => {
-                session.sendCodeChange(lang, code, currentIdx)
+                debouncedCodeChangeRef.current(lang, code)
               }}
             />
           </div>
         )}
       </div>
+
+      {/* Request Human Interviewer Confirmation Modal */}
+      {showHumanRequest && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+          <div className="bg-card border border-border rounded-2xl p-6 max-w-sm w-full space-y-4 shadow-xl">
+            <div className="flex items-center gap-3">
+              <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center">
+                <UserFocus className="h-5 w-5 text-primary" />
+              </div>
+              <div>
+                <h3 className="font-semibold text-foreground">Request Human Interviewer</h3>
+                <p className="text-xs text-muted-foreground">The AI interview will be paused.</p>
+              </div>
+            </div>
+            <p className="text-sm text-muted-foreground">
+              A team member will follow up with you. Your progress so far will be saved.
+            </p>
+            <div className="flex gap-2">
+              <Button
+                variant="gradient"
+                onClick={() => requestHumanMutation.mutate()}
+                disabled={requestHumanMutation.isPending}
+              >
+                {requestHumanMutation.isPending ? "Submitting..." : "Confirm Request"}
+              </Button>
+              <Button variant="outline" onClick={() => setShowHumanRequest(false)}>
+                Cancel
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

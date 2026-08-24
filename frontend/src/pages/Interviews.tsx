@@ -101,11 +101,15 @@ export function InterviewsPage() {
   }
 
   const create = useMutation({
-    mutationFn: () =>
-      api.post<CreateInterviewResult>("/interviews", {
+    mutationFn: () => {
+      // G11: client-side clamp — never send out-of-range counts to the API.
+      const parsed = Number.parseInt(count || "3", 10)
+      const questionCount = Math.min(10, Math.max(1, Number.isFinite(parsed) ? parsed : 3))
+      return api.post<CreateInterviewResult>("/interviews", {
         application_id: selectedApp!.id,
-        question_count: parseInt(count || "3", 10),
-      }),
+        question_count: questionCount,
+      })
+    },
     onSuccess: (result) => {
       setCreated(result)
       qc.invalidateQueries({ queryKey: ["applications"] })
@@ -246,7 +250,7 @@ export function InterviewsPage() {
                           variant={iv.status === "completed" ? "default" : "secondary"}
                           className={
                             iv.status === "completed"
-                              ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20 text-xs"
+                              ? "bg-success/10 text-success border-success/20 text-xs"
                               : "text-xs"
                           }
                         >
@@ -322,7 +326,7 @@ export function InterviewsPage() {
                       <TableCell className="font-medium">{app.candidate_name}</TableCell>
                       <TableCell className="text-xs text-muted-foreground">{app.job_title}</TableCell>
                       <TableCell>
-                        <Badge className="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20 font-bold">
+                        <Badge className="bg-success/10 text-success border-success/20 font-bold">
                           {app.cv_score} / 100
                         </Badge>
                       </TableCell>
@@ -351,11 +355,11 @@ export function InterviewsPage() {
 
       {/* Create & Invite Modal */}
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="sm:max-w-lg lg:max-w-xl">
           {created ? (
             <>
               <DialogHeader>
-                <DialogTitle className="font-display text-lg flex items-center gap-2 text-emerald-600 dark:text-emerald-400">
+                <DialogTitle className="font-display text-lg flex items-center gap-2 text-success">
                   <CheckCircle className="h-6 w-6" weight="fill" /> Interview Session Active!
                 </DialogTitle>
                 <DialogDescription>
@@ -417,7 +421,7 @@ export function InterviewsPage() {
                     className="bg-background/80"
                   />
                   <p className="text-xs text-muted-foreground">
-                    DeepSeek will synthesize CV-gap questions tailored to the candidate's missing competencies.
+                    LLM will synthesize CV-gap questions tailored to the candidate's missing competencies.
                   </p>
                 </div>
               </div>

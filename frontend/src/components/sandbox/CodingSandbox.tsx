@@ -1,5 +1,6 @@
-import { useState } from "react"
-import { CodeEditor, STARTER_TEMPLATES } from "./CodeEditor"
+import { useEffect, useRef, useState } from "react"
+import { CodeEditor } from "./CodeEditor"
+import { STARTER_TEMPLATES } from "./starter-templates"
 import { TerminalConsole } from "./TerminalConsole"
 import { TestCaseManager } from "./TestCaseManager"
 import { Sparkles, Activity, Layers } from "lucide-react"
@@ -20,6 +21,7 @@ interface CodingSandboxProps {
 export function CodingSandbox({
   initialLanguage = "go",
   initialCode,
+  questionIdx,
   onCodeChange,
   onExecute,
   onRequestAIReview,
@@ -36,6 +38,24 @@ export function CodingSandbox({
   const [isReviewing, setIsReviewing] = useState<boolean>(false)
   const [showReviewModal, setShowReviewModal] = useState<boolean>(false)
   const [bottomTab, setBottomTab] = useState<"terminal" | "tests">("terminal")
+
+  // G11: a new question resets the workspace — the previous stage's code,
+  // test cases and stale results must not bleed into the next challenge.
+  // The ref skips the mount run so initial state is not clobbered twice.
+  const mountedRef = useRef(false)
+  useEffect(() => {
+    if (!mountedRef.current) {
+      mountedRef.current = true
+      return
+    }
+    setCode(STARTER_TEMPLATES[language] || "")
+    setTestCases([{ id: "1", input: "example input", expected_output: "example input" }])
+    setResult(null)
+    setAiReview(null)
+    setBottomTab("terminal")
+    // `language` is intentionally excluded — reset uses the CURRENT language.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [questionIdx])
 
   const handleLanguageChange = (newLang: SandboxLanguage) => {
     setLanguage(newLang)
@@ -162,7 +182,7 @@ export function CodingSandbox({
 
       {/* AI Code Review Modal */}
       <Dialog open={showReviewModal && !!aiReview} onOpenChange={setShowReviewModal}>
-        <DialogContent className="bg-neutral-900 border-purple-900/60 max-w-lg w-full p-5 shadow-2xl">
+        <DialogContent className="bg-neutral-900 border-purple-900/60 sm:max-w-lg md:max-w-xl w-full p-6 shadow-2xl">
           {aiReview && (
             <div className="space-y-4">
               <DialogHeader className="border-b border-neutral-800 pb-3">

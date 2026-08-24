@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { useNavigate, useParams, useSearchParams } from "react-router-dom"
 import {
   Sparkle,
@@ -8,6 +8,7 @@ import {
   CheckCircle,
 } from "@phosphor-icons/react"
 import { api } from "@/lib/api"
+import { storeInvitationToken } from "@/lib/interview-ticket"
 import type { ConsentResult } from "@/types/api"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -20,16 +21,20 @@ export function InvitePage() {
   const { id } = useParams<{ id: string }>()
   const [params] = useSearchParams()
   const token = params.get("t") ?? ""
+  const autoStart = params.get("auto") === "1"
   const navigate = useNavigate()
 
   const [consented, setConsented] = useState(false)
   const [busy, setBusy] = useState(false)
+  // StrictMode-safe autostart guard: the effect body must run at most once —
+  // state updates are async, so `busy` alone cannot stop a double-invoke.
+  const autoStartDoneRef = useRef(false)
   // Persistent failure state — an expired or already-consumed invitation is
   // not a transient toast: the page must tell the candidate what happened and
   // how to get a fresh link, and must not re-enable the button.
   const [failed, setFailed] = useState(false)
 
-  async function start() {
+  const start = useCallback(async () => {
     if (!id || !token) return
     setBusy(true)
     setFailed(false)
@@ -38,13 +43,27 @@ export function InvitePage() {
       const ticket = await api.post<{ ticket: string }>(`/candidate/interviews/${id}/ticket`, {
         invitation_token: token,
       })
+      // G2: keep the long-lived invitation token so the chat session can
+      // re-mint an expired ws_ticket exactly once on mid-session reconnects.
+      storeInvitationToken(id, token)
       navigate(`/chat/${id}?t=${encodeURIComponent(ticket.ticket)}`)
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Could not start the interview")
       setFailed(true)
       setBusy(false)
     }
-  }
+  }, [id, navigate, token])
+
+  // Magic link auto-start: proceed WITHOUT manual interaction only once the
+  // candidate has explicitly consented (DD: consent is never auto-ticked).
+  // Without consent the candidate lands on the consent step; ticking the box
+  // is the explicit click that triggers the start.
+  useEffect(() => {
+    if (!autoStart || !consented || !token || !id || busy || failed) return
+    if (autoStartDoneRef.current) return
+    autoStartDoneRef.current = true
+    void start()
+  }, [autoStart, busy, consented, failed, id, start, token])
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-primary/10 via-background to-background p-4 animate-in fade-in duration-500">

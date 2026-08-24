@@ -1,79 +1,10 @@
-import { useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import Editor from "@monaco-editor/react"
 import { Play, RotateCcw, Sparkles, Check, ChevronDown } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { SandboxLanguage } from "@/types/api"
-
-export const STARTER_TEMPLATES: Record<SandboxLanguage, string> = {
-  go: `package main
-
-import (
-	"bufio"
-	"fmt"
-	"os"
-	"strings"
-)
-
-// Solve implements your algorithmic solution
-func Solve(lines []string) string {
-	if len(lines) == 0 {
-		return ""
-	}
-	// TODO: implement logic here
-	return strings.Join(lines, " ")
-}
-
-func main() {
-	scanner := bufio.NewScanner(os.Stdin)
-	var lines []string
-	for scanner.Scan() {
-		lines = append(lines, scanner.Text())
-	}
-	fmt.Println(Solve(lines))
-}
-`,
-  python: `import sys
-
-def solve():
-    """Implement your algorithmic solution here"""
-    lines = sys.stdin.read().strip().split()
-    if not lines:
-        return
-    # TODO: implement logic here
-    print(" ".join(lines))
-
-if __name__ == "__main__":
-    solve()
-`,
-  typescript: `function solve(input: string): string {
-    // TODO: implement your solution
-    return input.trim();
-}
-
-const readline = require("readline");
-const rl = readline.createInterface({ input: process.stdin });
-let lines: string[] = [];
-
-rl.on("line", (line: string) => lines.push(line));
-rl.on("close", () => {
-    console.log(solve(lines.join("\\n")));
-});
-`,
-  javascript: `function solve(input) {
-    // TODO: implement your solution
-    return input.trim();
-}
-
-const readline = require("readline");
-const rl = readline.createInterface({ input: process.stdin });
-let lines = [];
-
-rl.on("line", (line) => lines.push(line));
-rl.on("close", () => {
-    console.log(solve(lines.join("\\n")));
-});
-`,
-}
+import { toast } from "sonner"
+import { STARTER_TEMPLATES } from "./starter-templates"
 
 interface CodeEditorProps {
   language: SandboxLanguage
@@ -97,10 +28,28 @@ export function CodeEditor({
   readOnly = false,
 }: CodeEditorProps) {
   const [copied, setCopied] = useState(false)
+  const [confirmReset, setConfirmReset] = useState(false)
+  const resetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(() => {
+    return () => {
+      if (resetTimerRef.current) clearTimeout(resetTimerRef.current)
+      if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current)
+    }
+  }, [])
 
   const handleReset = () => {
-    if (window.confirm("Reset code to starter template? Your current edits will be overwritten.")) {
+    if (confirmReset) {
       onChange(STARTER_TEMPLATES[language] || "")
+      setConfirmReset(false)
+    } else {
+      setConfirmReset(true)
+      if (resetTimerRef.current) clearTimeout(resetTimerRef.current)
+      resetTimerRef.current = setTimeout(() => {
+        setConfirmReset(false)
+        resetTimerRef.current = null
+      }, 3000)
     }
   }
 
@@ -108,9 +57,13 @@ export function CodeEditor({
     try {
       await navigator.clipboard.writeText(code)
       setCopied(true)
-      setTimeout(() => setCopied(false), 2000)
-    } catch (e) {
-      alert("Failed to copy to clipboard")
+      if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current)
+      copiedTimerRef.current = setTimeout(() => {
+        setCopied(false)
+        copiedTimerRef.current = null
+      }, 2000)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to copy code")
     }
   }
 
@@ -142,7 +95,7 @@ export function CodeEditor({
               title="Reset code template"
             >
               <RotateCcw className="w-3 h-3" />
-              <span>Reset</span>
+              <span>{confirmReset ? "Click again to confirm" : "Reset"}</span>
             </button>
           )}
         </div>

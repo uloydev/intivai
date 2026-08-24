@@ -1,4 +1,4 @@
-import React, { useState } from "react"
+import React, { useRef, useState } from "react"
 import { Plus, Trash2, CheckCircle2, XCircle, Clock } from "lucide-react"
 import type { SandboxTestCase, SandboxTestCaseResult } from "@/types/api"
 
@@ -10,10 +10,13 @@ interface TestCaseManagerProps {
 
 export function TestCaseManager({ testCases, results, onUpdateTestCases }: TestCaseManagerProps) {
   const [activeTab, setActiveTab] = useState<number>(0)
+  // Monotonic id source — `length + 1` collides after a removal (add 3,
+  // remove one, add again → duplicate "3" breaks result matching).
+  const nextIdRef = useRef(1)
 
   const addTestCase = () => {
     const newCase: SandboxTestCase = {
-      id: String(testCases.length + 1),
+      id: `tc-${nextIdRef.current++}`,
       input: "",
       expected_output: "",
     }

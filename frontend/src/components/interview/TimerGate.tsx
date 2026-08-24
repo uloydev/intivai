@@ -11,11 +11,19 @@ export interface TimerGateProps {
   active: boolean
   isProcessing?: boolean
   onExpire: () => void
+  onSessionExpire?: () => void
 }
 
 const GRACE_PERIOD_SEC = 15
 const DEFAULT_SESSION_BUDGET_SEC = 1800
 const DEFAULT_QUESTION_LIMIT_SEC = 180
+
+// Module scope (G11): pure formatting helper — no per-render recreation.
+function formatTime(seconds: number): string {
+  const mins = Math.floor(seconds / 60)
+  const secs = seconds % 60
+  return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`
+}
 
 export function TimerGate({
   sessionRemainingSec,
@@ -26,12 +34,14 @@ export function TimerGate({
   active,
   isProcessing = false,
   onExpire,
+  onSessionExpire,
 }: TimerGateProps) {
-  const [sessionClock, setSessionClock] = useState(sessionRemainingSec || DEFAULT_SESSION_BUDGET_SEC)
-  const [questionClock, setQuestionClock] = useState(timeLimitSec || DEFAULT_QUESTION_LIMIT_SEC)
+  const [sessionClock, setSessionClock] = useState(sessionRemainingSec ?? DEFAULT_SESSION_BUDGET_SEC)
+  const [questionClock, setQuestionClock] = useState(timeLimitSec ?? DEFAULT_QUESTION_LIMIT_SEC)
   const [graceClock, setGraceClock] = useState<number | null>(null)
   const onExpireRef = useRef(onExpire)
   const expiredFiredRef = useRef(false)
+  const sessionExpiredFiredRef = useRef(false)
 
   // Keep the expire handler fresh — a stale closure (first render's
   // handleTimerExpire) would auto-submit an empty input.
@@ -39,13 +49,12 @@ export function TimerGate({
 
   // Sync initial/updated props from server frames
   useEffect(() => {
-    if (sessionRemainingSec > 0) {
-      setSessionClock(sessionRemainingSec)
-    }
+    setSessionClock(sessionRemainingSec ?? DEFAULT_SESSION_BUDGET_SEC)
+    sessionExpiredFiredRef.current = false
   }, [sessionRemainingSec])
 
   useEffect(() => {
-    setQuestionClock(timeLimitSec || DEFAULT_QUESTION_LIMIT_SEC)
+    setQuestionClock(timeLimitSec ?? DEFAULT_QUESTION_LIMIT_SEC)
     setGraceClock(null)
     expiredFiredRef.current = false
   }, [currentIdx, timeLimitSec])
@@ -82,14 +91,14 @@ export function TimerGate({
     }
   }, [graceClock])
 
-  // Formatting helpers
-  const formatTime = (seconds: number) => {
-    const mins = Math.floor(seconds / 60)
-    const secs = seconds % 60
-    return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`
-  }
+  useEffect(() => {
+    if (sessionClock === 0 && !sessionExpiredFiredRef.current) {
+      sessionExpiredFiredRef.current = true
+      onSessionExpire?.()
+    }
+  }, [sessionClock, onSessionExpire])
 
-  const initialLimit = timeLimitSec || DEFAULT_QUESTION_LIMIT_SEC
+  const initialLimit = timeLimitSec ?? DEFAULT_QUESTION_LIMIT_SEC
   const questionPercent = useMemo(() => {
     return Math.max(0, Math.min(100, (questionClock / initialLimit) * 100))
   }, [questionClock, initialLimit])
@@ -137,7 +146,7 @@ export function TimerGate({
           </div>
           {total > 0 && (
             <span className="text-muted-foreground font-mono">
-              Stage {Math.min(currentIdx, total)} of {total}
+              Stage {currentIdx} of {Math.max(total, currentIdx)}
             </span>
           )}
         </div>

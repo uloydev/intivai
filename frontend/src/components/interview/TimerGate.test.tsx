@@ -80,4 +80,37 @@ describe("TimerGate Component", () => {
     })
     expect(handleExpire).toHaveBeenCalledTimes(1)
   })
+
+  it("preserves zero session budget instead of falling back to default", () => {
+    render(
+      <TimerGate
+        sessionRemainingSec={0}
+        timeLimitSec={120}
+        currentIdx={1}
+        total={1}
+        active={false}
+        onExpire={() => undefined}
+      />
+    )
+
+    expect(screen.getByText("Session: 00:00")).toBeDefined()
+  })
+
+  it("fires session-expiry callback when global clock reaches zero", () => {
+    const handleSessionExpire = vi.fn()
+    render(
+      <TimerGate
+        sessionRemainingSec={1}
+        timeLimitSec={120}
+        currentIdx={1}
+        total={1}
+        active={true}
+        onExpire={() => undefined}
+        onSessionExpire={handleSessionExpire}
+      />
+    )
+
+    act(() => vi.advanceTimersByTime(1000))
+    expect(handleSessionExpire).toHaveBeenCalledTimes(1)
+  })
 })
