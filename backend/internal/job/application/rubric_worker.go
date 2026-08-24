@@ -3,6 +3,7 @@ package application
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 
 	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
@@ -83,13 +84,23 @@ Output JSON exactly matching the following schema:
   ]
 }`
 
-	req, _ := json.Marshal(map[string]interface{}{
-		"title":           job.Title,
-		"description":     job.Description,
-		"required_skills": job.RequiredSkills,
-		"min_experience":  job.MinExperience,
-		"weights":         job.ScoringWeights, // might be empty/null, that's fine
+	type rubricInput struct {
+		Title          string             `json:"title"`
+		Description    string             `json:"description"`
+		RequiredSkills []string           `json:"required_skills"`
+		MinExperience  int                `json:"min_experience"`
+		Weights        map[string]float64 `json:"weights"`
+	}
+	req, err := json.Marshal(rubricInput{
+		Title:          job.Title,
+		Description:    job.Description,
+		RequiredSkills: job.RequiredSkills,
+		MinExperience:  job.MinExperience,
+		Weights:        job.ScoringWeights,
 	})
+	if err != nil {
+		return fmt.Errorf("marshal rubric input: %w", err)
+	}
 	user := string(req)
 
 	type RubricSchema struct {
