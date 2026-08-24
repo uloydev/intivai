@@ -26,6 +26,22 @@ type stubLLM struct {
 	calls int
 }
 
+func TestPermanentExtractionFailureRetriesWhenFailureStateCannotPersist(t *testing.T) {
+	markErr := errors.New("database unavailable")
+	if err := permanentExtractionFailure(markErr); !errors.Is(err, markErr) {
+		t.Fatalf("error = %v, want mark failure returned for retry", err)
+	}
+	if err := permanentExtractionFailure(nil); !errors.Is(err, asynq.SkipRetry) {
+		t.Fatalf("error = %v, want SkipRetry after successful failure marking", err)
+	}
+}
+
+func TestResumeFromStoredDataRejectsCorruptJSON(t *testing.T) {
+	if _, err := resumeFromStoredData([]byte("{")); err == nil {
+		t.Fatal("expected corrupt stored resume data to fail")
+	}
+}
+
 func (s *stubLLM) Chat(ctx context.Context, req llm.ChatRequest) (*llm.ChatResponse, error) {
 	return nil, errors.New("unused")
 }

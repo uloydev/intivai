@@ -89,7 +89,7 @@ func (h *CVHandler) BulkUpload(c *fiber.Ctx) error {
 				ContentType: fh.Header.Get("Content-Type"),
 			})
 		}
-		file.Close()
+		_ = file.Close() // fully read; close error carries no signal for this request
 	}
 
 	if len(parsedFiles) == 0 {

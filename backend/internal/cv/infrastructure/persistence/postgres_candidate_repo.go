@@ -32,10 +32,16 @@ func (r *PostgresCandidateRepo) Create(ctx context.Context, c *cvdomain.Candidat
 	if err != nil {
 		return err
 	}
+	// Explicit state inserts (rule 13): the column default 'pdf' is bypassed
+	// by an explicit INSERT, so normalize here — never persist an empty
+	// cv_format that scan's COALESCE cannot repair.
+	if c.CVFormat == "" {
+		c.CVFormat = "pdf"
+	}
 	err = q.WithContext(ctx).Exec(
-		`INSERT INTO candidates (id, org_id, name, email, cv_path, status, batch_id, review_token, created_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-		c.ID, c.OrgID, c.Name, c.Email, c.CVPath, c.Status, c.BatchID, c.ReviewToken, c.CreatedAt).Error
+		`INSERT INTO candidates (id, org_id, name, email, cv_path, cv_format, status, batch_id, review_token, created_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+		c.ID, c.OrgID, c.Name, c.Email, c.CVPath, c.CVFormat, c.Status, c.BatchID, c.ReviewToken, c.CreatedAt).Error
 	return db.WrapError(err)
 }
 
@@ -45,7 +51,7 @@ func (r *PostgresCandidateRepo) GetByID(ctx context.Context, id uuid.UUID) (*cvd
 		return nil, err
 	}
 	row := q.Raw(
-		`SELECT id, org_id, name, email, cv_path, cv_raw_text, cv_structured, cv_ocr_method, status, error_message, batch_id, review_token, created_at
+		`SELECT id, org_id, name, email, cv_path, COALESCE(cv_format, 'pdf'), cv_raw_text, cv_structured, cv_ocr_method, status, error_message, batch_id, review_token, created_at
 		 FROM candidates WHERE id = $1`, id).Row()
 	return scanCandidate(row)
 }
@@ -54,7 +60,7 @@ func (r *PostgresCandidateRepo) GetByID(ctx context.Context, id uuid.UUID) (*cvd
 // cross-org token lookup runs through the SECURITY DEFINER function.
 func (r *PostgresCandidateRepo) GetByReviewToken(ctx context.Context, token string) (*cvdomain.Candidate, error) {
 	row := r.pool.WithContext(ctx).Raw(
-		`SELECT id, org_id, name, email, cv_path, cv_raw_text, cv_structured, cv_ocr_method, status, error_message, batch_id, review_token, created_at
+		`SELECT id, org_id, name, email, cv_path, COALESCE(cv_format, 'pdf'), cv_raw_text, cv_structured, cv_ocr_method, status, error_message, batch_id, review_token, created_at
 		 FROM candidate_by_review_token($1)`, token).Row()
 	return scanCandidate(row)
 }
@@ -82,7 +88,7 @@ func (r *PostgresCandidateRepo) List(ctx context.Context, orgID uuid.UUID) ([]*c
 		return nil, err
 	}
 	rows, err := q.Raw(
-		`SELECT id, org_id, name, email, cv_path, cv_raw_text, cv_structured, cv_ocr_method, status, error_message, batch_id, review_token, created_at
+		`SELECT id, org_id, name, email, cv_path, COALESCE(cv_format, 'pdf'), cv_raw_text, cv_structured, cv_ocr_method, status, error_message, batch_id, review_token, created_at
 		 FROM candidates WHERE org_id = $1 ORDER BY created_at DESC`, orgID).Rows()
 	if err != nil {
 		return nil, err
@@ -105,10 +111,10 @@ func (r *PostgresCandidateRepo) Update(ctx context.Context, c *cvdomain.Candidat
 		return err
 	}
 	err = q.WithContext(ctx).Exec(
-		`UPDATE candidates SET name = $1, email = $2, cv_path = $3, cv_raw_text = $4,
-		 cv_structured = $5, cv_ocr_method = $6, status = $7, error_message = $8, batch_id = $9, review_token = $10, updated_at = NOW()
-		 WHERE id = $11`,
-		c.Name, c.Email, c.CVPath, c.CVRawText, c.CVStructured, c.CVOCRMethod, c.Status, c.ErrorMessage, c.BatchID, c.ReviewToken, c.ID).Error
+		`UPDATE candidates SET name = $1, email = $2, cv_path = $3, cv_format = $4, cv_raw_text = $5,
+		 cv_structured = $6, cv_ocr_method = $7, status = $8, error_message = $9, batch_id = $10, review_token = $11, updated_at = NOW()
+		 WHERE id = $12`,
+		c.Name, c.Email, c.CVPath, c.CVFormat, c.CVRawText, c.CVStructured, c.CVOCRMethod, c.Status, c.ErrorMessage, c.BatchID, c.ReviewToken, c.ID).Error
 	return db.WrapError(err)
 }
 
@@ -133,8 +139,9 @@ func scanCandidate(row rowScanner) (*cvdomain.Candidate, error) {
 		structured []byte
 		errMsg     *string
 		ocrMethod  *string
+		cvFormat   *string
 	)
-	err := row.Scan(&c.ID, &c.OrgID, &c.Name, &c.Email, &path, &raw, &structured, &ocrMethod, &c.Status, &errMsg, &c.BatchID, &c.ReviewToken, &c.CreatedAt)
+	err := row.Scan(&c.ID, &c.OrgID, &c.Name, &c.Email, &path, &cvFormat, &raw, &structured, &ocrMethod, &c.Status, &errMsg, &c.BatchID, &c.ReviewToken, &c.CreatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, cvdomain.ErrNotFound
 	}
@@ -153,6 +160,11 @@ func scanCandidate(row rowScanner) (*cvdomain.Candidate, error) {
 	if ocrMethod != nil {
 		c.CVOCRMethod = *ocrMethod
 	}
+	if cvFormat != nil {
+		c.CVFormat = *cvFormat
+	} else {
+		c.CVFormat = "pdf"
+	}
 	if len(structured) > 0 {
 		c.CVStructured = structured
 	}
@@ -160,6 +172,8 @@ func scanCandidate(row rowScanner) (*cvdomain.Candidate, error) {
 }
 
 // ListByIDs — batched candidate fetch for list enrichment (RLS-scoped).
+// Contract intentionally returns identity/list columns only; callers needing
+// CV content or pipeline metadata must use GetByID.
 func (r *PostgresCandidateRepo) ListByIDs(ctx context.Context, orgID uuid.UUID, ids []uuid.UUID) (map[uuid.UUID]*cvdomain.Candidate, error) {
 	tx, err := r.tx(ctx)
 	if err != nil {

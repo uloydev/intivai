@@ -4,7 +4,7 @@ import (
 	scrdomain "github.com/intivai/backend/internal/screening/domain"
 )
 
-// ResumeData — structured CV extraction (DeepSeek json_object output).
+// ResumeData — structured CV extraction (LLM json_object output).
 // Canonical type lives in the screening domain (the scoring engine consumes
 // it); this package aliases it so the extract pipeline and the scorer always
 // speak the same shape.

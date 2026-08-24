@@ -3,11 +3,31 @@ package application
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 
 	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
 )
+
+type parseQueueStub struct {
+	err error
+}
+
+func (q parseQueueStub) Enqueue(context.Context, string, any, ...asynq.Option) (*asynq.TaskInfo, error) {
+	return nil, q.err
+}
+
+func TestParseWorkerQueueExtractPropagatesFailure(t *testing.T) {
+	w := &ParseWorker{
+		queue: parseQueueStub{err: errors.New("redis unavailable")},
+	}
+
+	err := w.queueExtract(context.Background(), ParseCVPayload{CandidateID: "candidate-1"})
+	if err == nil || err.Error() != "enqueue extract_cv: redis unavailable" {
+		t.Fatalf("queueExtract error = %v, want wrapped enqueue error", err)
+	}
+}
 
 func TestParseWorkerBadPayload(t *testing.T) {
 	worker := &ParseWorker{}

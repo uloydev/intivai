@@ -119,8 +119,26 @@ type CVResult struct {
 	Status string    `json:"status"`
 }
 
+// Bulk upload skip reasons — machine-readable, surfaced to the recruiter via
+// the outcomes array (finding D27: silent drops hide ingestion problems).
+const (
+	bulkSkipInvalidName = "invalid_candidate_name"
+	bulkSkipStorage     = "storage_failed"
+	bulkSkipPersist     = "persist_failed"
+	bulkSkipEnqueue     = "enqueue_failed"
+)
+
+type BulkUploadOutcome struct {
+	Filename string `json:"filename"`
+	OK       bool   `json:"ok"`
+	Reason   string `json:"reason,omitempty"`
+}
+
 type BulkUploadResult struct {
-	BatchID uuid.UUID `json:"batch_id"`
+	BatchID  uuid.UUID           `json:"batch_id"`
+	Uploaded int                 `json:"uploaded"`
+	Failed   int                 `json:"failed"`
+	Outcomes []BulkUploadOutcome `json:"outcomes"`
 }
 
 type BulkUploadFile struct {
@@ -129,26 +147,41 @@ type BulkUploadFile struct {
 	ContentType string
 }
 
+// BulkUpload ingests each file independently. Every file yields an explicit
+// outcome row (per-file ok/reason) and every skip is warn-logged; a batch
+// where everything failed still returns the batch id + reasons instead of an
+// error, so recruiters see exactly what did not land.
 func (s *CVService) BulkUpload(ctx context.Context, actor application.AuthContext, files []BulkUploadFile) (*BulkUploadResult, error) {
 	if err := application.Authorize(actor, iamdomain.RoleAdmin, iamdomain.RoleRecruiter); err != nil {
 		return nil, err
 	}
 	batchID := uuid.New()
+	result := &BulkUploadResult{BatchID: batchID, Outcomes: make([]BulkUploadOutcome, 0, len(files))}
+	skip := func(filename, reason string) {
+		log.Warn().Str("filename", filename).Str("reason", reason).Str("batch_id", batchID.String()).Msg("bulk cv upload skipped file")
+		result.Failed++
+		result.Outcomes = append(result.Outcomes, BulkUploadOutcome{Filename: filename, OK: false, Reason: reason})
+	}
 
 	for _, f := range files {
 		candidate, err := domain.NewCandidate(actor.OrgID, strings.TrimSpace(f.Name), "")
 		if err != nil {
-			continue // skip invalid names
+			skip(f.Name, bulkSkipInvalidName)
+			continue
 		}
 		candidate.BatchID = &batchID
 		candidate.CVPath = fmt.Sprintf("cvs/%s/%s.pdf", actor.OrgID, candidate.ID)
 		candidate.Status = domain.StatusParsing
 
 		if err := s.store.Upload(ctx, candidate.CVPath, strings.NewReader(string(f.Data)), int64(len(f.Data)), f.ContentType); err != nil {
-			continue // skip if upload fails
+			log.Warn().Err(err).Str("filename", f.Name).Msg("bulk cv upload store failed")
+			skip(f.Name, bulkSkipStorage)
+			continue
 		}
 		if err := s.repo.Create(ctx, candidate); err != nil {
 			_ = s.store.Delete(ctx, candidate.CVPath)
+			log.Warn().Err(err).Str("filename", f.Name).Msg("bulk cv upload persist failed")
+			skip(f.Name, bulkSkipPersist)
 			continue
 		}
 		if _, err := s.queue.Enqueue(ctx, TaskParseCV, ParseCVPayload{
@@ -156,9 +189,14 @@ func (s *CVService) BulkUpload(ctx context.Context, actor application.AuthContex
 		}); err != nil {
 			_ = s.store.Delete(ctx, candidate.CVPath)
 			_ = s.repo.Delete(ctx, candidate.ID)
+			log.Warn().Err(err).Str("filename", f.Name).Msg("bulk cv upload enqueue failed")
+			skip(f.Name, bulkSkipEnqueue)
+			continue
 		}
+		result.Uploaded++
+		result.Outcomes = append(result.Outcomes, BulkUploadOutcome{Filename: f.Name, OK: true})
 	}
-	return &BulkUploadResult{BatchID: batchID}, nil
+	return result, nil
 }
 
 // CVListItem — summary only. Raw text and structured data (PII) stay on

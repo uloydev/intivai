@@ -33,7 +33,7 @@ const (
 // Malformed/unexpected LLM output is permanent (SkipRetry).
 var ErrExtractTransient = errors.New("extract llm unavailable")
 
-// ExtractWorker: DeepSeek structured extraction → persist ResumeData, then
+// ExtractWorker: LLM structured extraction → persist ResumeData, then
 // fan out score_cv per active job + sync candidate into the Mnemosyne bank.
 // Failure discipline: enqueue failures return an error so asynq retries —
 // applications created without score tasks would otherwise be stuck
@@ -72,26 +72,35 @@ func (w *ExtractWorker) handle(ctx context.Context, t *asynq.Task) error {
 		return err
 	}
 
-	resume, err := w.extract(ctx, candidate)
-	if err != nil {
-		if errors.Is(err, ErrExtractTransient) {
-			return err // transient provider failure — asynq retries
+	var resume *ResumeData
+	if candidate.Status == cvdomain.StatusExtracting && len(candidate.CVStructured) > 0 {
+		resume, err = resumeFromStoredData(candidate.CVStructured)
+	} else {
+		resume, err = w.extract(ctx, candidate)
+		if err != nil {
+			if errors.Is(err, ErrExtractTransient) {
+				return err // transient provider failure — asynq retries
+			}
+			return permanentExtractionFailure(w.fail(ctx, p, err))
 		}
-		_ = w.fail(ctx, p, err)
-		return asynq.SkipRetry // malformed output — retrying cannot fix it
 	}
-	structured, _ := json.Marshal(resume)
+	if err != nil {
+		return permanentExtractionFailure(w.fail(ctx, p, err))
+	}
+	structured, err := json.Marshal(resume)
+	if err != nil {
+		return permanentExtractionFailure(w.fail(ctx, p, fmt.Errorf("marshal extracted resume: %w", err)))
+	}
 
 	// Phase 1: persist structured data + create applications (status stays
 	// extracting until ALL side effects are enqueued).
-	appIDs := []string{}
 	err = db.RunInTx(ctx, w.pool, p.OrgID, func(tctx context.Context) error {
 		c, err := w.candRepo.GetByID(tctx, candID)
 		if err != nil {
 			return err
 		}
 		c.CVStructured = structured
-		c.Status = cvdomain.StatusPendingReview
+		c.Status = cvdomain.StatusExtracting
 		if c.ReviewToken == nil {
 			tok := uuid.NewString()
 			c.ReviewToken = &tok
@@ -109,9 +118,8 @@ func (w *ExtractWorker) handle(ctx context.Context, t *asynq.Task) error {
 			return db.ErrNoTx
 		}
 		for _, job := range jobs {
-			existing, err := w.appRepo.GetByCandidateJob(tctx, candidate.OrgID, candidate.ID, job.ID)
+			_, err := w.appRepo.GetByCandidateJob(tctx, candidate.OrgID, candidate.ID, job.ID)
 			if err == nil {
-				appIDs = append(appIDs, existing.ID.String())
 				continue
 			}
 			if err != scrdomain.ErrNotFound {
@@ -119,11 +127,10 @@ func (w *ExtractWorker) handle(ctx context.Context, t *asynq.Task) error {
 			}
 
 			app := scrdomain.NewApplication(candidate.OrgID, candidate.ID, job.ID)
-			winning, _, err := scrapp.CreateApplicationWithRecovery(tctx, tx, w.appRepo, app)
+			_, _, err = scrapp.CreateApplicationWithRecovery(tctx, tx, w.appRepo, app)
 			if err != nil {
 				return err
 			}
-			appIDs = append(appIDs, winning.ID.String())
 		}
 		return nil
 	})
@@ -132,7 +139,6 @@ func (w *ExtractWorker) handle(ctx context.Context, t *asynq.Task) error {
 	}
 
 	// Phase 2: enqueue side effects — failure must retry the whole task
-	// (re-running the LLM is safe: applications dedupe, status re-marks).
 	// Deterministic TaskIDs make a retry-after-partial-failure re-run a no-op
 	// for tasks that already committed (asynq unique-enqueue).
 	// Enqueue email for candidate review (magic link). The candidate is
@@ -148,15 +154,18 @@ func (w *ExtractWorker) handle(ctx context.Context, t *asynq.Task) error {
 		reviewEmail, reviewName, reviewToken = c.Email, c.Name, c.ReviewToken
 		return nil
 	})
-	if err == nil && reviewEmail != "" && reviewToken != nil {
+	if err != nil {
+		return fmt.Errorf("load candidate review details: %w", err)
+	}
+	if reviewEmail != "" && reviewToken != nil {
 		inviteURL := fmt.Sprintf("%s/candidate-review/%s", strings.TrimSuffix(w.publicURL, "/"), *reviewToken)
 		if _, err := w.queue.Enqueue(ctx, notifapp.TaskSendEmail, notifapp.SendEmailPayload{
 			Type:          notifapp.EmailTypeCandidateReview,
 			To:            reviewEmail,
 			CandidateName: reviewName,
 			InviteURL:     inviteURL,
-		}, asynq.MaxRetry(5)); err != nil {
-			w.log.Error().Err(err).Msg("failed to enqueue candidate review email")
+		}, asynq.TaskID("candidate_review_email:"+p.CandidateID), asynq.MaxRetry(5)); err != nil && !errors.Is(err, asynq.ErrTaskIDConflict) {
+			return fmt.Errorf("enqueue candidate review email: %w", err)
 		}
 	}
 
@@ -177,12 +186,27 @@ func (w *ExtractWorker) handle(ctx context.Context, t *asynq.Task) error {
 		if err != nil {
 			return err
 		}
-		if c.Status != cvdomain.StatusPendingReview {
+		if c.Status == cvdomain.StatusPendingReview {
 			return nil // already terminal (e.g. concurrent re-extract)
 		}
-		// Notice: we do NOT set StatusExtracted here, it remains PendingReview
+		c.Status = cvdomain.StatusPendingReview
 		return w.candRepo.Update(tctx, c)
 	})
+}
+
+func permanentExtractionFailure(markErr error) error {
+	if markErr != nil {
+		return fmt.Errorf("persist extraction failure: %w", markErr)
+	}
+	return asynq.SkipRetry
+}
+
+func resumeFromStoredData(raw []byte) (*ResumeData, error) {
+	var resume ResumeData
+	if err := json.Unmarshal(raw, &resume); err != nil {
+		return nil, fmt.Errorf("decode stored resume data: %w", err)
+	}
+	return &resume, nil
 }
 
 func (w *ExtractWorker) loadAndMarkExtracting(ctx context.Context, p ExtractCVPayload, candID uuid.UUID) (*cvdomain.Candidate, error) {
@@ -243,13 +267,14 @@ func (w *ExtractWorker) extract(ctx context.Context, candidate *cvdomain.Candida
 }
 
 func (w *ExtractWorker) fail(ctx context.Context, p ExtractCVPayload, cause error) error {
+	safeMessage := SafeFailureMessage(cause)
 	uer := db.RunInTx(ctx, w.pool, p.OrgID, func(tctx context.Context) error {
 		c, err := w.candRepo.GetByID(tctx, uuidx.MustParse(p.CandidateID))
 		if err != nil {
 			return err
 		}
 		c.Status = cvdomain.StatusFailedExtract
-		c.ErrorMessage = cause.Error()
+		c.ErrorMessage = safeMessage
 		return w.candRepo.Update(tctx, c)
 	})
 	if uer != nil {

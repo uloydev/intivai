@@ -28,6 +28,7 @@ type Candidate struct {
 	Name         string
 	Email        string
 	CVPath       string
+	CVFormat     string
 	CVRawText    string
 	CVStructured json.RawMessage
 	CVOCRMethod  string
