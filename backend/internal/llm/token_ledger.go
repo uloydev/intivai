@@ -20,6 +20,14 @@ type RedisTokenLedger struct {
 	dailyCap int
 }
 
+const recordUsageScript = `
+local value = redis.call("INCRBY", KEYS[1], ARGV[1])
+if value == tonumber(ARGV[1]) then
+  redis.call("EXPIRE", KEYS[1], ARGV[2])
+end
+return value
+`
+
 func NewRedisTokenLedger(rdb *redis.Client, dailyCap int) *RedisTokenLedger {
 	return &RedisTokenLedger{rdb: rdb, dailyCap: dailyCap}
 }
@@ -31,14 +39,9 @@ func (l *RedisTokenLedger) CheckAndRecord(ctx context.Context, orgID string, tok
 
 	key := fmt.Sprintf("llm:usage:org:%s:%s", orgID, time.Now().Format("2006-01-02"))
 
-	val, err := l.rdb.IncrBy(ctx, key, int64(tokens)).Result()
+	val, err := l.rdb.Eval(ctx, recordUsageScript, []string{key}, tokens, int64((48 * time.Hour).Seconds())).Int64()
 	if err != nil {
 		return err
-	}
-
-	if val == int64(tokens) {
-		// First time today, set expiration for 24h + some buffer
-		_ = l.rdb.Expire(ctx, key, 48*time.Hour)
 	}
 
 	if val > int64(l.dailyCap) {

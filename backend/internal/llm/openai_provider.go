@@ -17,8 +17,11 @@ import (
 	"github.com/sony/gobreaker"
 )
 
-// DeepSeekProvider — OpenAI-compatible API (api.deepseek.com/v1), model deepseek-chat.
-type DeepSeekProvider struct {
+// OpenAIProvider is an OpenAI-compatible chat provider (raw HTTP, no SDK).
+// Works with any endpoint exposing POST /chat/completions with Bearer auth:
+// SumoPod, OpenRouter, Together, vLLM, Ollama, etc.
+type OpenAIProvider struct {
+	name    string
 	apiKey  string
 	baseURL string
 	model   string
@@ -26,15 +29,23 @@ type DeepSeekProvider struct {
 	cb      *gobreaker.CircuitBreaker
 }
 
-func NewDeepSeekProvider(apiKey, baseURL, model string) *DeepSeekProvider {
+// NewOpenAIProvider creates an OpenAI-compatible provider.
+//   - name:  human label for metrics/logs (e.g. "sumopod", "openrouter")
+//   - apiKey: Bearer token
+//   - baseURL: base URL (no trailing slash); the provider appends /chat/completions
+//   - model: model identifier sent in every request body
+func NewOpenAIProvider(name, apiKey, baseURL, model string, timeoutSeconds int) *OpenAIProvider {
 	if baseURL == "" {
-		baseURL = "https://api.deepseek.com/v1"
+		baseURL = "https://api.openai.com/v1"
 	}
 	if model == "" {
-		model = "deepseek-chat"
+		model = "gpt-4o-mini"
+	}
+	if timeoutSeconds <= 0 {
+		timeoutSeconds = 60
 	}
 	cb := gobreaker.NewCircuitBreaker(gobreaker.Settings{
-		Name:        "DeepSeekAPI",
+		Name:        name + "API",
 		MaxRequests: 5,
 		Interval:    60 * time.Second,
 		Timeout:     30 * time.Second,
@@ -42,11 +53,12 @@ func NewDeepSeekProvider(apiKey, baseURL, model string) *DeepSeekProvider {
 			return counts.Requests >= 10 && float64(counts.TotalFailures)/float64(counts.Requests) >= 0.5
 		},
 	})
-	return &DeepSeekProvider{
+	return &OpenAIProvider{
+		name:    name,
 		apiKey:  apiKey,
 		baseURL: strings.TrimSuffix(baseURL, "/"),
 		model:   model,
-		http:    &http.Client{Timeout: 60 * time.Second},
+		http:    &http.Client{Timeout: time.Duration(timeoutSeconds) * time.Second},
 		cb:      cb,
 	}
 }
@@ -73,7 +85,7 @@ type chatResponse struct {
 	} `json:"usage"`
 }
 
-func (p *DeepSeekProvider) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, error) {
+func (p *OpenAIProvider) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, error) {
 	body := chatRequest{
 		Model:       or(req.Model, p.model),
 		Messages:    req.Messages,
@@ -119,14 +131,16 @@ func (p *DeepSeekProvider) Chat(ctx context.Context, req ChatRequest) (*ChatResp
 	return respObj, nil
 }
 
-// ChatStream streams SSE tokens. The channel is closed on completion/error.
-func (p *DeepSeekProvider) ChatStream(ctx context.Context, req ChatRequest) (<-chan string, error) {
+func (p *OpenAIProvider) ChatStream(ctx context.Context, req ChatRequest) (<-chan string, error) {
 	body := chatRequest{
 		Model:    or(req.Model, p.model),
 		Messages: req.Messages,
 		Stream:   true,
 	}
-	raw, _ := json.Marshal(body)
+	raw, err := json.Marshal(body)
+	if err != nil {
+		return nil, fmt.Errorf("marshal streaming chat request: %w", err)
+	}
 
 	hreq, err := http.NewRequestWithContext(ctx, http.MethodPost, p.baseURL+"/chat/completions", bytes.NewReader(raw))
 	if err != nil {
@@ -138,13 +152,15 @@ func (p *DeepSeekProvider) ChatStream(ctx context.Context, req ChatRequest) (<-c
 		r, err := p.http.Do(hreq)
 		if err != nil {
 			if errors.Is(err, context.Canceled) {
-				return nil, nil // success for the breaker; caller maps nil → Canceled
+				return nil, nil
 			}
 			return nil, err
 		}
 		return r, nil
 	})
 	if res == nil {
+		// A nil response is also returned when the caller canceled its context;
+		// transport-specific cancellation details are intentionally not exposed.
 		return nil, context.Canceled
 	}
 	if err != nil {
@@ -192,8 +208,7 @@ func (p *DeepSeekProvider) ChatStream(ctx context.Context, req ChatRequest) (<-c
 	return ch, nil
 }
 
-// StructuredOutput requests JSON mode and validates it parses into Schema.
-func (p *DeepSeekProvider) StructuredOutput(ctx context.Context, req StructuredRequest) (any, error) {
+func (p *OpenAIProvider) StructuredOutput(ctx context.Context, req StructuredRequest) (any, error) {
 	resp, err := p.Chat(ctx, ChatRequest{
 		Model: or(req.Model, p.model),
 		Messages: []Message{
@@ -205,27 +220,43 @@ func (p *DeepSeekProvider) StructuredOutput(ctx context.Context, req StructuredR
 	if err != nil {
 		return nil, err
 	}
+	raw := stripMarkdownFences(resp.Content)
 	if req.Schema != nil {
-		if err := json.Unmarshal([]byte(resp.Content), req.Schema); err != nil {
+		if err := json.Unmarshal([]byte(raw), req.Schema); err != nil {
 			return nil, fmt.Errorf("%w: %v", ErrStructuredParse, err)
 		}
 		return req.Schema, nil
 	}
 	var out any
-	if err := json.Unmarshal([]byte(resp.Content), &out); err != nil {
+	if err := json.Unmarshal([]byte(raw), &out); err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrStructuredParse, err)
 	}
 	return out, nil
 }
 
-// Embed — TODO(M2): local fastembed (bge-small, 384 dims). DeepSeek has no
-// public embedding API; this stays unimplemented until the fastembed adapter lands.
-func (p *DeepSeekProvider) Embed(ctx context.Context, text string) ([]float32, error) {
-	return nil, errors.New("embedding not implemented: use local fastembed adapter (M2)")
+// stripMarkdownFences removes ```json ... ``` wrapping that some LLM providers
+// return despite ResponseFormat: json_object. Idempotent on already-clean JSON.
+func stripMarkdownFences(s string) string {
+	s = strings.TrimSpace(s)
+	if strings.HasPrefix(s, "```") {
+		// strip opening fence (```json or ```JSON or just ```)
+		if idx := strings.Index(s, "\n"); idx != -1 {
+			s = s[idx+1:]
+		}
+		// strip closing fence
+		if idx := strings.LastIndex(s, "```"); idx != -1 {
+			s = s[:idx]
+		}
+		s = strings.TrimSpace(s)
+	}
+	return s
 }
 
-// CountTokens approximates the DeepSeek tokenizer with cl100k_base (5-10% drift).
-func (p *DeepSeekProvider) CountTokens(text string) int {
+func (p *OpenAIProvider) Embed(ctx context.Context, text string) ([]float32, error) {
+	return nil, errors.New("embedding not implemented: use local fastembed adapter")
+}
+
+func (p *OpenAIProvider) CountTokens(text string) int {
 	tke, err := tiktoken.GetEncoding("cl100k_base")
 	if err != nil {
 		return len(strings.Fields(text))
@@ -233,12 +264,11 @@ func (p *DeepSeekProvider) CountTokens(text string) int {
 	return len(tke.Encode(text, nil, nil))
 }
 
-// The wrapped fn returns (nil, nil) on client cancellation so gobreaker
-// records a SUCCESS; the caller turns the nil result back into
-// context.Canceled — repeated chat disconnects must not trip the breaker.
-
-func (p *DeepSeekProvider) do(ctx context.Context, body chatRequest) (*http.Response, error) {
-	raw, _ := json.Marshal(body)
+func (p *OpenAIProvider) do(ctx context.Context, body chatRequest) (*http.Response, error) {
+	raw, err := json.Marshal(body)
+	if err != nil {
+		return nil, fmt.Errorf("marshal chat request: %w", err)
+	}
 	hreq, err := http.NewRequestWithContext(ctx, http.MethodPost, p.baseURL+"/chat/completions", bytes.NewReader(raw))
 	if err != nil {
 		return nil, err
@@ -248,7 +278,7 @@ func (p *DeepSeekProvider) do(ctx context.Context, body chatRequest) (*http.Resp
 		r, err := p.http.Do(hreq)
 		if err != nil {
 			if errors.Is(err, context.Canceled) {
-				return nil, nil // success for the breaker; caller maps nil → Canceled
+				return nil, nil
 			}
 			return nil, err
 		}
@@ -266,13 +296,23 @@ func (p *DeepSeekProvider) do(ctx context.Context, body chatRequest) (*http.Resp
 	return res.(*http.Response), nil
 }
 
-func (p *DeepSeekProvider) setHeaders(req *http.Request) {
+func (p *OpenAIProvider) setHeaders(req *http.Request) {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+p.apiKey)
 }
 
 func statusError(resp *http.Response) error {
-	b, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	b, err := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	if err != nil {
+		switch {
+		case resp.StatusCode == http.StatusTooManyRequests:
+			return fmt.Errorf("%w: read response body: %v", ErrRateLimited, err)
+		case resp.StatusCode >= 500:
+			return fmt.Errorf("%w: read response body: %v", ErrUpstream, err)
+		default:
+			return fmt.Errorf("llm api %d: read response body: %v", resp.StatusCode, err)
+		}
+	}
 	switch {
 	case resp.StatusCode == http.StatusTooManyRequests:
 		return fmt.Errorf("%w: %s", ErrRateLimited, strings.TrimSpace(string(b)))
@@ -290,4 +330,4 @@ func or(a, b string) string {
 	return b
 }
 
-var _ Provider = (*DeepSeekProvider)(nil)
+var _ Provider = (*OpenAIProvider)(nil)

@@ -44,12 +44,14 @@ type Config struct {
 		BcryptCost   int
 	}
 	LLM struct {
-		DeepSeekAPIKey  string
-		DeepSeekBaseURL string
-		DeepSeekModel   string
-		FallbackBaseURL string
-		FallbackAPIKey  string
+		APIKey          string // LLM_API_KEY
+		BaseURL         string // LLM_BASE_URL
+		Model           string // LLM_MODEL
+		ProviderName    string // LLM_PROVIDER_NAME — human label for metrics/logs
+		FallbackBaseURL string // LLM_FALLBACK_BASE_URL
+		FallbackAPIKey  string // LLM_FALLBACK_API_KEY
 		MaxRetries      int
+		TimeoutSeconds  int // LLM_TIMEOUT_SECONDS — HTTP client timeout; reasoning models need more than the default
 	}
 	Memory struct {
 		Driver  string // sqlite | postgres
@@ -127,12 +129,17 @@ func Load() (*Config, error) {
 	cfg.Auth.WSTicketMins = getInt("WS_TICKET_MINS", 10)
 	cfg.Auth.BcryptCost = getInt("BCRYPT_COST", 10)
 
-	cfg.LLM.DeepSeekAPIKey = v.GetString("DEEPSEEK_API_KEY")
-	cfg.LLM.DeepSeekBaseURL = getString("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1")
-	cfg.LLM.DeepSeekModel = getString("DEEPSEEK_MODEL", "deepseek-v4-flash")
+	cfg.LLM.APIKey = v.GetString("LLM_API_KEY")
+	cfg.LLM.BaseURL = getString("LLM_BASE_URL", "https://ai.sumopod.com/v1")
+	cfg.LLM.Model = getString("LLM_MODEL", "MiniMax-M2.7-highspeed")
+	cfg.LLM.ProviderName = getString("LLM_PROVIDER_NAME", "sumopod")
 	cfg.LLM.FallbackBaseURL = v.GetString("LLM_FALLBACK_BASE_URL")
 	cfg.LLM.FallbackAPIKey = v.GetString("LLM_FALLBACK_API_KEY")
 	cfg.LLM.MaxRetries = getInt("LLM_MAX_RETRIES", 3)
+	cfg.LLM.TimeoutSeconds = getInt("LLM_TIMEOUT_SECONDS", 60)
+	if cfg.LLM.TimeoutSeconds <= 0 {
+		return nil, fmt.Errorf("invalid LLM_TIMEOUT_SECONDS %d: must be positive", cfg.LLM.TimeoutSeconds)
+	}
 
 	cfg.Memory.Driver = getString("MEMORY_DRIVER", "sqlite")
 	if cfg.Memory.Driver != "sqlite" && cfg.Memory.Driver != "postgres" {

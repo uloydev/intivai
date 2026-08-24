@@ -46,7 +46,10 @@ func (e *Evaluator) Evaluate(ctx context.Context, orgID string, pairs []ivdomain
 	if len(pairs) > EvalWindow {
 		pairs = pairs[len(pairs)-EvalWindow:]
 	}
-	raw, _ := json.Marshal(pairs)
+	raw, err := json.Marshal(pairs)
+	if err != nil {
+		return evaldomain.Report{}, fmt.Errorf("evaluate: marshal transcript: %w", err)
+	}
 	out, err := e.llm.StructuredOutput(ctx, llm.StructuredRequest{
 		OrgID:  orgID,
 		System: evalSystem,

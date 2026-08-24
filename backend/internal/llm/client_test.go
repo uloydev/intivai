@@ -106,7 +106,7 @@ func TestStatusErrorMapping(t *testing.T) {
 }
 
 func TestCountTokensFallback(t *testing.T) {
-	p := &DeepSeekProvider{}
+	p := &OpenAIProvider{}
 	if n := p.CountTokens(""); n != 0 {
 		t.Fatalf("empty tokens = %d", n)
 	}

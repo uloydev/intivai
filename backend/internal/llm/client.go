@@ -66,7 +66,9 @@ func (c *Client) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, erro
 		}
 	}
 
-	if err != nil && c.fallback != nil {
+	// Fallback only for retryable failures — a non-retryable primary error
+	// (e.g. invalid request) must not be masked by a fallback attempt.
+	if err != nil && c.fallback != nil && isRetryable(err) {
 		resp, err = c.fallback.Chat(ctx, req)
 	}
 
@@ -75,11 +77,15 @@ func (c *Client) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, erro
 	}
 
 	if c.ledger != nil && req.OrgID != "" {
-		// Post-flight true-up: we pre-charged 500, so we record the difference
 		total := resp.Usage.PromptTokens + resp.Usage.CompletionTokens
 		diff := total - chatBudgetEstimate
 		if diff > 0 {
-			_ = c.ledger.CheckAndRecord(context.Background(), req.OrgID, diff)
+			// Best-effort true-up: use the original ctx but ignore errors below timeout so we never double-charge on retry.
+			trueCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if ctxErr := ctx.Err(); ctxErr == nil {
+				_ = c.ledger.CheckAndRecord(trueCtx, req.OrgID, diff)
+			}
 		}
 	}
 
@@ -93,14 +99,59 @@ func (c *Client) ChatStream(ctx context.Context, req ChatRequest) (<-chan string
 		}
 	}
 
-	ch, err := c.primary.ChatStream(ctx, req)
-	if err == nil {
-		return ch, nil
+	var lastErr error
+	for attempt := 0; attempt < c.maxRetries; attempt++ {
+		ch, err := c.primary.ChatStream(ctx, req)
+		if err == nil {
+			return ch, nil
+		}
+		lastErr = err
+		if c.onRetry != nil {
+			c.onRetry(attempt+1, err)
+		}
+		if !isRetryable(err) {
+			break
+		}
+		if attempt < c.maxRetries-1 {
+			backoff := time.Duration(math.Pow(2, float64(attempt))) * time.Second
+			select {
+			case <-time.After(backoff):
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		}
 	}
-	if isRetryable(err) && c.fallback != nil {
-		return c.fallback.ChatStream(ctx, req)
+
+	// Fallback only for retryable failures — a non-retryable primary error
+	// (e.g. invalid request) must not be masked by a fallback attempt.
+	if c.fallback != nil && lastErr != nil && isRetryable(lastErr) {
+		for attempt := 0; attempt < c.maxRetries; attempt++ {
+			ch, err := c.fallback.ChatStream(ctx, req)
+			if err == nil {
+				return ch, nil
+			}
+			lastErr = err
+			if c.onRetry != nil {
+				c.onRetry(attempt+1, err)
+			}
+			if !isRetryable(err) {
+				break
+			}
+			if attempt < c.maxRetries-1 {
+				backoff := time.Duration(math.Pow(2, float64(attempt))) * time.Second
+				select {
+				case <-time.After(backoff):
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				}
+			}
+		}
 	}
-	return nil, err
+
+	if lastErr != nil {
+		return nil, fmt.Errorf("all providers failed after %d attempts: %w", c.maxRetries, lastErr)
+	}
+	return nil, fmt.Errorf("all providers failed after %d attempts: %w", c.maxRetries, ErrUpstream)
 }
 
 func (c *Client) StructuredOutput(ctx context.Context, req StructuredRequest) (any, error) {
