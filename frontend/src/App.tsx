@@ -25,6 +25,10 @@ const LoginPage = React.lazy(() => import("@/pages/Login").then(m => ({ default:
 const InterviewVoicePage = React.lazy(() => import("@/pages/InterviewVoice").then(m => ({ default: m.InterviewVoicePage })))
 const RegisterPage = React.lazy(() => import("@/pages/Register").then(m => ({ default: m.RegisterPage })))
 const CompanyContextPage = React.lazy(() => import("@/pages/CompanyContext").then(m => ({ default: m.CompanyContextPage })))
+const IntegrationsPage = React.lazy(() => import("@/pages/settings/Integrations").then(m => ({ default: m.IntegrationsPage })))
+const PrivacyPolicyPage = React.lazy(() => import("@/pages/legal/LegalPages").then(m => ({ default: m.PrivacyPolicyPage })))
+const TermsOfServicePage = React.lazy(() => import("@/pages/legal/LegalPages").then(m => ({ default: m.TermsOfServicePage })))
+const SecurityPage = React.lazy(() => import("@/pages/legal/LegalPages").then(m => ({ default: m.SecurityPage })))
 
 function NotFoundPage() {
   return (
@@ -77,6 +81,9 @@ export default function App() {
               {/* Auth */}
               <Route path="/login" element={<LoginPage />} />
               <Route path="/register" element={<RegisterPage />} />
+              <Route path="/privacy" element={<PrivacyPolicyPage />} />
+              <Route path="/terms" element={<TermsOfServicePage />} />
+              <Route path="/security" element={<SecurityPage />} />
 
               {/* Recruiter Authed Workspace */}
               <Route element={<RequireAuth />}>
@@ -90,6 +97,7 @@ export default function App() {
                   <Route path="/interviews/:id" element={<InterviewResultPage />} />
                   <Route path="/interviews/:id/result" element={<InterviewResultPage />} />
                   <Route path="/company-context" element={<CompanyContextPage />} />
+                  <Route path="/integrations" element={<IntegrationsPage />} />
                 </Route>
               </Route>
 

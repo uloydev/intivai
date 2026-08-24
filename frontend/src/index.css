@@ -6,7 +6,7 @@
 /* Intivai design tokens — Pro Max */
 @theme inline {
   --font-sans: "Inter", sans-serif;
-  --font-display: "Inter", sans-serif;
+  --font-display: "DM Sans", "Inter", sans-serif;
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -38,6 +38,20 @@
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
+
+  /* Semantic status colors for Tailwind */
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-success-muted: var(--success-muted);
+  --color-success-border: var(--success-border);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-warning-muted: var(--warning-muted);
+  --color-warning-border: var(--warning-border);
+  --color-info: var(--info);
+  --color-info-foreground: var(--info-foreground);
+  --color-info-muted: var(--info-muted);
+  --color-info-border: var(--info-border);
 }
 
 :root {
@@ -69,6 +83,32 @@
   --sidebar-accent-foreground: #0F172A;
   --sidebar-border: #E2E8F0;
   --sidebar-ring: #1E3A5F;
+
+  /* Semantic status tokens */
+  --success: #059669;
+  --success-foreground: #FFFFFF;
+  --success-muted: #0596691A;
+  --success-border: #05966933;
+  --warning: #D97706;
+  --warning-foreground: #FFFFFF;
+  --warning-muted: #D977061A;
+  --warning-border: #D9770633;
+  --info: #2563EB;
+  --info-foreground: #FFFFFF;
+  --info-muted: #2563EB1A;
+  --info-border: #2563EB33;
+
+  /* Shadow tokens */
+  --shadow-card: 0 1px 3px rgba(0,0,0,0.1), 0 1px 2px rgba(0,0,0,0.06);
+  --shadow-elevated: 0 10px 15px -3px rgba(0,0,0,0.1), 0 4px 6px -4px rgba(0,0,0,0.1);
+  --shadow-glow-primary: 0 0 20px rgba(30,58,95,0.15);
+
+  /* Animation tokens */
+  --duration-fast: 150ms;
+  --duration-normal: 300ms;
+  --duration-slow: 500ms;
+  --easing-standard: cubic-bezier(0.4, 0, 0.2, 1);
+  --easing-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
 .dark {
@@ -99,6 +139,25 @@
   --sidebar-accent-foreground: #F8FAFC;
   --sidebar-border: #334155;
   --sidebar-ring: #3B82F6;
+
+  /* Semantic status tokens (dark) */
+  --success: #10B981;
+  --success-foreground: #FFFFFF;
+  --success-muted: #10B9811A;
+  --success-border: #10B98133;
+  --warning: #F59E0B;
+  --warning-foreground: #FFFFFF;
+  --warning-muted: #F59E0B1A;
+  --warning-border: #F59E0B33;
+  --info: #3B82F6;
+  --info-foreground: #FFFFFF;
+  --info-muted: #3B82F61A;
+  --info-border: #3B82F633;
+
+  /* Shadow tokens (dark) */
+  --shadow-card: 0 1px 3px rgba(0,0,0,0.3), 0 1px 2px rgba(0,0,0,0.2);
+  --shadow-elevated: 0 10px 15px -3px rgba(0,0,0,0.3), 0 4px 6px -4px rgba(0,0,0,0.2);
+  --shadow-glow-primary: 0 0 20px rgba(59,130,246,0.15);
 }
 
 * {
@@ -109,5 +168,19 @@ body {
   background-color: var(--background);
   color: var(--foreground);
   font-family: var(--font-sans);
+}
+
+@media print {
+  .no-print, nav, footer, header, [data-slot="sidebar"], [role="navigation"] {
+    display: none !important;
+  }
+  body {
+    background: white !important;
+    color: black !important;
+  }
+  * {
+    box-shadow: none !important;
+    text-shadow: none !important;
+  }
 }
 

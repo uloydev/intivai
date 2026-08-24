@@ -5,12 +5,12 @@ import { cn } from "@/lib/utils"
 import { cva, type VariantProps } from "class-variance-authority"
 
 const cardVariants = cva(
-  "group/card flex flex-col gap-(--card-spacing) overflow-hidden rounded-xl py-(--card-spacing) text-sm text-card-foreground [--card-spacing:--spacing(4)] has-data-[slot=card-footer]:pb-0 has-[>img:first-child]:pt-0 data-[size=sm]:[--card-spacing:--spacing(3)] data-[size=sm]:has-data-[slot=card-footer]:pb-0 *:[img:first-child]:rounded-t-xl *:[img:last-child]:rounded-b-xl",
+  "group/card flex flex-col gap-(--card-spacing) overflow-hidden rounded-xl py-(--card-spacing) text-sm text-card-foreground [--card-spacing:--spacing(4)] has-data-[slot=card-footer]:pb-0 has-[>img:first-child]:pt-0 data-[size=sm]:[--card-spacing:--spacing(3)] data-[size=sm]:has-data-[slot=card-footer]:pb-0 *:[img:first-child]:rounded-t-xl *:[img:last-child]:rounded-b-xl transition-all duration-[--duration-normal] ease-[--easing-standard]",
   {
     variants: {
       variant: {
-        default: "bg-card border border-border shadow-sm dark:border-white/10 dark:shadow-none",
-        glass: "bg-background/60 backdrop-blur-md border border-white/20 shadow-md dark:border-white/10 dark:shadow-none",
+        default: "bg-card border border-border shadow-[--shadow-card] hover:shadow-[--shadow-elevated] hover:border-border/80 dark:border-white/10 dark:shadow-none dark:hover:border-white/20",
+        glass: "bg-card/80 backdrop-blur-md border border-border/60 shadow-[--shadow-card] hover:shadow-[--shadow-elevated] hover:border-border/80 dark:bg-background/60 dark:border-white/10 dark:shadow-none dark:hover:border-white/20",
       }
     },
     defaultVariants: {

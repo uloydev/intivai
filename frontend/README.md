@@ -14,7 +14,7 @@ npm ci
 npm run dev        # http://localhost:5173 — proxies /api (+WS) to :8081
 npm run build      # tsc + vite build → dist/
 npm run test       # vitest run (lib/api, lib/ws)
-npm run e2e        # playwright test (needs stack + INTIVAI_DEEPSEEK_API_KEY)
+npm run e2e        # playwright test (needs stack + INTIVAI_LLM_API_KEY)
 ```
 
 ## Design tokens
@@ -57,8 +57,8 @@ src/
 ## Playwright E2E
 
 `e2e/happy-path.spec.ts` walks the full journey against the live stack:
-register → job → CV upload → DeepSeek extraction (polled, logged) → passed →
+register → job → CV upload → LLM extraction (polled, logged) → passed →
 interview → invite → consent → WS chat → streamed reply. Requires the dev
-stack (`cd backend && make dev`), the DeepSeek key in the stack, and
+stack (`cd backend && make dev`), the LLM API key in the stack, and
 `/tmp/kilo/cv.pdf` (any text PDF). Runs are step-logged to stdout for
 long-run observability.
