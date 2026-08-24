@@ -1,5 +1,5 @@
 -- 01_orgs_and_users.sql
--- Seed Demo Organization and Initial Admin/Recruiter Users
+-- Seed Demo Organization, Initial Admin/Recruiter Users, and Curated Question Bank
 
 DO $$
 DECLARE
@@ -7,6 +7,18 @@ DECLARE
 BEGIN
     SELECT id INTO v_demo_id FROM orgs WHERE slug = 'demo';
     IF v_demo_id IS NOT NULL THEN
+        DELETE FROM candidate_otps WHERE email IN (
+            'alex.rivera@example.com',
+            'elena.rostova@example.com',
+            'david.chen@example.com',
+            'marcus.vance@example.com'
+        );
+        DELETE FROM global_candidate_passports WHERE email IN (
+            'alex.rivera@example.com',
+            'elena.rostova@example.com',
+            'david.chen@example.com',
+            'marcus.vance@example.com'
+        );
         DELETE FROM audit_logs WHERE org_id = v_demo_id;
         DELETE FROM mnemosyne_memories WHERE org_id = v_demo_id;
         DELETE FROM interview_tokens WHERE org_id = v_demo_id;
@@ -28,7 +40,7 @@ VALUES (
     'Demo Corp',
     'demo',
     'enterprise',
-    '{"skills_match": 0.4, "experience_years": 0.3, "semantic_match": 0.2, "education": 0.1}',
+    '{"skills_match": 0.35, "experience_years": 0.20, "semantic_match": 0.25, "education": 0.10, "certifications": 0.10}'::jsonb,
     60.0,
     NOW() - INTERVAL '30 days'
 );
@@ -62,3 +74,53 @@ VALUES (
 ON CONFLICT (org_id, email) DO UPDATE SET
     role = EXCLUDED.role,
     password_hash = EXCLUDED.password_hash;
+
+-- Reusable Question Bank for Demo Corp
+INSERT INTO questions (id, org_id, category, difficulty, body, skills, created_at)
+VALUES
+    (
+        '11111111-1111-1111-1111-111111111111',
+        '968f66ef-91c6-4db3-8764-ceeffb753b1f',
+        'technical',
+        'hard',
+        'Can you describe a challenging distributed concurrency or race condition issue you diagnosed in Go, and how you resolved it?',
+        ARRAY['Go', 'Concurrency'],
+        NOW() - INTERVAL '20 days'
+    ),
+    (
+        '22222222-2222-2222-2222-222222222222',
+        '968f66ef-91c6-4db3-8764-ceeffb753b1f',
+        'technical',
+        'medium',
+        'How do you enforce PostgreSQL tenant isolation and transaction safety when handling asynchronous background tasks?',
+        ARRAY['PostgreSQL', 'Multi-tenancy'],
+        NOW() - INTERVAL '20 days'
+    ),
+    (
+        '33333333-3333-3333-3333-333333333333',
+        '968f66ef-91c6-4db3-8764-ceeffb753b1f',
+        'technical',
+        'hard',
+        'How do you architect a frontend streaming client with WebSocket reconnects, state reconciliation, and zero UI latency?',
+        ARRAY['React', 'WebSockets'],
+        NOW() - INTERVAL '20 days'
+    ),
+    (
+        '44444444-4444-4444-4444-444444444444',
+        '968f66ef-91c6-4db3-8764-ceeffb753b1f',
+        'problem_solving',
+        'medium',
+        'Tell me about a time you had to make a critical architectural trade-off under strict delivery constraints.',
+        ARRAY['Architecture', 'Trade-offs'],
+        NOW() - INTERVAL '20 days'
+    ),
+    (
+        '55555555-5555-5555-5555-555555555555',
+        '968f66ef-91c6-4db3-8764-ceeffb753b1f',
+        'culture_fit',
+        'medium',
+        'How do you establish engineering excellence and mentor team members when adopting new technologies?',
+        ARRAY['Leadership', 'Mentorship'],
+        NOW() - INTERVAL '20 days'
+    )
+ON CONFLICT (id) DO NOTHING;
