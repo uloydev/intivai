@@ -153,7 +153,9 @@ func (h *CandidatePortalHandler) VerifyOTP(c *fiber.Ctx) error {
 		if err == nil && otp == nil {
 			// Record the failed attempt against the latest live row so
 			// brute-force is bounded per email even with IP rotation.
-			_ = h.repo.IncrementAttempts(c.UserContext(), email)
+			if err := h.repo.IncrementAttempts(c.UserContext(), email); err != nil {
+				return httpapi.Error(c, sharederr.NewDomainError("INTERNAL_ERROR", "failed to record verification attempt"))
+			}
 		}
 	default:
 		return httpapi.Error(c, sharederr.NewDomainError("BAD_REQUEST", "provide either (email + code) or magic token"))
@@ -182,9 +184,7 @@ func (h *CandidatePortalHandler) VerifyOTP(c *fiber.Ctx) error {
 	// uuid derived from the email so the token stays tied to one identity
 	// (uuid.Nil/random subjects could not be linked or revoked per candidate).
 	candidateID := uuid.NewSHA1(uuid.NameSpaceOID, []byte(otp.Email))
-	extra := map[string]any{
-		"email": otp.Email,
-	}
+	extra := iamapp.TokenExtra{Email: otp.Email}
 	jwtToken, err := h.tokens.Issue(candidateID, uuid.Nil, "candidate", iamapp.TokenTypeCandidate, candidateTokenTTL, extra)
 	if err != nil {
 		return httpapi.Error(c, sharederr.NewDomainError("INTERNAL_ERROR", "failed to issue candidate token"))
@@ -209,8 +209,8 @@ func (h *CandidatePortalHandler) RequireCandidateAuth(c *fiber.Ctx) error {
 		return httpapi.Error(c, sharederr.NewDomainError("UNAUTHORIZED", "invalid candidate authorization token"))
 	}
 
-	email, ok := claims.Extra["email"].(string)
-	if !ok || email == "" {
+	email := claims.Extra.Email
+	if email == "" {
 		return httpapi.Error(c, sharederr.NewDomainError("UNAUTHORIZED", "candidate email missing from claims"))
 	}
 
@@ -239,6 +239,9 @@ func (h *CandidatePortalHandler) Export(c *fiber.Ctx) error {
 	if !ok || email == "" {
 		return httpapi.Error(c, sharederr.NewDomainError("UNAUTHORIZED", "unauthorized"))
 	}
+	if err := h.repo.LogDataRequest(c.UserContext(), email, "export"); err != nil {
+		log.Warn().Err(err).Str("email", email).Msg("data request audit log failed")
+	}
 	apps, err := h.repo.ListApplications(c.UserContext(), email)
 	if err != nil {
 		return httpapi.Error(c, sharederr.NewDomainError("INTERNAL_ERROR", "internal server error"))
@@ -257,6 +260,9 @@ func (h *CandidatePortalHandler) DeleteMe(c *fiber.Ctx) error {
 	email, ok := c.Locals("candidate_email").(string)
 	if !ok || email == "" {
 		return httpapi.Error(c, sharederr.NewDomainError("UNAUTHORIZED", "unauthorized"))
+	}
+	if err := h.repo.LogDataRequest(c.UserContext(), email, "delete"); err != nil {
+		log.Warn().Err(err).Str("email", email).Msg("data request audit log failed")
 	}
 	if err := h.repo.EraseCandidate(c.UserContext(), email); err != nil {
 		log.Warn().Err(err).Str("email", email).Msg("candidate erase failed")

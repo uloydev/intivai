@@ -13,6 +13,7 @@ import (
 	"github.com/intivai/backend/pkg/db"
 	"github.com/jackc/pgx/v5/pgconn"
 	"gorm.io/gorm"
+	"time"
 )
 
 type PostgresApplicationRepo struct {
@@ -76,7 +77,7 @@ func (r *PostgresApplicationRepo) List(ctx context.Context, orgID, jobID uuid.UU
 		return nil, err
 	}
 	sql := `SELECT id, org_id, candidate_id, job_id, cv_score, score_breakdown, passed_screening, status, stage, recruiter_notes, created_at,
-		(SELECT (evaluation->>'overall')::float8 FROM interviews
+		(SELECT COALESCE((evaluation->>'overall_score')::float8, (evaluation->>'overall')::float8) FROM interviews
 		 WHERE application_id = applications.id AND evaluation IS NOT NULL
 		 ORDER BY created_at DESC LIMIT 1) AS interview_score
 		FROM applications WHERE org_id = $1`
@@ -216,6 +217,24 @@ func scanApplication(row rowScanner) (*scrdomain.Application, error) {
 	return &a, nil
 }
 
+// CountRecentByCandidateEmail — abuse-cap probe for the public apply flow:
+// how many applications this org received from the same lower(email) since
+// `since`. Must run inside the tenant transaction (RLS FORCED tables) — the
+// apply handler calls it within RunInTx before creating anything.
+func (r *PostgresApplicationRepo) CountRecentByCandidateEmail(ctx context.Context, orgID uuid.UUID, email string, since time.Time) (int, error) {
+	tx, err := r.tx(ctx)
+	if err != nil {
+		return 0, err
+	}
+	var n int
+	err = tx.WithContext(ctx).Raw(
+		`SELECT COUNT(*) FROM applications a
+		 JOIN candidates c ON c.id = a.candidate_id
+		 WHERE a.org_id = ? AND LOWER(c.email) = LOWER(?) AND a.created_at > ?`,
+		orgID, email, since).Row().Scan(&n)
+	return n, err
+}
+
 // ApplyWithDedupe — public-apply flow (ADR-0001 stage start + dedupe):
 // advisory lock per (org, email), reuse an existing candidate row, else
 // create it (status 'parsing'), then insert the application idempotently.
@@ -237,6 +256,15 @@ func (r *PostgresApplicationRepo) ApplyWithDedupe(ctx context.Context, orgID, jo
 		orgID, email).Row()
 	switch err := row.Scan(&existing); {
 	case err == nil:
+		// Candidate exists — still link them to THIS job (idempotent), or a
+		// re-apply to a different job would silently create no application.
+		if err := tx.WithContext(ctx).Exec(
+			`INSERT INTO applications (id, org_id, candidate_id, job_id, status, stage, created_at, updated_at)
+			 VALUES ($1, $2, $3, $4, 'screening', 'applied', NOW(), NOW())
+			 ON CONFLICT (candidate_id, job_id) DO UPDATE SET updated_at = NOW()`,
+			uuid.New(), orgID, existing, jobID).Error; err != nil {
+			return uuid.Nil, false, err
+		}
 		return existing, false, nil
 	case !errors.Is(err, sql.ErrNoRows):
 		return uuid.Nil, false, err

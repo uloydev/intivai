@@ -19,6 +19,11 @@ const (
 	EmailTypeCandidateOTP      = "candidate_otp"
 	EmailTypeCandidateReview   = "candidate_review"
 	EmailTypeCandidateDecision = "candidate_decision"
+	EmailTypeHumanRequest      = "human_request"
+	// EmailTypePortalAccess — one-time portal magic link for a just-applied
+	// candidate. The apply endpoint must never return the token in its HTTP
+	// response; this email is the only delivery channel.
+	EmailTypePortalAccess = "portal_access"
 )
 
 type SendEmailPayload struct {
@@ -71,6 +76,10 @@ func (w *EmailWorker) handle(ctx context.Context, task *asynq.Task) error {
 		return w.mailer.SendCandidateReview(ctx, p.To, p.CandidateName, p.InviteURL)
 	case EmailTypeCandidateDecision:
 		return w.mailer.SendCandidateDecision(ctx, p.To, p.CandidateName, p.JobTitle, p.Decision, p.PortalURL)
+	case EmailTypeHumanRequest:
+		return w.mailer.SendHumanRequestNotification(ctx, p.To, p.CandidateName, p.JobTitle, p.ReportURL)
+	case EmailTypePortalAccess:
+		return w.mailer.SendCandidatePortalAccess(ctx, p.To, p.CandidateName, p.MagicLink)
 	default:
 		// Unknown type is permanent — log and drop, never retry.
 		w.logger.Warn().Str("type", p.Type).Msg("unknown email task type, skipping")

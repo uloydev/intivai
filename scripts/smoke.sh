@@ -1,12 +1,19 @@
 #!/usr/bin/env bash
 # End-to-end API scenario against a running stack (make dev first).
-# Requires a DeepSeek key in the stack to pass full extraction.
+# Requires an LLM API key in the stack to pass full extraction.
 set -euo pipefail
 
 BASE="${BASE:-http://localhost:8081/api/v1}"
 SLUG="smoke$(date +%s)"
 EMAIL="admin@${SLUG}.io"
 PASS="secret123"
+
+# A16: full pipeline needs an LLM key in the stack. With SMOKE_ALLOW_NO_LLM=1
+# and no key configured, skip cleanly instead of failing at extraction.
+if [ -z "${INTIVAI_LLM_API_KEY:-}" ] && [ "${SMOKE_ALLOW_NO_LLM:-}" = "1" ]; then
+  echo "SKIP: no LLM key (SMOKE_ALLOW_NO_LLM=1)"
+  exit 0
+fi
 
 say() { printf '\n== %s ==\n' "$1"; }
 jq_get() { python3 -c "import sys,json; d=json.load(sys.stdin); print(d$1)"; }
@@ -33,13 +40,33 @@ curl -sf -X PATCH "$BASE/jobs/$JOB_ID" -H "Authorization: Bearer $TOKEN" -H 'Con
   -d '{"status":"active"}' >/dev/null
 echo "patch ok"
 
+say "public apply leak check (C9)"
+APPLY_RESP=$(mktemp)
+APPLY_CODE=$(curl -s -o "$APPLY_RESP" -w '%{http_code}' -X POST "$BASE/public/jobs/$JOB_ID/apply" \
+  -F 'name=Jane Doe' -F 'email=jane@smoke.io' -F "file=@$1")
+if [ "$APPLY_CODE" = "429" ]; then
+  echo "apply rate limited (re-run within cap window?) — leak check skipped"
+elif [ "$APPLY_CODE" = "201" ]; then
+  python3 -c "
+import json,sys
+d=json.load(open('$APPLY_RESP'))
+s=json.dumps(d)
+assert 'portal_token' not in s and d.get('data',{}).get('portal_token') is None, 'C9 LEAK: portal_token in apply response'
+"
+  rm -f "$APPLY_RESP"
+  echo "no portal_token in response ok"
+else
+  rm -f "$APPLY_RESP"
+  echo "public apply failed (HTTP $APPLY_CODE)"; exit 1
+fi
+
 say "cv upload"
 CV=$(curl -sf -X POST "$BASE/cvs" -H "Authorization: Bearer $TOKEN" \
   -F "file=@$1" -F 'name=Jane Doe' -F 'email=jane@smoke.io')
 CV_ID=$(echo "$CV" | jq_get "['data']['id']")
 
-say "cv pipeline (poll up to 30s)"
-for i in $(seq 1 15); do
+say "cv pipeline (poll up to 120s — reasoning models are slow)"
+for i in $(seq 1 60); do
   STATUS=$(curl -sf "$BASE/cvs/$CV_ID" -H "Authorization: Bearer $TOKEN" | jq_get "['data']['status']")
   case "$STATUS" in
     extracted|failed_ocr|failed_extract) break ;; # terminal states
@@ -48,7 +75,8 @@ for i in $(seq 1 15); do
 done
 echo "final status: $STATUS"
 case "$STATUS" in
-  extracted)
+  extracted|pending_review)
+    # pending_review = extraction succeeded, awaiting candidate profile confirmation
     say "screening (scored path)"
     curl -sf -X POST "$BASE/screenings" -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
       -d "{\"candidate_id\":\"$CV_ID\",\"job_id\":\"$JOB_ID\"}" >/dev/null
@@ -56,7 +84,7 @@ case "$STATUS" in
     curl -sf "$BASE/applications" -H "Authorization: Bearer $TOKEN" | jq_get "['data']"
     ;;
   failed_extract)
-    echo "extract failed — DeepSeek key missing in stack?"
+    echo "extract failed — LLM API key missing in stack?"
     exit 1
     ;;
   *)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/google/uuid"
@@ -109,7 +110,10 @@ func (w *ScoreWorker) handle(ctx context.Context, t *asynq.Task) error {
 			ScoringWeights:    job.ScoringWeights,
 		}, scrdomain.OrgInfo{ScoringWeights: orgWeights, MinScoreToProceed: orgMin}, semantic)
 
-		breakdown, _ := json.Marshal(result.Breakdown)
+		breakdown, err := json.Marshal(result.Breakdown)
+		if err != nil {
+			return fmt.Errorf("marshal score breakdown: %w", err)
+		}
 		app.CVScore = &result.Total
 		app.ScoreBreakdown = breakdown
 		app.PassedScreening = &result.Passed

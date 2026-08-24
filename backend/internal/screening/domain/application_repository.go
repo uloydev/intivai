@@ -2,6 +2,7 @@ package domain
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -22,4 +23,8 @@ type ApplicationRepository interface {
 	// the candidate by (org, email), then an idempotent application insert.
 	// Returns the candidate id and whether the candidate row is new.
 	ApplyWithDedupe(ctx context.Context, orgID, jobID uuid.UUID, name, email string) (candidateID uuid.UUID, isNew bool, err error)
+	// CountRecentByCandidateEmail — abuse cap for the public apply flow:
+	// applications per (org, lower(email)) since `since`. Runs inside the
+	// tenant transaction (RLS FORCED tables).
+	CountRecentByCandidateEmail(ctx context.Context, orgID uuid.UUID, email string, since time.Time) (int, error)
 }

@@ -101,10 +101,9 @@ func validWeightName(k string) bool {
 	return false
 }
 
-func (j *Job) MarshalScoringWeights() json.RawMessage {
+func (j *Job) MarshalScoringWeights() (json.RawMessage, error) {
 	if j.ScoringWeights == nil {
-		return nil
+		return nil, nil
 	}
-	b, _ := json.Marshal(j.ScoringWeights)
-	return b
+	return json.Marshal(j.ScoringWeights)
 }

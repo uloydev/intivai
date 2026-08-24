@@ -13,6 +13,14 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
+// IPKey — keyFn factory for per-IP buckets (e.g. IPKey("public-apply:")).
+// The prefix namespaces the bucket so distinct endpoints never share limits.
+func IPKey(prefix string) func(c *fiber.Ctx) string {
+	return func(c *fiber.Ctx) string {
+		return prefix + c.IP()
+	}
+}
+
 // RateLimit implements a Redis sliding-window counter per key.
 // keyFn builds the bucket key (e.g. "rl:tenant:{org_id}"); nil key = unlimited.
 func RateLimit(rdb *redis.Client, limit int, window time.Duration, keyFn func(c *fiber.Ctx) string) fiber.Handler {

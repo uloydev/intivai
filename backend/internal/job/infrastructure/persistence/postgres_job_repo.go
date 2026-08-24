@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -42,11 +43,30 @@ func (r *PostgresJobRepo) Create(ctx context.Context, job *jobdomain.Job) error 
 	if err != nil {
 		return err
 	}
-	reqSkills, _ := json.Marshal(job.RequiredSkills)
-	resp, _ := json.Marshal(job.Responsibilities)
-	reqs, _ := json.Marshal(job.Requirements)
-	nice, _ := json.Marshal(job.NiceToHaves)
-	ben, _ := json.Marshal(job.Benefits)
+	reqSkills, err := marshalJSONB(job.RequiredSkills)
+	if err != nil {
+		return fmt.Errorf("encode required skills: %w", err)
+	}
+	resp, err := marshalJSONB(job.Responsibilities)
+	if err != nil {
+		return fmt.Errorf("encode responsibilities: %w", err)
+	}
+	reqs, err := marshalJSONB(job.Requirements)
+	if err != nil {
+		return fmt.Errorf("encode requirements: %w", err)
+	}
+	nice, err := marshalJSONB(job.NiceToHaves)
+	if err != nil {
+		return fmt.Errorf("encode nice-to-haves: %w", err)
+	}
+	ben, err := marshalJSONB(job.Benefits)
+	if err != nil {
+		return fmt.Errorf("encode benefits: %w", err)
+	}
+	weights, err := job.MarshalScoringWeights()
+	if err != nil {
+		return fmt.Errorf("encode scoring weights: %w", err)
+	}
 
 	return tx.WithContext(ctx).Exec(
 		`INSERT INTO jobs (id, org_id, title, description, location, employment_type, salary_min, salary_max, currency,
@@ -55,7 +75,7 @@ func (r *PostgresJobRepo) Create(ctx context.Context, job *jobdomain.Job) error 
 		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)`,
 		job.ID, job.OrgID, job.Title, job.Description, job.Location, job.EmploymentType, job.SalaryMin, job.SalaryMax, job.Currency,
 		reqSkills, job.MinExperience, resp, reqs, nice, ben,
-		job.MarshalScoringWeights(), job.MinScoreToProceed, job.Status, job.ProctoringMode, job.IsPublished, job.Rubric, job.CreatedAt).Error
+		weights, job.MinScoreToProceed, job.Status, job.ProctoringMode, job.IsPublished, job.Rubric, job.CreatedAt).Error
 }
 
 func (r *PostgresJobRepo) GetByID(ctx context.Context, id uuid.UUID) (*jobdomain.Job, error) {
@@ -103,11 +123,30 @@ func (r *PostgresJobRepo) Update(ctx context.Context, job *jobdomain.Job) error 
 	if err != nil {
 		return err
 	}
-	reqSkills, _ := json.Marshal(job.RequiredSkills)
-	resp, _ := json.Marshal(job.Responsibilities)
-	reqs, _ := json.Marshal(job.Requirements)
-	nice, _ := json.Marshal(job.NiceToHaves)
-	ben, _ := json.Marshal(job.Benefits)
+	reqSkills, err := marshalJSONB(job.RequiredSkills)
+	if err != nil {
+		return fmt.Errorf("encode required skills: %w", err)
+	}
+	resp, err := marshalJSONB(job.Responsibilities)
+	if err != nil {
+		return fmt.Errorf("encode responsibilities: %w", err)
+	}
+	reqs, err := marshalJSONB(job.Requirements)
+	if err != nil {
+		return fmt.Errorf("encode requirements: %w", err)
+	}
+	nice, err := marshalJSONB(job.NiceToHaves)
+	if err != nil {
+		return fmt.Errorf("encode nice-to-haves: %w", err)
+	}
+	ben, err := marshalJSONB(job.Benefits)
+	if err != nil {
+		return fmt.Errorf("encode benefits: %w", err)
+	}
+	weights, err := job.MarshalScoringWeights()
+	if err != nil {
+		return fmt.Errorf("encode scoring weights: %w", err)
+	}
 
 	return tx.WithContext(ctx).Exec(
 		`UPDATE jobs SET title = $1, description = $2, location = $3, employment_type = $4,
@@ -117,7 +156,7 @@ func (r *PostgresJobRepo) Update(ctx context.Context, job *jobdomain.Job) error 
 		job.Title, job.Description, job.Location, job.EmploymentType,
 		job.SalaryMin, job.SalaryMax, job.Currency, reqSkills, job.MinExperience,
 		resp, reqs, nice, ben,
-		job.MarshalScoringWeights(), job.MinScoreToProceed, job.Status, job.ProctoringMode, job.IsPublished, job.Rubric, job.ID).Error
+		weights, job.MinScoreToProceed, job.Status, job.ProctoringMode, job.IsPublished, job.Rubric, job.ID).Error
 }
 
 type rowScanner interface {
@@ -151,23 +190,35 @@ func scanJob(row rowScanner) (*jobdomain.Job, error) {
 		j.MinExperience = *minExperience
 	}
 	if skills != nil && len(*skills) > 0 && string(*skills) != "null" {
-		_ = json.Unmarshal(*skills, &j.RequiredSkills)
+		if err := unmarshalJSONB(&j.RequiredSkills, *skills); err != nil {
+			return nil, fmt.Errorf("decode required skills: %w", err)
+		}
 	}
 	if resp != nil && len(*resp) > 0 && string(*resp) != "null" {
-		_ = json.Unmarshal(*resp, &j.Responsibilities)
+		if err := unmarshalJSONB(&j.Responsibilities, *resp); err != nil {
+			return nil, fmt.Errorf("decode responsibilities: %w", err)
+		}
 	}
 	if reqs != nil && len(*reqs) > 0 && string(*reqs) != "null" {
-		_ = json.Unmarshal(*reqs, &j.Requirements)
+		if err := unmarshalJSONB(&j.Requirements, *reqs); err != nil {
+			return nil, fmt.Errorf("decode requirements: %w", err)
+		}
 	}
 	if nice != nil && len(*nice) > 0 && string(*nice) != "null" {
-		_ = json.Unmarshal(*nice, &j.NiceToHaves)
+		if err := unmarshalJSONB(&j.NiceToHaves, *nice); err != nil {
+			return nil, fmt.Errorf("decode nice-to-haves: %w", err)
+		}
 	}
 	if ben != nil && len(*ben) > 0 && string(*ben) != "null" {
-		_ = json.Unmarshal(*ben, &j.Benefits)
+		if err := unmarshalJSONB(&j.Benefits, *ben); err != nil {
+			return nil, fmt.Errorf("decode benefits: %w", err)
+		}
 	}
 	j.MinScoreToProceed = minScore
 	if len(weights) > 0 {
-		_ = json.Unmarshal(weights, &j.ScoringWeights)
+		if err := unmarshalJSONB(&j.ScoringWeights, weights); err != nil {
+			return nil, fmt.Errorf("decode scoring weights: %w", err)
+		}
 	}
 	if len(rubric) > 0 && string(rubric) != "null" {
 		j.Rubric = rubric
@@ -253,11 +304,21 @@ func scanPublicJob(row rowScanner) (*PublicJobDTO, error) {
 	if minExp != nil {
 		j.MinExperience = *minExp
 	}
-	unmarshalJSONB(&j.RequiredSkills, skills)
-	unmarshalJSONB(&j.Responsibilities, resp)
-	unmarshalJSONB(&j.Requirements, req)
-	unmarshalJSONB(&j.NiceToHaves, nice)
-	unmarshalJSONB(&j.Benefits, ben)
+	if err := unmarshalJSONB(&j.RequiredSkills, skills); err != nil {
+		return nil, fmt.Errorf("decode public required skills: %w", err)
+	}
+	if err := unmarshalJSONB(&j.Responsibilities, resp); err != nil {
+		return nil, fmt.Errorf("decode public responsibilities: %w", err)
+	}
+	if err := unmarshalJSONB(&j.Requirements, req); err != nil {
+		return nil, fmt.Errorf("decode public requirements: %w", err)
+	}
+	if err := unmarshalJSONB(&j.NiceToHaves, nice); err != nil {
+		return nil, fmt.Errorf("decode public nice-to-haves: %w", err)
+	}
+	if err := unmarshalJSONB(&j.Benefits, ben); err != nil {
+		return nil, fmt.Errorf("decode public benefits: %w", err)
+	}
 	if len(rubric) > 0 && string(rubric) != "null" {
 		j.Rubric = string(rubric)
 	}
@@ -266,10 +327,15 @@ func scanPublicJob(row rowScanner) (*PublicJobDTO, error) {
 
 // unmarshalJSONB decodes a JSONB column into dst, tolerating the NULL and
 // empty representations database/sql surfaces for absent values.
-func unmarshalJSONB(dst any, src []byte) {
-	if len(src) > 0 && string(src) != "null" {
-		_ = json.Unmarshal(src, dst)
+func marshalJSONB[T any](value T) ([]byte, error) {
+	return json.Marshal(value)
+}
+
+func unmarshalJSONB[T any](dst *T, src []byte) error {
+	if len(src) == 0 || string(src) == "null" {
+		return nil
 	}
+	return json.Unmarshal(src, dst)
 }
 
 // UpdateRubric — column-scoped rubric write; the full-row Update() would

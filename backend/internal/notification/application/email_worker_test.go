@@ -42,6 +42,14 @@ func (m *mockMailer) SendCandidateDecision(ctx context.Context, to, name, jobTit
 	return nil
 }
 
+func (m *mockMailer) SendCandidatePortalAccess(ctx context.Context, to, name, portalURL string) error {
+	return nil
+}
+
+func (m *mockMailer) SendHumanRequestNotification(ctx context.Context, to, candidateName, jobTitle, reportURL string) error {
+	return nil
+}
+
 func TestEmailWorker_SkipRetry(t *testing.T) {
 	worker := application.NewEmailWorker(&mockMailer{}, zerolog.Nop())
 	mux := asynq.NewServeMux()

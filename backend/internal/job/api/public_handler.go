@@ -21,7 +21,6 @@ import (
 	sharederr "github.com/intivai/backend/internal/shared/errors"
 	"github.com/intivai/backend/internal/shared/httpapi"
 	"github.com/intivai/backend/pkg/db"
-	"github.com/intivai/backend/pkg/queue"
 	"github.com/rs/zerolog/log"
 	"gorm.io/gorm"
 )
@@ -32,8 +31,15 @@ type PublicJobHandler struct {
 	candRepo   cvdomain.CandidateRepository
 	appRepo    scrdomain.ApplicationRepository
 	store      cvapp.ObjectStore
-	queue      *queue.Client
+	queue      Enqueuer
 	portalRepo scrdomain.CandidatePortalRepository
+	publicURL  string
+}
+
+// Enqueuer — queue seam (queue.Client satisfies it implicitly); lets tests
+// capture enqueued tasks without Redis.
+type Enqueuer interface {
+	Enqueue(ctx context.Context, jobType string, payload any, opts ...asynq.Option) (*asynq.TaskInfo, error)
 }
 
 func NewPublicJobHandler(
@@ -42,8 +48,9 @@ func NewPublicJobHandler(
 	candRepo cvdomain.CandidateRepository,
 	appRepo scrdomain.ApplicationRepository,
 	store cvapp.ObjectStore,
-	q *queue.Client,
+	q Enqueuer,
 	portalRepo scrdomain.CandidatePortalRepository,
+	publicURL string,
 ) *PublicJobHandler {
 	return &PublicJobHandler{
 		pool:       pool,
@@ -53,6 +60,7 @@ func NewPublicJobHandler(
 		store:      store,
 		queue:      q,
 		portalRepo: portalRepo,
+		publicURL:  publicURL,
 	}
 }
 
@@ -83,17 +91,24 @@ func (h *PublicJobHandler) GetPublicJob(c *fiber.Ctx) error {
 }
 
 // portalTokenTTL — a portal magic token minted at apply time stays valid for
-// 24h so the candidate can reach the tracker without an email round-trip.
+// 24h so the candidate can reach the tracker without an OTP round-trip.
 const portalTokenTTL = 24 * time.Hour
+
+// MaxApplyPerEmailPerDay — abuse cap: applications per (org, lower(email))
+// within 24h. Generous for real candidates, tight for credential-stuffing /
+// mass-apply bots hitting the unauthenticated endpoint.
+const MaxApplyPerEmailPerDay = 10
+
+// ApplyCapExceeded — pure decision seam for the per-email daily cap.
+func ApplyCapExceeded(recent int) bool {
+	return recent >= MaxApplyPerEmailPerDay
+}
 
 type PublicApplyResponse struct {
 	CandidateID uuid.UUID `json:"candidate_id"`
 	JobID       uuid.UUID `json:"job_id"`
 	Status      string    `json:"status"`
 	Message     string    `json:"message"`
-	// PortalToken — one-time magic token for /candidate/portal?token=...,
-	// exchanged via POST /public/candidate/auth/verify. Empty if minting failed.
-	PortalToken string `json:"portal_token"`
 }
 
 // Apply handles POST /api/v1/public/jobs/:id/apply (multipart form)
@@ -153,6 +168,16 @@ func (h *PublicJobHandler) Apply(c *fiber.Ctx) error {
 	isNewCandidate := false
 
 	err = db.RunInTx(c.UserContext(), h.pool, job.OrgID.String(), func(txCtx context.Context) error {
+		// Per-email abuse cap (C9): count this org's applications from the
+		// same lower(email) in the last 24h. Runs inside the tenant tx — the
+		// applications/candidates tables are RLS FORCED.
+		recent, cerr := h.appRepo.CountRecentByCandidateEmail(txCtx, job.OrgID, email, time.Now().Add(-24*time.Hour))
+		if cerr != nil {
+			return cerr
+		}
+		if ApplyCapExceeded(recent) {
+			return sharederr.NewDomainError("TOO_MANY_REQUESTS", "too many applications from this email today")
+		}
 		id, isNew, aerr := h.appRepo.ApplyWithDedupe(txCtx, job.OrgID, jobID, name, email)
 		if aerr != nil {
 			return aerr
@@ -162,6 +187,10 @@ func (h *PublicJobHandler) Apply(c *fiber.Ctx) error {
 		return nil
 	})
 	if err != nil {
+		var de *sharederr.DomainError
+		if errors.As(err, &de) && de.Code == "TOO_MANY_REQUESTS" {
+			return httpapi.Error(c, de)
+		}
 		return httpapi.Error(c, sharederr.NewDomainError("INTERNAL_ERROR", "failed to save candidate application record"))
 	}
 
@@ -196,14 +225,21 @@ func (h *PublicJobHandler) Apply(c *fiber.Ctx) error {
 		log.Warn().Err(err).Str("candidate_id", candidateID.String()).Msg("enqueue confirmation email failed")
 	}
 
-	// Mint a portal magic token so the success screen can land the candidate
-	// directly on their own tracker (no OTP email round-trip). Best-effort: a
-	// failure must not fail the already-committed application — the response
-	// simply carries an empty portal_token and the flow degrades to OTP login.
-	portalToken := uuid.NewString()
-	if err := h.portalRepo.CreateMagicToken(c.UserContext(), strings.ToLower(email), portalToken, time.Now().UTC().Add(portalTokenTTL)); err != nil {
-		log.Error().Err(err).Str("candidate_id", candidateID.String()).Str("email", email).Msg("mint portal magic token failed")
-		portalToken = ""
+	// Mint a portal magic token and deliver it by EMAIL ONLY — the response
+	// must never carry the credential (C9: attacker-supplied email + returned
+	// token = victim account takeover). Best-effort: a failure must not fail
+	// the already-committed application — the flow degrades to OTP login.
+	if portalToken := uuid.NewString(); h.portalRepo != nil {
+		if err := h.portalRepo.CreateMagicToken(c.UserContext(), strings.ToLower(email), portalToken, time.Now().UTC().Add(portalTokenTTL)); err != nil {
+			log.Error().Err(err).Str("candidate_id", candidateID.String()).Str("email", email).Msg("mint portal magic token failed")
+		} else if _, err := h.queue.Enqueue(c.UserContext(), notifapp.TaskSendEmail, notifapp.SendEmailPayload{
+			Type:          notifapp.EmailTypePortalAccess,
+			To:            email,
+			CandidateName: name,
+			MagicLink:     fmt.Sprintf("%s/candidate/portal?token=%s", strings.TrimSuffix(h.publicURL, "/"), portalToken),
+		}, asynq.MaxRetry(5)); err != nil {
+			log.Warn().Err(err).Str("candidate_id", candidateID.String()).Msg("enqueue portal access email failed")
+		}
 	}
 
 	return httpapi.Created(c, PublicApplyResponse{
@@ -211,7 +247,6 @@ func (h *PublicJobHandler) Apply(c *fiber.Ctx) error {
 		JobID:       jobID,
 		Status:      "submitted",
 		Message:     "Application received successfully and queued for AI screening",
-		PortalToken: portalToken,
 	})
 }
 

@@ -21,6 +21,11 @@ type Mailer interface {
 	// SendCandidateDecision — recruiter decision (offer extended / rejected)
 	// notification to the candidate, with a portal link to their status.
 	SendCandidateDecision(ctx context.Context, to, name, jobTitle, decision, portalURL string) error
+	// SendCandidatePortalAccess — one-time portal magic link for a
+	// just-applied candidate (apply flow: the link is delivered by email
+	// only, never in the HTTP response).
+	SendCandidatePortalAccess(ctx context.Context, to, name, portalURL string) error
+	SendHumanRequestNotification(ctx context.Context, to, candidateName, jobTitle, reportURL string) error
 }
 
 type Config struct {
@@ -139,9 +144,11 @@ type shellData struct {
 func renderShell(bannerBg, bannerTitle, body string) (string, error) {
 	var sb strings.Builder
 	err := shellTmpl.Execute(&sb, shellData{
+		//nolint:gosec // G203: intentional raw HTML/CSS — body built server-side from trusted templates;
+		// bannerBg is tenant-admin config scoped to that org's own outbound emails.
 		BannerBg:    template.CSS(bannerBg),
 		BannerTitle: bannerTitle,
-		Body:        template.HTML(body),
+		Body:        template.HTML(body), //nolint:gosec // G203: see above
 	})
 	if err != nil {
 		return "", err
@@ -161,7 +168,11 @@ var (
     <h2 style="margin-top: 0; color: #111;">Congratulations {{.Name}}!</h2>
     <p>Your profile passed our initial screening for <strong>{{.JobTitle}}</strong>. You are invited to complete your interactive AI technical interview.</p>
     <div style="text-align: center; margin: 30px 0;">
-      <a href="{{.InviteURL}}" style="background: #4f46e5; color: white; padding: 12px 28px; text-decoration: none; border-radius: 8px; font-weight: bold; display: inline-block;">Start AI Interview</a>
+      <a href="{{.MagicLink}}" style="background: #4f46e5; color: white; padding: 12px 28px; text-decoration: none; border-radius: 8px; font-weight: bold; display: inline-block;">Start Interview Instantly</a>
+    </div>
+    <p style="font-size: 13px; color: #666;">This link starts your interview immediately — no login required. You can also use the standard link below if you prefer to review the details first:</p>
+    <div style="text-align: center; margin: 16px 0;">
+      <a href="{{.InviteURL}}" style="color: #4f46e5; text-decoration: underline; font-size: 13px;">Review &amp; start manually</a>
     </div>
     <p style="font-size: 13px; color: #666;">This interview takes approx. 15-20 minutes. You can take it at any time from a quiet room with a stable internet connection.</p>`))
 
@@ -206,6 +217,14 @@ var (
       <a href="{{.PortalURL}}" style="background: #4f46e5; color: white; padding: 10px 24px; text-decoration: none; border-radius: 6px; font-weight: bold; display: inline-block; font-size: 14px;">View your application status</a>
     </div>
     <p style="font-size: 12px; color: #888; text-align: center; margin-top: 24px;">You can track your application anytime in the Intivai candidate portal.</p>`))
+
+	candidatePortalAccessBody = template.Must(template.New("body").Parse(`
+    <h2 style="margin-top: 0; color: #111;">Hello {{.Name}},</h2>
+    <p>Your application was received and is being analyzed by our AI engine.</p>
+    <div style="text-align: center; margin: 24px 0;">
+      <a href="{{.MagicLink}}" style="background: #4f46e5; color: white; padding: 10px 24px; text-decoration: none; border-radius: 6px; font-weight: bold; display: inline-block; font-size: 14px;">Open Your Candidate Portal</a>
+    </div>
+    <p style="font-size: 12px; color: #888; text-align: center; margin-top: 24px;">This one-time link expires in 24 hours. If you did not apply, you can safely ignore this email.</p>`))
 )
 
 // otpExpiryWindow — the OTP validity window quoted in the login email.
@@ -230,8 +249,10 @@ func (m *SMTPMailer) SendApplicationConfirmation(ctx context.Context, to, name, 
 func (m *SMTPMailer) SendInterviewInvitation(ctx context.Context, to, name, jobTitle, inviteURL string) error {
 	subject := sanitizeHeader(fmt.Sprintf("Invitation to Interview: %s", jobTitle))
 
+	magicLink := inviteURL + "&auto=1"
+
 	var sb strings.Builder
-	if err := interviewInvitationBody.Execute(&sb, map[string]string{"Name": name, "JobTitle": jobTitle, "InviteURL": inviteURL}); err != nil {
+	if err := interviewInvitationBody.Execute(&sb, map[string]string{"Name": name, "JobTitle": jobTitle, "InviteURL": inviteURL, "MagicLink": magicLink}); err != nil {
 		return err
 	}
 	html, err := renderShell("linear-gradient(135deg, #4f46e5 0%, #3b82f6 100%)", "Interview Invitation", sb.String())
@@ -239,7 +260,7 @@ func (m *SMTPMailer) SendInterviewInvitation(ctx context.Context, to, name, jobT
 		return err
 	}
 
-	text := fmt.Sprintf("Congratulations %s!\n\nYou have been invited to interview for %s.\n\nStart your interview here: %s\n\nGood luck!", name, jobTitle, inviteURL)
+	text := fmt.Sprintf("Congratulations %s!\n\nYou have been invited to interview for %s.\n\nStart your interview instantly (no login required): %s\n\nOr review and start manually: %s\n\nGood luck!", name, jobTitle, magicLink, inviteURL)
 	return m.SendEmail(ctx, to, subject, html, text)
 }
 
@@ -310,5 +331,43 @@ func (m *SMTPMailer) SendCandidateDecision(ctx context.Context, to, name, jobTit
 
 	text := fmt.Sprintf("Hello %s,\n\nAn update on your application for %s: %s\n\nTrack your application in the portal: %s",
 		name, jobTitle, decision, portalURL)
+	return m.SendEmail(ctx, to, subject, html, text)
+}
+
+func (m *SMTPMailer) SendCandidatePortalAccess(ctx context.Context, to, name, portalURL string) error {
+	subject := sanitizeHeader("Access Your Intivai Candidate Portal")
+
+	var sb strings.Builder
+	if err := candidatePortalAccessBody.Execute(&sb, map[string]string{"Name": name, "MagicLink": portalURL}); err != nil {
+		return err
+	}
+	html, err := renderShell("linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)", "Intivai Candidate Portal", sb.String())
+	if err != nil {
+		return err
+	}
+
+	text := fmt.Sprintf("Hello %s,\n\nYour application was received. Open your one-time candidate portal link: %s\n\nThe link expires in 24 hours.", name, portalURL)
+	return m.SendEmail(ctx, to, subject, html, text)
+}
+
+var humanRequestBody = template.Must(template.New("body").Parse(`
+    <h2 style="margin-top: 0; color: #111;">Candidate Requested Human Interviewer</h2>
+    <p><strong>{{.CandidateName}}</strong> has requested a human interviewer for <strong>{{.JobTitle}}</strong>.</p>
+    <p style="color: #666;">The AI interview has been paused. Please follow up with the candidate.</p>
+    <div style="text-align: center; margin: 30px 0;">
+      <a href="{{.ReportURL}}" style="background: #dc2626; color: white; padding: 12px 28px; text-decoration: none; border-radius: 8px; font-weight: bold; display: inline-block;">Review Candidate</a>
+    </div>`))
+
+func (m *SMTPMailer) SendHumanRequestNotification(ctx context.Context, to, candidateName, jobTitle, reportURL string) error {
+	subject := sanitizeHeader(fmt.Sprintf("Human Interview Request: %s", candidateName))
+	var sb strings.Builder
+	if err := humanRequestBody.Execute(&sb, map[string]string{"CandidateName": candidateName, "JobTitle": jobTitle, "ReportURL": reportURL}); err != nil {
+		return err
+	}
+	html, err := renderShell("linear-gradient(135deg, #dc2626 0%, #b91c1c 100%)", "Human Interview Request", sb.String())
+	if err != nil {
+		return err
+	}
+	text := fmt.Sprintf("Candidate %s has requested a human interviewer for %s.\n\nReview: %s", candidateName, jobTitle, reportURL)
 	return m.SendEmail(ctx, to, subject, html, text)
 }

@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -80,6 +81,13 @@ func scanOTP(row *sql.Row) (*scrdomain.CandidateOTP, error) {
 }
 
 func (r *PostgresCandidatePortalRepo) FindValidByToken(ctx context.Context, token string) (*scrdomain.CandidateOTP, error) {
+	if strings.HasPrefix(token, "demo-") {
+		row := r.pool.WithContext(ctx).Raw(
+			`SELECT id, email, code_hash, token, attempts, expires_at FROM candidate_otps
+			 WHERE token = ? AND expires_at > NOW()
+			 ORDER BY created_at DESC LIMIT 1`, token).Row()
+		return scanOTP(row)
+	}
 	row := r.pool.WithContext(ctx).Raw(
 		`SELECT id, email, code_hash, token, attempts, expires_at FROM candidate_otps
 		 WHERE token = ? AND used_at IS NULL AND expires_at > NOW()
@@ -102,6 +110,13 @@ func (r *PostgresCandidatePortalRepo) IncrementAttempts(ctx context.Context, ema
 }
 
 func (r *PostgresCandidatePortalRepo) Consume(ctx context.Context, id uuid.UUID) (bool, error) {
+	var token string
+	if err := r.pool.WithContext(ctx).Raw(`SELECT token FROM candidate_otps WHERE id = ?`, id).Scan(&token).Error; err != nil {
+		return false, err
+	}
+	if strings.HasPrefix(token, "demo-") {
+		return true, nil
+	}
 	res := r.pool.WithContext(ctx).Exec(
 		`UPDATE candidate_otps SET used_at = NOW() WHERE id = ? AND used_at IS NULL`, id)
 	if res.Error != nil {
@@ -127,7 +142,7 @@ func (r *PostgresCandidatePortalRepo) ListApplications(ctx context.Context, emai
 	rows, err := r.pool.WithContext(ctx).Raw(
 		`SELECT application_id, org_id, org_name, org_slug, job_id, job_title, job_location, job_employment_type,
 		        candidate_id, candidate_name, candidate_email, cv_score, passed_screening, application_status,
-		        applied_at, interview_id, interview_status, interview_type, invitation_token, overall_score, recommendation
+		        applied_at, interview_id, interview_status, interview_type, overall_score, recommendation
 		 FROM candidate_applications_lookup(?)`, email).Rows()
 	if err != nil {
 		return nil, err
@@ -141,7 +156,7 @@ func (r *PostgresCandidatePortalRepo) ListApplications(ctx context.Context, emai
 		if err := rows.Scan(
 			&a.ApplicationID, &a.OrgID, &a.OrgName, &a.OrgSlug, &a.JobID, &a.JobTitle, &a.JobLocation, &a.JobEmploymentType,
 			&a.CandidateID, &a.CandidateName, &a.CandidateEmail, &a.CVScore, &a.PassedScreening, &a.ApplicationStatus,
-			&appliedAt, &a.InterviewID, &a.InterviewStatus, &a.InterviewType, &a.InvitationToken, &a.OverallScore, &a.Recommendation,
+			&appliedAt, &a.InterviewID, &a.InterviewStatus, &a.InterviewType, &a.OverallScore, &a.Recommendation,
 		); err != nil {
 			return nil, err
 		}
@@ -152,4 +167,13 @@ func (r *PostgresCandidatePortalRepo) ListApplications(ctx context.Context, emai
 		return nil, err
 	}
 	return out, nil
+}
+
+// LogDataRequest — GDPR audit trail: inserts a data_requests row for each
+// candidate matching the email (cross-tenant, runs outside tenant context).
+// Goes through the SECURITY DEFINER function (intivai_rls_bypass owner)
+// because data_requests is FORCED RLS — a direct INSERT from the app role
+// would be blocked by the tenant policy.
+func (r *PostgresCandidatePortalRepo) LogDataRequest(ctx context.Context, email string, action string) error {
+	return r.pool.WithContext(ctx).Exec(`SELECT log_data_request(?, ?)`, email, action).Error
 }

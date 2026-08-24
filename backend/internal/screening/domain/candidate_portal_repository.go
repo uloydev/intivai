@@ -40,7 +40,6 @@ type CandidateApplicationView struct {
 	InterviewID       *uuid.UUID `json:"interview_id"`
 	InterviewStatus   *string    `json:"interview_status"`
 	InterviewType     *string    `json:"interview_type"`
-	InvitationToken   *string    `json:"invitation_token"`
 	OverallScore      *float64   `json:"overall_score"`
 	Recommendation    *string    `json:"recommendation"`
 }
@@ -72,4 +71,7 @@ type CandidatePortalRepository interface {
 	// ListApplications — the candidate's application rows across orgs
 	// (SECURITY DEFINER lookup function; no tenant context exists yet).
 	ListApplications(ctx context.Context, email string) ([]*CandidateApplicationView, error)
+	// LogDataRequest — GDPR audit: records an export or delete data request
+	// for all candidates matching the email.
+	LogDataRequest(ctx context.Context, email string, action string) error
 }
