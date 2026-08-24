@@ -26,3 +26,5 @@ frontend/dist/
 
 # Sandbox sidecar mTLS material (generated)
 backend/.sandbox-certs/
+
+frontend/test-results/
