@@ -155,7 +155,7 @@ export function Candidate360Drawer({
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
       <DialogContent
         showCloseButton={false}
-        className="fixed inset-y-0 right-0 top-0 left-auto flex h-full w-full max-w-2xl translate-x-0 translate-y-0 flex-col gap-0 rounded-none border-l border-border bg-card p-0 shadow-2xl ring-0 data-open:animate-in data-open:fade-in-0 data-open:slide-in-from-right data-closed:animate-out data-closed:slide-out-to-right sm:max-w-2xl"
+        className="fixed inset-y-0 right-0 top-0 left-auto flex h-full w-full max-w-full translate-x-0 translate-y-0 flex-col gap-0 rounded-none border-l border-border bg-card p-0 shadow-2xl ring-0 data-open:animate-in data-open:fade-in-0 data-open:slide-in-from-right data-closed:animate-out data-closed:slide-out-to-right sm:max-w-2xl lg:max-w-3xl xl:max-w-4xl"
         aria-label="Candidate 360 profile drawer"
       >
         {/* Drawer Header */}

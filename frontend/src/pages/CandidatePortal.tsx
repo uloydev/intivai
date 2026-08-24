@@ -10,10 +10,19 @@ import type {
   CandidateOTPResponse,
   CandidateVerifyResponse,
 } from "@/types/api"
+import { toast } from "sonner"
+import { Download, Trash } from "@phosphor-icons/react"
 
 const TOKEN_KEY = "intivai_candidate_token"
 const EMAIL_KEY = "intivai_candidate_email"
 const OTP_DEFAULT_TTL_SEC = 600
+const OTP_RESEND_COOLDOWN_SEC = 60
+
+function formatCountdown(secs: number): string {
+  const mins = Math.floor(secs / 60)
+  const rem = secs % 60
+  return `${mins.toString().padStart(2, "0")}:${rem.toString().padStart(2, "0")}`
+}
 
 function applicationStatusLabel(status: string | null | undefined): string {
   switch (status) {
@@ -63,7 +72,7 @@ function SubmitButton({
 }
 
 export function CandidatePortal() {
-  const [searchParams] = useSearchParams()
+  const [searchParams, setSearchParams] = useSearchParams()
   const qc = useQueryClient()
   const [email, setEmail] = useState(localStorage.getItem(EMAIL_KEY) || "")
   const [otpCode, setOtpCode] = useState("")
@@ -74,6 +83,7 @@ export function CandidatePortal() {
   const [infoMsg, setInfoMsg] = useState<string | null>(null)
   const [otpExpiresAt, setOtpExpiresAt] = useState<number | null>(null)
   const [otpRemainingSec, setOtpRemainingSec] = useState(0)
+  const [resendCooldownSec, setResendCooldownSec] = useState(0)
   const emptyAutoRefetchRef = useRef(false)
 
   const handleLogout = useCallback(() => {
@@ -82,8 +92,38 @@ export function CandidatePortal() {
     setStep("email")
     setOtpCode("")
     setOtpExpiresAt(null)
+    // Identity teardown: the next sign-in gets a fresh empty-list auto-refetch.
+    emptyAutoRefetchRef.current = false
     qc.removeQueries({ queryKey: ["candidate-applications"] })
   }, [qc])
+
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+  const [deleteConfirmText, setDeleteConfirmText] = useState("")
+
+  const handleExport = useCallback(async () => {
+    try {
+      const data = await api.get<{ email: string; applications: CandidateApplicationItem[]; generated_at: string }>("/candidate/portal/export")
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement("a")
+      a.href = url
+      a.download = `intivai-data-export-${new Date().toISOString().split("T")[0]}.json`
+      a.click()
+      URL.revokeObjectURL(url)
+      toast.success("Data exported successfully")
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to export data")
+    }
+  }, [])
+
+  const deleteMutation = useMutation({
+    mutationFn: () => api.delete("/candidate/portal/me"),
+    onSuccess: () => {
+      toast.success("Your data has been erased")
+      handleLogout()
+    },
+    onError: (e: Error) => toast.error(e.message),
+  })
 
   // Magic Link exchange: the raw ?token= is NOT a JWT — swap it for a real
   // candidate token first, then the applications query (enabled on dashboard)
@@ -96,6 +136,10 @@ export function CandidatePortal() {
       localStorage.setItem(EMAIL_KEY, res.email)
       setEmail(res.email)
       setStep("dashboard")
+      // G6: strip the spent ?token= from the address bar immediately — a
+      // refresh would replay the consumed token into onError and handleLogout
+      // would wipe the freshly minted (valid) session.
+      setSearchParams({}, { replace: true })
       qc.invalidateQueries({ queryKey: ["candidate-applications", res.email] })
     },
     onError: (err) => {
@@ -120,6 +164,7 @@ export function CandidatePortal() {
       setOtpCode("")
       setError(null)
       setOtpExpiresAt(Date.now() + (data.expires_in || OTP_DEFAULT_TTL_SEC) * 1000)
+      setResendCooldownSec(OTP_RESEND_COOLDOWN_SEC)
       setInfoMsg(`A 6-digit verification code has been dispatched to ${emailValue}.`)
     },
     onError: (err) => {
@@ -169,6 +214,13 @@ export function CandidatePortal() {
 
   const otpExpired = otpExpiresAt !== null && otpRemainingSec <= 0
 
+  // OTP resend cooldown — one code per minute keeps the email relay honest.
+  useEffect(() => {
+    if (resendCooldownSec <= 0) return
+    const t = setInterval(() => setResendCooldownSec((s) => (s <= 1 ? 0 : s - 1)), 1000)
+    return () => clearInterval(t)
+  }, [resendCooldownSec])
+
   // Expired/revoked candidate token: the api layer already dropped the stored
   // token on 401 — bounce back to the email step.
   useEffect(() => {
@@ -192,6 +244,7 @@ export function CandidatePortal() {
 
   function handleSendOTP(e?: React.FormEvent) {
     e?.preventDefault()
+    if (resendCooldownSec > 0) return
     const normalized = email.trim().toLowerCase()
     if (!normalized || !normalized.includes("@")) {
       setError("Please enter a valid email address.")
@@ -217,11 +270,6 @@ export function CandidatePortal() {
   }
 
   const authBusy = sendOtp.isPending || verify.isPending || magicVerify.isPending
-  const formatCountdown = (secs: number) => {
-    const mins = Math.floor(secs / 60)
-    const rem = secs % 60
-    return `${mins.toString().padStart(2, "0")}:${rem.toString().padStart(2, "0")}`
-  }
 
   return (
     <div className="min-h-[calc(100vh-4rem)] bg-background text-foreground py-12 px-4 sm:px-6 lg:px-8 relative overflow-hidden">
@@ -346,9 +394,12 @@ export function CandidatePortal() {
                     <button
                       type="button"
                       onClick={handleSendOTP}
-                      className="text-xs text-muted-foreground hover:text-primary transition-colors"
+                      disabled={resendCooldownSec > 0 || authBusy}
+                      className="text-xs text-muted-foreground hover:text-primary transition-colors disabled:opacity-50 disabled:hover:text-muted-foreground"
                     >
-                      Didn't receive the code? Resend
+                      {resendCooldownSec > 0
+                        ? `Didn't receive the code? Resend in ${resendCooldownSec}s`
+                        : "Didn't receive the code? Resend"}
                     </button>
                   </div>
                 </form>
@@ -362,7 +413,7 @@ export function CandidatePortal() {
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 p-6 bg-card/80 border border-border rounded-2xl backdrop-blur-xl">
               <div>
                 <div className="flex items-center gap-2 mb-1">
-                  <span className="inline-block w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
+                  <span className="inline-block w-2.5 h-2.5 rounded-full bg-success animate-pulse" />
                   <h2 className="text-xl font-bold text-foreground">Applicant Tracking Dashboard</h2>
                 </div>
                 <p className="text-sm text-muted-foreground">
@@ -371,6 +422,15 @@ export function CandidatePortal() {
               </div>
 
               <div className="flex items-center gap-3">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={handleExport}
+                  className="text-xs flex items-center gap-1.5"
+                >
+                  <Download className="h-3.5 w-3.5" /> Export My Data
+                </Button>
                 <Button
                   type="button"
                   variant="secondary"
@@ -389,6 +449,15 @@ export function CandidatePortal() {
                   className="text-xs text-destructive hover:text-destructive hover:bg-destructive/10"
                 >
                   Sign Out
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setShowDeleteConfirm(true)}
+                  className="text-xs text-destructive hover:text-destructive hover:bg-destructive/10"
+                >
+                  <Trash className="h-3.5 w-3.5 mr-1" /> Delete Account
                 </Button>
               </div>
             </div>
@@ -476,7 +545,7 @@ export function CandidatePortal() {
                             </Link>
                           ) : isCompleted ? (
                             <div className="text-right">
-                              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30">
+                              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-success/10 text-success border border-success/30">
                                 ✓ Assessment Complete
                               </span>
                               {app.overall_score !== null && app.overall_score !== undefined && (
@@ -501,8 +570,8 @@ export function CandidatePortal() {
 
                         <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
                           {/* Stage 1: Submitted */}
-                          <div className="p-3.5 rounded-xl bg-muted/40 border border-emerald-500/30">
-                            <div className="flex items-center gap-2 text-xs font-semibold text-emerald-600 dark:text-emerald-400 mb-1">
+                          <div className="p-3.5 rounded-xl bg-muted/40 border border-success/30">
+                            <div className="flex items-center gap-2 text-xs font-semibold text-success mb-1">
                               <span>✓</span> Stage 1: Submitted
                             </div>
                             <p className="text-xs text-muted-foreground">Application & CV received</p>
@@ -513,14 +582,14 @@ export function CandidatePortal() {
                             className={cn(
                               "p-3.5 rounded-xl bg-muted/40 border",
                               app.passed_screening
-                                ? "border-emerald-500/30"
+                                ? "border-success/30"
                                 : app.cv_score !== null && app.cv_score !== undefined
-                                ? "border-amber-500/30"
+                                ? "border-warning/30"
                                 : "border-border"
                             )}
                           >
                             <div className="flex items-center justify-between text-xs font-semibold mb-1">
-                              <span className={app.passed_screening ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground"}>
+                              <span className={app.passed_screening ? "text-success" : "text-muted-foreground"}>
                                 {app.passed_screening ? "✓" : "•"} Stage 2: CV Screen
                               </span>
                               {app.cv_score !== null && app.cv_score !== undefined && (
@@ -543,7 +612,7 @@ export function CandidatePortal() {
                             className={cn(
                               "p-3.5 rounded-xl bg-muted/40 border",
                               isCompleted
-                                ? "border-emerald-500/30"
+                                ? "border-success/30"
                                 : isInterviewReady
                                 ? "border-primary/60 ring-1 ring-primary/30"
                                 : "border-border"
@@ -553,7 +622,7 @@ export function CandidatePortal() {
                               <span
                                 className={
                                   isCompleted
-                                    ? "text-emerald-600 dark:text-emerald-400"
+                                    ? "text-success"
                                     : isInterviewReady
                                     ? "text-primary"
                                     : "text-muted-foreground"
@@ -576,12 +645,12 @@ export function CandidatePortal() {
                             className={cn(
                               "p-3.5 rounded-xl bg-muted/40 border",
                               isCompleted && app.recommendation
-                                ? "border-emerald-500/30"
+                                ? "border-success/30"
                                 : "border-border"
                             )}
                           >
                             <div className="flex items-center gap-2 text-xs font-semibold mb-1">
-                              <span className={isCompleted ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground"}>
+                              <span className={isCompleted ? "text-success" : "text-muted-foreground"}>
                                 {isCompleted ? "✓" : "•"} Stage 4: Decision
                               </span>
                             </div>
@@ -593,11 +662,100 @@ export function CandidatePortal() {
                           </div>
                         </div>
                       </div>
+
+                      {/* Candidate Post-Interview Feedback Card (GAP-CAN-01) —
+                          G10: only real evaluation fields from the API payload;
+                          fabricated placeholder strengths were removed. */}
+                      {isCompleted && (
+                        <div className="mt-6 p-5 rounded-2xl bg-gradient-to-br from-primary/5 via-muted/30 to-background border border-primary/20 space-y-4">
+                          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 border-b border-border/40 pb-3">
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <span className="flex h-5 w-5 items-center justify-center rounded-full bg-primary/20 text-primary text-xs font-bold">
+                                  ✦
+                                </span>
+                                <h4 className="text-sm font-bold text-foreground">
+                                  Assessment Performance & Strengths Summary
+                                </h4>
+                              </div>
+                              <p className="text-xs text-muted-foreground mt-0.5">
+                                Automated feedback derived from your technical interview and coding session.
+                              </p>
+                            </div>
+                            {app.overall_score !== null && app.overall_score !== undefined && (
+                              <span className="px-3 py-1 rounded-full text-xs font-bold bg-primary/10 text-primary border border-primary/30 shrink-0 self-start sm:self-auto">
+                                Overall Score: {Math.round(app.overall_score)}/100
+                              </span>
+                            )}
+                          </div>
+
+                          {app.recommendation ? (
+                            <div className="p-3.5 rounded-xl bg-card border border-border/60 flex items-center justify-between gap-3">
+                              <h5 className="text-xs font-semibold text-primary uppercase tracking-wider">
+                                AI Recommendation
+                              </h5>
+                              <span className="text-xs font-semibold text-foreground capitalize">
+                                {app.recommendation.replace(/_/g, " ")}
+                              </span>
+                            </div>
+                          ) : (
+                            <p className="text-xs text-muted-foreground">
+                              No automated feedback available yet.
+                            </p>
+                          )}
+                        </div>
+                      )}
                     </div>
                   )
                 })}
               </div>
             )}
+          </div>
+        )}
+
+        {/* Delete Account Confirmation Modal */}
+        {showDeleteConfirm && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+            <div className="bg-card border border-destructive/30 rounded-2xl p-6 max-w-md w-full space-y-4 shadow-xl">
+              <div className="flex items-center gap-3">
+                <div className="h-10 w-10 rounded-full bg-destructive/10 flex items-center justify-center">
+                  <Trash className="h-5 w-5 text-destructive" />
+                </div>
+                <div>
+                  <h3 className="font-semibold text-foreground">Delete All Your Data</h3>
+                  <p className="text-xs text-muted-foreground">This action cannot be undone.</p>
+                </div>
+              </div>
+              <p className="text-sm text-muted-foreground">
+                This will permanently erase all your data including applications, interviews, transcripts, and scores across all organizations.
+              </p>
+              <div className="space-y-2">
+                <label className="text-xs font-medium text-foreground">
+                  Type <span className="font-mono font-bold text-destructive">DELETE</span> to confirm:
+                </label>
+                <Input
+                  value={deleteConfirmText}
+                  onChange={(e) => setDeleteConfirmText(e.target.value)}
+                  placeholder="DELETE"
+                  className="font-mono"
+                />
+              </div>
+              <div className="flex gap-2">
+                <Button
+                  variant="destructive"
+                  disabled={deleteConfirmText.toUpperCase() !== "DELETE" || deleteMutation.isPending}
+                  onClick={() => deleteMutation.mutate()}
+                >
+                  {deleteMutation.isPending ? "Erasing..." : "Permanently Delete My Data"}
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => { setShowDeleteConfirm(false); setDeleteConfirmText("") }}
+                >
+                  Cancel
+                </Button>
+              </div>
+            </div>
           </div>
         )}
       </div>

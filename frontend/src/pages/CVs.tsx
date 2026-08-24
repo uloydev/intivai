@@ -18,6 +18,16 @@ import { api } from "@/lib/api"
 import type { CVListItem, Job } from "@/types/api"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import {
   Dialog,
@@ -46,7 +56,7 @@ function statusBadge(status: string) {
     // Transient pipeline work — static amber badge; the query refetchInterval
     // polls, so an infinite pulsing spinner would be misleading.
     return (
-      <Badge variant="secondary" className="bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20 gap-1">
+      <Badge variant="secondary" className="bg-warning/10 text-warning border-warning/20 gap-1">
         <ArrowClockwise className="h-3 w-3 animate-spin motion-reduce:animate-none" /> Processing
       </Badge>
     )
@@ -60,7 +70,7 @@ function statusBadge(status: string) {
   }
   if (status === "extracted" || status === "parsed" || status === "pending_review") {
     return (
-      <Badge className="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20 gap-1">
+      <Badge className="bg-success/10 text-success border-success/20 gap-1">
         <CheckCircle className="h-3 w-3" weight="fill" /> Profile ready
       </Badge>
     )
@@ -105,6 +115,7 @@ export function CVsPage() {
   // Screen candidate dialog state
   const [screenCandidate, setScreenCandidate] = useState<CVListItem | null>(null)
   const [selectedJobId, setSelectedJobId] = useState<string>("")
+  const [deleteTarget, setDeleteTarget] = useState<CVListItem | null>(null)
 
   const upload = useMutation({
     mutationFn: async () => {
@@ -269,14 +280,38 @@ export function CVsPage() {
               </div>
               <div className="space-y-1.5 md:col-span-4">
                 <Label htmlFor="cv-file" className="text-xs font-semibold">Resume File (PDF)</Label>
-                <div className="flex items-center gap-2">
+                <div
+                  className="flex flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-border/60 bg-muted/20 p-6 text-center transition-colors hover:border-primary/40 hover:bg-primary/5 cursor-pointer"
+                  onDragOver={(e) => { e.preventDefault(); e.currentTarget.classList.add("border-primary", "bg-primary/10") }}
+                  onDragLeave={(e) => { e.currentTarget.classList.remove("border-primary", "bg-primary/10") }}
+                  onDrop={(e) => {
+                    e.preventDefault()
+                    e.currentTarget.classList.remove("border-primary", "bg-primary/10")
+                    const file = e.dataTransfer.files?.[0]
+                    if (file && (file.type === "application/pdf" || file.name.endsWith(".pdf"))) {
+                      setSelectedFile(file)
+                    } else {
+                      toast.error("Please upload a PDF file")
+                    }
+                  }}
+                  onClick={() => fileRef.current?.click()}
+                >
+                  <CloudArrowUp className="h-8 w-8 text-muted-foreground" />
+                  {selectedFile ? (
+                    <p className="text-sm font-medium text-foreground">{selectedFile.name}</p>
+                  ) : (
+                    <>
+                      <p className="text-sm text-muted-foreground">Drag and drop PDF here, or click to browse</p>
+                      <p className="text-xs text-muted-foreground">PDF files only</p>
+                    </>
+                  )}
                   <Input
                     id="cv-file"
                     ref={fileRef}
                     type="file"
                     accept="application/pdf"
                     onChange={(e) => setSelectedFile(e.target.files?.[0] || null)}
-                    className="bg-background/80 file:mr-2 file:rounded-md file:border-0 file:bg-primary/10 file:px-2 file:py-1 file:text-xs file:font-semibold file:text-primary"
+                    className="hidden"
                   />
                 </div>
               </div>
@@ -390,7 +425,7 @@ export function CVsPage() {
                   {statusBadge(cv.status)}
 
                   {/* Actions based on status */}
-                  {(cv.status === "extracted" || cv.status === "parsed") && (
+                  {(cv.status === "extracted" || cv.status === "parsed" || cv.status === "pending_review") && (
                     <>
                       <Button
                         variant="outline"
@@ -431,11 +466,7 @@ export function CVsPage() {
                     className="h-8 w-8 p-0 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
                     title="Delete Candidate"
                     aria-label={`Delete resume for ${cv.name}`}
-                    onClick={() => {
-                      if (window.confirm(`Delete resume for ${cv.name}?`)) {
-                        deleteCV.mutate(cv.id)
-                      }
-                    }}
+                    onClick={() => setDeleteTarget(cv)}
                     disabled={deleteCV.isPending}
                   >
                     <Trash className="h-4 w-4" />
@@ -449,7 +480,7 @@ export function CVsPage() {
 
       {/* Screen Candidate Modal */}
       <Dialog open={screenCandidate !== null} onOpenChange={(o) => !o && setScreenCandidate(null)}>
-        <DialogContent>
+        <DialogContent className="sm:max-w-lg">
           <DialogHeader>
             <DialogTitle className="font-display text-lg flex items-center gap-2">
               <Sparkle className="h-5 w-5 text-primary" weight="fill" /> Screen Candidate against Role
@@ -491,6 +522,32 @@ export function CVsPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Delete Confirmation AlertDialog */}
+      <AlertDialog open={deleteTarget !== null} onOpenChange={(o) => !o && setDeleteTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Resume</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete the resume for {deleteTarget?.name}? This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              onClick={() => {
+                if (deleteTarget) {
+                  deleteCV.mutate(deleteTarget.id)
+                  setDeleteTarget(null)
+                }
+              }}
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

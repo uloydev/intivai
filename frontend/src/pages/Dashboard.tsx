@@ -19,27 +19,33 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
+import { GlareHover } from "@/components/ui/glare-hover"
+import { NumberTicker } from "@/components/ui/number-ticker"
 import { cn } from "@/lib/utils"
 
 export function DashboardPage() {
   const { data: jobs, isLoading: loadingJobs } = useQuery({
     queryKey: ["jobs"],
     queryFn: () => api.get<Job[]>("/jobs"),
+    staleTime: 30_000,
   })
 
   const { data: cvs, isLoading: loadingCVs } = useQuery({
     queryKey: ["cvs"],
     queryFn: () => api.get<CVListItem[]>("/cvs"),
+    staleTime: 30_000,
   })
 
   const { data: apps, isLoading: loadingApps } = useQuery({
     queryKey: ["applications"],
     queryFn: () => api.get<Application[]>("/applications"),
+    staleTime: 30_000,
   })
 
   const { data: interviews, isLoading: loadingInterviews } = useQuery({
     queryKey: ["interviews"],
     queryFn: () => api.get<InterviewListItem[]>("/interviews"),
+    staleTime: 30_000,
   })
 
   const { data: health } = useQuery({
@@ -105,96 +111,108 @@ export function DashboardPage() {
       {/* KPI Metrics Grid */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {/* Metric 1: Active Jobs */}
-        <Card className="glass relative overflow-hidden border-border/60 transition-all hover:border-primary/40 hover:shadow-lg hover:shadow-primary/5">
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Active Roles</CardTitle>
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 text-primary">
-              <Briefcase className="h-4 w-4" weight="bold" />
-            </div>
-          </CardHeader>
-          <CardContent>
-            {loadingJobs ? (
-              <Skeleton className="h-8 w-16" />
-            ) : (
-              <div className="flex items-baseline justify-between">
-                <span className="font-display text-3xl font-bold">{activeJobs.length}</span>
-                <span className="text-xs font-medium text-muted-foreground">{jobs?.length ?? 0} total</span>
-              </div>
-            )}
-            <p className="mt-1 text-xs text-muted-foreground">Positions actively accepting applicants</p>
-          </CardContent>
-        </Card>
+        <Link to="/jobs">
+          <GlareHover background="transparent" color="#1E3A5F" opacity={0.08} className="rounded-xl w-full">
+            <Card className="glass relative overflow-hidden border-border/60 transition-all hover:border-primary/40 w-full">
+              <CardHeader className="flex flex-row items-center justify-between pb-2">
+                <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Active Roles</CardTitle>
+                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                  <Briefcase className="h-4 w-4" weight="bold" />
+                </div>
+              </CardHeader>
+              <CardContent>
+                {loadingJobs ? (
+                  <Skeleton className="h-8 w-16" />
+                ) : (
+                  <div className="flex items-baseline justify-between">
+                    <span className="font-display text-3xl font-bold"><NumberTicker value={activeJobs.length} /></span>
+                    <span className="text-xs font-medium text-muted-foreground">{jobs?.length ?? 0} total</span>
+                  </div>
+                )}
+                <p className="mt-1 text-xs text-muted-foreground">Positions actively accepting applicants</p>
+              </CardContent>
+            </Card>
+          </GlareHover>
+        </Link>
 
         {/* Metric 2: CVs Ingested */}
-        <Card className="glass relative overflow-hidden border-border/60 transition-all hover:border-primary/40 hover:shadow-lg hover:shadow-primary/5">
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">CVs Ingested</CardTitle>
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-500/10 text-blue-500">
-              <Files className="h-4 w-4" weight="bold" />
-            </div>
-          </CardHeader>
-          <CardContent>
-            {loadingCVs ? (
-              <Skeleton className="h-8 w-16" />
-            ) : (
-              <div className="flex items-baseline justify-between">
-                <span className="font-display text-3xl font-bold">{totalCVs}</span>
-                <Badge variant="secondary" className="bg-blue-500/10 text-blue-600 dark:text-blue-400 text-[10px]">
-                  OCR + Parsed
-                </Badge>
+        <Link to="/cvs">
+          <GlareHover background="transparent" color="#2563EB" opacity={0.08} className="rounded-xl w-full">
+          <Card className="glass relative overflow-hidden border-border/60 transition-all hover:border-primary/40 w-full">
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">CVs Ingested</CardTitle>
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-info/10 text-info">
+                <Files className="h-4 w-4" weight="bold" />
               </div>
-            )}
-            <p className="mt-1 text-xs text-muted-foreground">Auto-extracted candidate profiles</p>
-          </CardContent>
-        </Card>
+            </CardHeader>
+            <CardContent>
+              {loadingCVs ? (
+                <Skeleton className="h-8 w-16" />
+              ) : (
+                <div className="flex items-baseline justify-between">
+                  <span className="font-display text-3xl font-bold"><NumberTicker value={totalCVs} /></span>
+                  <Badge variant="info" size="sm">OCR + Parsed</Badge>
+                </div>
+              )}
+              <p className="mt-1 text-xs text-muted-foreground">Auto-extracted candidate profiles</p>
+            </CardContent>
+          </Card>
+        </GlareHover>
+        </Link>
 
         {/* Metric 3: Screening Pass Rate */}
-        <Card className="glass relative overflow-hidden border-border/60 transition-all hover:border-primary/40 hover:shadow-lg hover:shadow-primary/5">
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Screening Pass Rate (all roles)</CardTitle>
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-500">
-              <TrendUp className="h-4 w-4" weight="bold" />
-            </div>
-          </CardHeader>
-          <CardContent>
-            {loadingApps ? (
-              <Skeleton className="h-8 w-16" />
-            ) : (
-              <div className="flex items-baseline justify-between">
-                <span className="font-display text-3xl font-bold text-emerald-600 dark:text-emerald-400">
-                  {passRate !== null ? `${passRate}%` : "—"}
-                </span>
-                {passRate !== null && (
-                  <span className="text-xs font-medium text-muted-foreground">{passedApps.length}/{totalApps} passed</span>
-                )}
+        <Link to="/candidates">
+          <GlareHover background="transparent" color="#059669" opacity={0.08} className="rounded-xl w-full">
+          <Card className="glass relative overflow-hidden border-border/60 transition-all hover:border-primary/40 w-full">
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Screening Pass Rate (all roles)</CardTitle>
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-success/10 text-success">
+                <TrendUp className="h-4 w-4" weight="bold" />
               </div>
-            )}
-            <p className="mt-1 text-xs text-muted-foreground">Match threshold benchmark</p>
-          </CardContent>
-        </Card>
+            </CardHeader>
+            <CardContent>
+              {loadingApps ? (
+                <Skeleton className="h-8 w-16" />
+              ) : (
+                <div className="flex items-baseline justify-between">
+                  <span className="font-display text-3xl font-bold text-success">
+                    {passRate !== null ? <><NumberTicker value={passRate} />%</> : "—"}
+                  </span>
+                  {passRate !== null && (
+                    <span className="text-xs font-medium text-muted-foreground">{passedApps.length}/{totalApps} passed</span>
+                  )}
+                </div>
+              )}
+              <p className="mt-1 text-xs text-muted-foreground">Match threshold benchmark</p>
+            </CardContent>
+          </Card>
+        </GlareHover>
+        </Link>
 
         {/* Metric 4: AI Interviews */}
-        <Card className="glass relative overflow-hidden border-border/60 transition-all hover:border-primary/40 hover:shadow-lg hover:shadow-primary/5">
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Interviews Run</CardTitle>
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-500/10 text-indigo-500">
-              <ChatCircleText className="h-4 w-4" weight="bold" />
-            </div>
-          </CardHeader>
-          <CardContent>
-            {loadingInterviews ? (
-              <Skeleton className="h-8 w-16" />
-            ) : (
-              <div className="flex items-baseline justify-between">
-                <span className="font-display text-3xl font-bold">{interviews?.length ?? 0}</span>
-                <Badge variant="secondary" className="bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 text-[10px]">
-                  {completedInterviews.length} Evaluated
-                </Badge>
-              </div>
-            )}
-            <p className="mt-1 text-xs text-muted-foreground">Real-time chat & voice sessions</p>
-          </CardContent>
-        </Card>
+        <Link to="/interviews">
+          <GlareHover background="transparent" color="#4F46E5" opacity={0.08} className="rounded-xl w-full">
+            <Card className="glass relative overflow-hidden border-border/60 transition-all hover:border-primary/40 w-full">
+              <CardHeader className="flex flex-row items-center justify-between pb-2">
+                <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Interviews Run</CardTitle>
+                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-500/10 text-indigo-500">
+                  <ChatCircleText className="h-4 w-4" weight="bold" />
+                </div>
+              </CardHeader>
+              <CardContent>
+                {loadingInterviews ? (
+                  <Skeleton className="h-8 w-16" />
+                ) : (
+                  <div className="flex items-baseline justify-between">
+                    <span className="font-display text-3xl font-bold"><NumberTicker value={interviews?.length ?? 0} /></span>
+                    <Badge variant="info" size="sm">{completedInterviews.length} completed</Badge>
+                  </div>
+                )}
+                <p className="mt-1 text-xs text-muted-foreground">Real-time chat & voice sessions</p>
+              </CardContent>
+            </Card>
+          </GlareHover>
+        </Link>
       </div>
 
       {/* Main Grid: Pipeline Activity + System Health */}
@@ -308,7 +326,7 @@ export function DashboardPage() {
                           <Badge
                             className={
                               app.passed_screening
-                                ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20"
+                                ? "bg-success/10 text-success border-success/20"
                                 : "bg-destructive/10 text-destructive border-destructive/20"
                             }
                           >
@@ -357,13 +375,13 @@ export function DashboardPage() {
                 </p>
               </div>
 
-              <div className="rounded-xl border border-blue-500/20 bg-blue-500/5 p-3.5 space-y-2">
+              <div className="rounded-xl border border-info/20 bg-info/5 p-3.5 space-y-2">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <MicrophoneStage className="h-4 w-4 text-blue-500" weight="bold" />
+                    <MicrophoneStage className="h-4 w-4 text-info" weight="bold" />
                     <span className="text-sm font-semibold">Voice Interview Mode</span>
                   </div>
-                  <Badge variant="secondary" className="text-[10px] bg-blue-500/10 text-blue-600 dark:text-blue-400">WebRTC + Whisper</Badge>
+                  <Badge variant="secondary" className="text-[10px] bg-info/10 text-info">WebRTC + Whisper</Badge>
                 </div>
                 <p className="text-xs text-muted-foreground">
                   Full duplex audio stream with Speech-to-Text and Edge synthesized voice output.
@@ -385,13 +403,13 @@ export function DashboardPage() {
                   <span
                     className={cn(
                       "animate-ping absolute inline-flex h-full w-full rounded-full opacity-75",
-                      health === "healthy" ? "bg-emerald-400" : "bg-amber-400"
+                      health === "healthy" ? "bg-success" : "bg-warning"
                     )}
                   />
                   <span
                     className={cn(
                       "relative inline-flex rounded-full h-2 w-2",
-                      health === "healthy" ? "bg-emerald-500" : "bg-amber-500"
+                      health === "healthy" ? "bg-success" : "bg-warning"
                     )}
                   />
                 </span>
@@ -405,11 +423,11 @@ export function DashboardPage() {
                     Offline
                   </Badge>
                 ) : health === "degraded" ? (
-                  <Badge variant="outline" className="text-[10px] text-amber-500 border-amber-500/30">
+                  <Badge variant="outline" className="text-[10px] text-warning border-warning/30">
                     Degraded
                   </Badge>
                 ) : (
-                  <Badge variant="outline" className="text-[10px] text-emerald-500 border-emerald-500/30">
+                  <Badge variant="outline" className="text-[10px] text-success border-success/30">
                     Online
                   </Badge>
                 )}

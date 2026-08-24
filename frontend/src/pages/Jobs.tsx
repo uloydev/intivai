@@ -14,6 +14,16 @@ import type { Application, Job } from "@/types/api"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
+import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -62,6 +72,7 @@ export function JobsPage() {
   const [minExp, setMinExp] = useState("3")
   const [search, setSearch] = useState("")
   const [filterStatus, setFilterStatus] = useState<"all" | "active" | "archived">("all")
+  const [archiveTarget, setArchiveTarget] = useState<Job | null>(null)
 
   // Assessment Stage Pipeline state
   const [enableScreening, setEnableScreening] = useState(true)
@@ -99,6 +110,8 @@ export function JobsPage() {
 			qc.invalidateQueries({ queryKey: ["jobs"] })
 			toast.success("Job status updated")
 		},
+		// G7: silent failures leave recruiters believing the status changed.
+		onError: (e) => toast.error(e instanceof Error ? e.message : "Status update failed"),
 	})
 
 	const patchPublished = useMutation({
@@ -108,6 +121,8 @@ export function JobsPage() {
 			qc.invalidateQueries({ queryKey: ["jobs"] })
 			toast.success(data.is_published ? "Job published to careers page" : "Job removed from careers page")
 		},
+		// G7: silent failures leave recruiters believing the publish state changed.
+		onError: (e) => toast.error(e instanceof Error ? e.message : "Publish state update failed"),
 	})
 
   function toggleSkill(skill: string) {
@@ -167,7 +182,7 @@ export function JobsPage() {
           <Button
             variant={filterStatus === "active" ? "secondary" : "ghost"}
             size="sm"
-            className="text-xs h-8 text-emerald-600 dark:text-emerald-400"
+            className="text-xs h-8 text-success"
             onClick={() => setFilterStatus("active")}
           >
             Active ({jobs?.filter((j) => j.status === "active").length ?? 0})
@@ -235,14 +250,14 @@ export function JobsPage() {
                       <Badge
                         className={
                           job.status === "active"
-                            ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20"
+                            ? "bg-success/10 text-success border-success/20"
                             : "bg-muted text-muted-foreground"
                         }
                       >
                         {job.status}
                       </Badge>
                       {job.is_published ? (
-                        <Badge variant="outline" title="Published = visible on the careers board; Active = accepting applicants" className="text-xs bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20">
+                        <Badge variant="outline" title="Published = visible on the careers board; Active = accepting applicants" className="text-xs bg-info/10 text-info border-info/20">
                           Published
                         </Badge>
                       ) : (
@@ -258,7 +273,7 @@ export function JobsPage() {
                     <span className="inline-flex items-center gap-1 rounded-md bg-secondary/80 px-2 py-0.5 text-[11px] font-medium text-foreground">
                       <UsersThree className="h-3 w-3 text-muted-foreground" /> {applicantCount} Applied
                     </span>
-                    <span className="inline-flex items-center gap-1 rounded-md bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 text-[11px] font-semibold text-emerald-500">
+                    <span className="inline-flex items-center gap-1 rounded-md bg-success/10 border border-success/20 px-2 py-0.5 text-[11px] font-semibold text-success">
                       <CheckCircle className="h-3 w-3" weight="fill" /> {passedApps.length} Qualified
                     </span>
                   </div>
@@ -301,12 +316,7 @@ export function JobsPage() {
                       variant="outline"
                       size="sm"
                       className="h-8 text-xs text-muted-foreground"
-                      onClick={() =>
-                        patchStatus.mutate({
-                          id: job.id,
-                          status: job.status === "active" ? "archived" : "active",
-                        })
-                      }
+                      onClick={() => setArchiveTarget(job)}
                     >
                       {job.status === "active" ? "Archive" : "Activate"}
                     </Button>
@@ -320,219 +330,255 @@ export function JobsPage() {
 
       {/* New Job Modal with Assessment Stage Selection */}
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-w-xl">
-          <DialogHeader>
-            <DialogTitle className="font-display text-xl flex items-center gap-2">
-              <Sparkle className="h-5 w-5 text-primary" weight="fill" /> Create Job & Assessment Pipeline
-            </DialogTitle>
-            <DialogDescription>
-              Configure role requirements, CV screening cutoff thresholds, and AI assessment stages.
-            </DialogDescription>
-          </DialogHeader>
+        <DialogContent className="sm:max-w-2xl lg:max-w-3xl max-h-[90vh] flex flex-col p-0 overflow-hidden">
+          <div className="flex flex-col h-full max-h-[90vh]">
+            <DialogHeader className="p-6 pb-3 border-b border-border/80 bg-card/90 backdrop-blur-sm shrink-0">
+              <DialogTitle className="font-display text-xl font-bold flex items-center gap-2">
+                <Sparkle className="h-5 w-5 text-primary" weight="fill" /> Create Job & Assessment Pipeline
+              </DialogTitle>
+              <DialogDescription className="text-xs">
+                Configure role requirements, CV screening cutoff thresholds, and AI assessment stages.
+              </DialogDescription>
 
-          {/* Builder Step Tabs */}
-          <div className="flex border-b border-border my-2">
-            <button
-              type="button"
-              onClick={() => setModalTab("details")}
-              className={`flex-1 border-b-2 py-2 text-xs font-semibold transition-colors text-center ${
-                modalTab === "details"
-                  ? "border-primary text-primary"
-                  : "border-transparent text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              1. Role Competencies & Details
-            </button>
-            <button
-              type="button"
-              onClick={() => setModalTab("stages")}
-              className={`flex-1 border-b-2 py-2 text-xs font-semibold transition-colors text-center ${
-                modalTab === "stages"
-                  ? "border-primary text-primary"
-                  : "border-transparent text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              2. Assessment Stage Pipeline
-            </button>
-          </div>
-
-          {modalTab === "details" ? (
-            <div className="space-y-4 py-1">
-              <div className="space-y-1.5">
-                <Label htmlFor="job-title" className="text-xs font-semibold">Job Title</Label>
-                <Input
-                  id="job-title"
-                  value={title}
-                  onChange={(e) => setTitle(e.target.value)}
-                  placeholder="e.g. Senior Distributed Systems Engineer"
-                />
-              </div>
-
-              <div className="space-y-1.5">
-                <Label htmlFor="job-desc" className="text-xs font-semibold">Job Description & Responsibilities</Label>
-                <Textarea
-                  id="job-desc"
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                  placeholder="Key technical scope, system requirements, architecture responsibilities..."
-                  rows={3}
-                />
-              </div>
-
-              <div className="space-y-1.5">
-                <Label htmlFor="job-skills" className="text-xs font-semibold">Required Skills (Comma separated)</Label>
-                <Input
-                  id="job-skills"
-                  value={skills}
-                  onChange={(e) => setSkills(e.target.value)}
-                  placeholder="Go, React, PostgreSQL, Docker"
-                />
-                <div className="mt-2 flex flex-wrap gap-1">
-                  {POPULAR_SKILLS.map((sk) => {
-                    const active = skills.split(",").map((s) => s.trim()).includes(sk)
-                    return (
-                      <button
-                        key={sk}
-                        type="button"
-                        onClick={() => toggleSkill(sk)}
-                        className={`text-[10px] rounded-md px-2 py-0.5 font-medium transition-colors border ${
-                          active
-                            ? "bg-primary text-primary-foreground border-primary"
-                            : "bg-muted/70 hover:bg-muted text-muted-foreground border-border/50"
-                        }`}
-                      >
-                        {active ? `✓ ${sk}` : `+ ${sk}`}
-                      </button>
-                    )
-                  })}
-                </div>
-              </div>
-
-              <div className="space-y-1.5">
-                <Label htmlFor="job-exp" className="text-xs font-semibold">Minimum Years of Experience</Label>
-                <Input
-                  id="job-exp"
-                  type="number"
-                  min="0"
-                  max="25"
-                  value={minExp}
-                  onChange={(e) => setMinExp(e.target.value)}
-                />
-              </div>
-            </div>
-          ) : (
-            <div className="space-y-3.5 py-1">
-              {/* Stage 1: CV Screening */}
-              <div className="rounded-xl border border-border/80 bg-background/60 p-3.5 space-y-2">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      id="stage-screening"
-                      checked={enableScreening}
-                      onChange={(e) => setEnableScreening(e.target.checked)}
-                      className="rounded border-border text-primary focus:ring-primary h-4 w-4"
-                    />
-                    <Label htmlFor="stage-screening" className="text-xs font-bold cursor-pointer">
-                      Stage 1: Automated AI Resume Screening
-                    </Label>
-                  </div>
-                  <Badge variant="outline" className="text-[10px]">Instant OCR + Vector Match</Badge>
-                </div>
-                {enableScreening && (
-                  <div className="pl-6 pt-1 space-y-1.5 border-t border-border/40">
-                    <div className="flex items-center justify-between text-xs">
-                      <span className="text-muted-foreground">Screening Passing Threshold:</span>
-                      <span className="font-mono font-bold text-primary">{passThreshold}% Match</span>
-                    </div>
-                    <input
-                      type="range"
-                      min="50"
-                      max="90"
-                      step="5"
-                      value={passThreshold}
-                      onChange={(e) => setPassThreshold(Number(e.target.value))}
-                      className="w-full h-1.5 bg-secondary rounded-lg appearance-none cursor-pointer accent-primary"
-                    />
-                  </div>
-                )}
-              </div>
-
-              {/* The assessment pipeline is fixed for every interview — these
-                  descriptions replace the old configurable toggles, which were
-                  never persisted to the backend. */}
-              <div className="rounded-xl border border-border/80 bg-background/60 p-3.5 space-y-2">
-                <div className="flex items-center gap-2">
-                  <Badge variant="outline" className="text-[10px]">Stage 1</Badge>
-                  <span className="text-xs font-bold">AI CV Screening</span>
-                  <span className="ml-auto text-[11px] text-muted-foreground">Automatic, on submission</span>
-                </div>
-                <p className="text-[11px] text-muted-foreground">Semantic extraction + weighted match against the rubric below.</p>
-              </div>
-
-              <div className="rounded-xl border border-border/80 bg-background/60 p-3.5 space-y-2">
-                <div className="flex items-center gap-2">
-                  <Badge variant="outline" className="text-[10px]">Stage 2</Badge>
-                  <span className="text-xs font-bold">Adaptive AI Technical & Architecture Interview</span>
-                  <span className="ml-auto text-[11px] text-muted-foreground">WebSocket streaming</span>
-                </div>
-                <p className="text-[11px] text-muted-foreground">Adaptive question depth (3–8 probes) driven by answer quality.</p>
-              </div>
-
-              <div className="rounded-xl border border-border/80 bg-background/60 p-3.5 space-y-2">
-                <div className="flex items-center gap-2">
-                  <Badge variant="outline" className="text-[10px]">Stage 3</Badge>
-                  <span className="text-xs font-bold">Live Coding Sandbox Challenge</span>
-                  <span className="ml-auto text-[11px] text-muted-foreground">Go / Python / TS</span>
-                </div>
-                <p className="text-[11px] text-muted-foreground">Candidate writes code and runs automated test suites in the isolated sandbox.</p>
-              </div>
-
-              <div className="rounded-xl border border-dashed border-border/80 bg-background/40 p-3.5 space-y-2">
-                <div className="flex items-center gap-2">
-                  <Badge variant="outline" className="text-[10px]">Stage 4</Badge>
-                  <span className="text-xs font-bold text-muted-foreground">AI Voice Phone Screen</span>
-                  <Badge variant="secondary" className="text-[10px]">Coming soon</Badge>
-                </div>
-                <p className="text-[11px] text-muted-foreground">Full-duplex voice interviews are in pilot and not yet available on jobs.</p>
-              </div>
-            </div>
-          )}
-
-          <DialogFooter className="flex items-center justify-between sm:justify-between pt-2">
-            {modalTab === "details" ? (
-              <>
-                <Button variant="secondary" onClick={() => setOpen(false)}>
-                  Cancel
-                </Button>
-                <Button
-                  variant="outline"
+              {/* Builder Step Tabs */}
+              <div className="flex border-b border-border mt-3">
+                <button
+                  type="button"
+                  onClick={() => setModalTab("details")}
+                  className={`flex-1 border-b-2 py-2 text-xs font-semibold transition-colors text-center ${
+                    modalTab === "details"
+                      ? "border-primary text-primary"
+                      : "border-transparent text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  1. Role Competencies & Details
+                </button>
+                <button
+                  type="button"
                   onClick={() => setModalTab("stages")}
-                  disabled={!title.trim() || !minExpValid}
-                  className="gap-1 text-xs font-bold"
+                  className={`flex-1 border-b-2 py-2 text-xs font-semibold transition-colors text-center ${
+                    modalTab === "stages"
+                      ? "border-primary text-primary"
+                      : "border-transparent text-muted-foreground hover:text-foreground"
+                  }`}
                 >
-                  Next: Configure Stages →
-                </Button>
-              </>
-            ) : (
-              <>
-                <Button variant="secondary" onClick={() => setModalTab("details")}>
-                  ← Back to Details
-                </Button>
-                <Button
-                  variant="gradient"
-                  onClick={() => create.mutate()}
-                  disabled={!title.trim() || !minExpValid || create.isPending}
-                  className="gap-1 text-xs font-bold shadow-md shadow-primary/20"
-                >
-                  <Sparkle className="h-4 w-4" weight="fill" />
-                  {create.isPending ? "Publishing Role..." : "Publish Job & Pipeline"}
-                </Button>
-              </>
-            )}
-          </DialogFooter>
+                  2. Assessment Stage Pipeline
+                </button>
+              </div>
+            </DialogHeader>
+
+            <div className="overflow-y-auto p-6 space-y-4 flex-1">
+              {modalTab === "details" ? (
+                <div className="space-y-4">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="job-title" className="text-xs font-semibold">Job Title</Label>
+                    <Input
+                      id="job-title"
+                      value={title}
+                      onChange={(e) => setTitle(e.target.value)}
+                      placeholder="e.g. Senior Distributed Systems Engineer"
+                      className="bg-background/80"
+                    />
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <Label htmlFor="job-desc" className="text-xs font-semibold">Job Description & Responsibilities</Label>
+                    <Textarea
+                      id="job-desc"
+                      value={description}
+                      onChange={(e) => setDescription(e.target.value)}
+                      placeholder="Key technical scope, system requirements, architecture responsibilities..."
+                      rows={4}
+                      className="bg-background/80"
+                    />
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <Label htmlFor="job-skills" className="text-xs font-semibold">Required Skills (Comma separated)</Label>
+                    <Input
+                      id="job-skills"
+                      value={skills}
+                      onChange={(e) => setSkills(e.target.value)}
+                      placeholder="Go, React, PostgreSQL, Docker"
+                      className="bg-background/80"
+                    />
+                    <div className="mt-2 flex flex-wrap gap-1">
+                      {POPULAR_SKILLS.map((sk) => {
+                        const active = skills.split(",").map((s) => s.trim()).includes(sk)
+                        return (
+                          <button
+                            key={sk}
+                            type="button"
+                            onClick={() => toggleSkill(sk)}
+                            className={`text-[10px] rounded-md px-2 py-0.5 font-medium transition-colors border ${
+                              active
+                                ? "bg-primary text-primary-foreground border-primary"
+                                : "bg-muted/70 hover:bg-muted text-muted-foreground border-border/50"
+                            }`}
+                          >
+                            {active ? `✓ ${sk}` : `+ ${sk}`}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <Label htmlFor="job-exp" className="text-xs font-semibold">Minimum Years of Experience</Label>
+                    <Input
+                      id="job-exp"
+                      type="number"
+                      min="0"
+                      max="25"
+                      value={minExp}
+                      onChange={(e) => setMinExp(e.target.value)}
+                      className="bg-background/80"
+                    />
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-3.5">
+                  {/* Stage 1: CV Screening */}
+                  <div className="rounded-xl border border-border/80 bg-background/60 p-4 space-y-2.5">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          id="stage-screening"
+                          checked={enableScreening}
+                          onChange={(e) => setEnableScreening(e.target.checked)}
+                          className="rounded border-border text-primary focus:ring-primary h-4 w-4"
+                        />
+                        <Label htmlFor="stage-screening" className="text-xs font-bold cursor-pointer">
+                          Stage 1: Automated AI Resume Screening
+                        </Label>
+                      </div>
+                      <Badge variant="outline" className="text-[10px]">Instant OCR + Vector Match</Badge>
+                    </div>
+                    {enableScreening && (
+                      <div className="pl-6 pt-2 space-y-2 border-t border-border/40">
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="text-muted-foreground">Screening Passing Threshold:</span>
+                          <span className="font-mono font-bold text-primary">{passThreshold}% Match</span>
+                        </div>
+                        <input
+                          type="range"
+                          min="50"
+                          max="90"
+                          step="5"
+                          value={passThreshold}
+                          onChange={(e) => setPassThreshold(Number(e.target.value))}
+                          className="w-full h-1.5 bg-secondary rounded-lg appearance-none cursor-pointer accent-primary"
+                        />
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Stage 1 info */}
+                  <div className="rounded-xl border border-border/80 bg-background/60 p-4 space-y-1.5">
+                    <div className="flex items-center gap-2">
+                      <Badge variant="outline" className="text-[10px]">Stage 1</Badge>
+                      <span className="text-xs font-bold">AI CV Screening</span>
+                      <span className="ml-auto text-[11px] text-muted-foreground">Automatic, on submission</span>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground">Semantic extraction + weighted match against the rubric.</p>
+                  </div>
+
+                  <div className="rounded-xl border border-border/80 bg-background/60 p-4 space-y-1.5">
+                    <div className="flex items-center gap-2">
+                      <Badge variant="outline" className="text-[10px]">Stage 2</Badge>
+                      <span className="text-xs font-bold">Adaptive AI Technical & Architecture Interview</span>
+                      <span className="ml-auto text-[11px] text-muted-foreground">WebSocket streaming</span>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground">Adaptive question depth (3–8 probes) driven by answer quality.</p>
+                  </div>
+
+                  <div className="rounded-xl border border-border/80 bg-background/60 p-4 space-y-1.5">
+                    <div className="flex items-center gap-2">
+                      <Badge variant="outline" className="text-[10px]">Stage 3</Badge>
+                      <span className="text-xs font-bold">Live Coding Sandbox Challenge</span>
+                      <span className="ml-auto text-[11px] text-muted-foreground">Go / Python / TS</span>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground">Candidate writes code and runs automated test suites in the isolated sandbox.</p>
+                  </div>
+
+                  <div className="rounded-xl border border-dashed border-border/80 bg-background/40 p-4 space-y-1.5">
+                    <div className="flex items-center gap-2">
+                      <Badge variant="outline" className="text-[10px]">Stage 4</Badge>
+                      <span className="text-xs font-bold text-muted-foreground">AI Voice Phone Screen</span>
+                      <Badge variant="secondary" className="text-[10px]">Coming soon</Badge>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground">Full-duplex voice interviews are in pilot and not yet available on jobs.</p>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <DialogFooter className="p-4 px-6 border-t border-border/80 bg-card/90 backdrop-blur-sm shrink-0 flex items-center justify-between sm:justify-between">
+              {modalTab === "details" ? (
+                <>
+                  <Button variant="secondary" onClick={() => setOpen(false)}>
+                    Cancel
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => setModalTab("stages")}
+                    disabled={!title.trim() || !minExpValid}
+                    className="gap-1 text-xs font-bold"
+                  >
+                    Next: Configure Stages →
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <Button variant="secondary" onClick={() => setModalTab("details")}>
+                    ← Back to Details
+                  </Button>
+                  <Button
+                    variant="gradient"
+                    onClick={() => create.mutate()}
+                    disabled={!title.trim() || !minExpValid || create.isPending}
+                    className="gap-1 text-xs font-bold shadow-md shadow-primary/20"
+                  >
+                    <Sparkle className="h-4 w-4" weight="fill" />
+                    {create.isPending ? "Publishing Role..." : "Publish Job & Pipeline"}
+                  </Button>
+                </>
+              )}
+            </DialogFooter>
+          </div>
         </DialogContent>
       </Dialog>
+
+      {/* Archive Confirmation AlertDialog */}
+      <AlertDialog open={archiveTarget !== null} onOpenChange={(o) => !o && setArchiveTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{archiveTarget?.status === "active" ? "Archive" : "Activate"} Job</AlertDialogTitle>
+            <AlertDialogDescription>
+              {archiveTarget?.status === "active"
+                ? `Archive "${archiveTarget?.title}"? It will no longer appear on the careers board.`
+                : `Activate "${archiveTarget?.title}"? It will appear on the careers board again.`}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (archiveTarget) {
+                  patchStatus.mutate({
+                    id: archiveTarget.id,
+                    status: archiveTarget.status === "active" ? "archived" : "active",
+                  })
+                  setArchiveTarget(null)
+                }
+              }}
+            >
+              {archiveTarget?.status === "active" ? "Archive" : "Activate"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

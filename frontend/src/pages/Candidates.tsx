@@ -1,5 +1,5 @@
-import { useState, useEffect, useMemo } from "react"
-import { useQuery } from "@tanstack/react-query"
+import { useState, useEffect, useMemo, useRef, useDeferredValue } from "react"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useParams, useSearchParams } from "react-router-dom"
 import {
   UsersThree,
@@ -11,8 +11,10 @@ import {
   CaretUp,
   CaretDown,
   CaretUpDown,
+  PaperPlaneTilt,
 } from "@phosphor-icons/react"
 import { api } from "@/lib/api"
+import { summarizeBulkResults } from "@/lib/bulk-results"
 import { stageMeta } from "@/lib/stages"
 import type { Application, CandidateLifecycleStage, Job } from "@/types/api"
 import { Candidate360Drawer } from "@/components/candidates/Candidate360Drawer"
@@ -43,6 +45,14 @@ const PAGE_SIZE = 50
 type SortKey = "score" | "date"
 type SortDir = "asc" | "desc"
 
+const BULK_STAGE_OPTIONS: Array<{ stage: CandidateLifecycleStage; label: string }> = [
+  { stage: "screening_passed", label: "Mark as Screening Passed" },
+  { stage: "interview_invited", label: "Move to Interview Invited" },
+  { stage: "offer_extended", label: "Extend Offer" },
+  { stage: "hired", label: "Mark as Hired" },
+  { stage: "rejected", label: "Reject Candidates" },
+]
+
 function scorePill(app: Application) {
   if (app.cv_score == null) {
     // cv_score is null until the pipeline produces one — the pill must say
@@ -50,7 +60,7 @@ function scorePill(app: Application) {
     switch (app.cv_status) {
       case "pending_review":
         return (
-          <Badge variant="secondary" className="bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20 text-xs">
+          <Badge variant="secondary" className="bg-warning/10 text-warning border-warning/20 text-xs">
             Pending review
           </Badge>
         )
@@ -65,7 +75,7 @@ function scorePill(app: Application) {
       case "parsing":
       case "extracting":
         return (
-          <Badge variant="secondary" className="bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20 text-xs">
+          <Badge variant="secondary" className="bg-warning/10 text-warning border-warning/20 text-xs">
             Scoring…
           </Badge>
         )
@@ -79,7 +89,7 @@ function scorePill(app: Application) {
   }
   if (app.passed_screening) {
     return (
-      <Badge className="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20 font-bold text-xs gap-1">
+      <Badge className="bg-success/10 text-success border-success/20 font-bold text-xs gap-1">
         <CheckCircle className="h-3 w-3" weight="fill" /> {app.cv_score}% Match
       </Badge>
     )
@@ -103,9 +113,17 @@ function stagePill(app: Application) {
   )
 }
 
+// Module scope (G11): a component definition inside a render body remounts
+// on every render and recreates closures for no benefit.
+function SortIcon({ active, dir }: { active: boolean; dir: SortDir }) {
+  if (!active) return <CaretUpDown className="h-3.5 w-3.5 opacity-50" />
+  return dir === "asc" ? <CaretUp className="h-3.5 w-3.5" /> : <CaretDown className="h-3.5 w-3.5" />
+}
+
 export function CandidatesPage() {
   const { id: routeId } = useParams<{ id: string }>()
   const [searchParams, setSearchParams] = useSearchParams()
+  const qc = useQueryClient()
   // Filter state IS the URL — derive directly, no sync effects.
   const selectedJob = searchParams.get("job_id") ?? "all"
   const statusFilter = searchParams.get("stage") ?? "all"
@@ -124,11 +142,18 @@ export function CandidatesPage() {
   })
 
   const [search, setSearch] = useState("")
+  const deferredSearch = useDeferredValue(search)
   const [selectedApp, setSelectedApp] = useState<Application | null>(null)
+  const [selectedAppIds, setSelectedAppIds] = useState<Set<string>>(new Set())
+  const [bulkProcessing, setBulkProcessing] = useState(false)
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [page, setPage] = useState(1)
   const [sortKey, setSortKey] = useState<SortKey>("score")
   const [sortDir, setSortDir] = useState<SortDir>("desc")
+
+  // G11: deep-linked missing candidate — toast once per param, not on every
+  // background poll tick.
+  const missingCandidateToastedRef = useRef<string | null>(null)
 
   // Open drawer if candidate_id or routeId is provided
   useEffect(() => {
@@ -140,9 +165,11 @@ export function CandidatesPage() {
           a.candidate_email === candidateParam
       )
       if (match) {
+        missingCandidateToastedRef.current = null
         setSelectedApp(match)
         setDrawerOpen(true)
-      } else {
+      } else if (missingCandidateToastedRef.current !== candidateParam) {
+        missingCandidateToastedRef.current = candidateParam
         toast.info("Candidate application profile not found or pending screening.")
       }
     }
@@ -173,11 +200,107 @@ export function CandidatesPage() {
     }
   }
 
+  // G11: structural param type — both MouseEvent and ChangeEvent satisfy it,
+  // so no `as unknown as` casts are needed at call sites.
+  const toggleSelect = (id: string, e?: { stopPropagation(): void }) => {
+    e?.stopPropagation()
+    setSelectedAppIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  const toggleSelectAll = () => {
+    if (pageApps.every((a) => selectedAppIds.has(a.id))) {
+      setSelectedAppIds((prev) => {
+        const next = new Set(prev)
+        pageApps.forEach((a) => next.delete(a.id))
+        return next
+      })
+    } else {
+      setSelectedAppIds((prev) => {
+        const next = new Set(prev)
+        pageApps.forEach((a) => next.add(a.id))
+        return next
+      })
+    }
+  }
+
+  // G8: Promise.allSettled masks per-item failures — report succeeded/failed
+  // counts and grouped reasons honestly instead of a blanket success toast.
+  const handleBulkStageChange = async (targetStage: CandidateLifecycleStage) => {
+    if (selectedAppIds.size === 0) return
+    setBulkProcessing(true)
+    try {
+      const ids = Array.from(selectedAppIds)
+      const results = await Promise.allSettled(
+        ids.map((id) => api.patch(`/applications/${id}`, { stage: targetStage }))
+      )
+      const summary = summarizeBulkResults(results)
+      qc.invalidateQueries({ queryKey: ["applications"] })
+      const stageLabel = stageMeta(targetStage).label
+      if (summary.succeeded === 0) {
+        toast.error(`No candidates were moved to ${stageLabel}. Failures: ${summary.reasons.join("; ")}.`)
+      } else if (summary.failed > 0) {
+        toast.warning(
+          `Updated ${summary.succeeded} candidate${summary.succeeded > 1 ? "s" : ""} to ${stageLabel}; ${summary.failed} failed (${summary.reasons.join("; ")}).`
+        )
+        setSelectedAppIds(new Set())
+      } else {
+        toast.success(`Updated ${summary.succeeded} candidate${summary.succeeded > 1 ? "s" : ""} to ${stageLabel}.`)
+        setSelectedAppIds(new Set())
+      }
+    } finally {
+      setBulkProcessing(false)
+    }
+  }
+
+  const handleBulkInvite = async () => {
+    if (selectedAppIds.size === 0) return
+    setBulkProcessing(true)
+    try {
+      const eligibleApps = (apps ?? []).filter(
+        (a) => selectedAppIds.has(a.id) && !a.interview_id
+      )
+      if (eligibleApps.length === 0) {
+        toast.info("All selected candidates already have interview invitations.")
+        setBulkProcessing(false)
+        return
+      }
+      const results = await Promise.allSettled(
+        eligibleApps.map((a) =>
+          api.post("/interviews", {
+            application_id: a.id,
+            question_count: 3,
+          })
+        )
+      )
+      const summary = summarizeBulkResults(results)
+      qc.invalidateQueries({ queryKey: ["applications"] })
+      qc.invalidateQueries({ queryKey: ["interviews"] })
+      if (summary.succeeded === 0) {
+        toast.error(`No interview invitations were generated. Failures: ${summary.reasons.join("; ")}.`)
+      } else if (summary.failed > 0) {
+        toast.warning(
+          `Generated interview sessions for ${summary.succeeded} candidate${summary.succeeded > 1 ? "s" : ""}; ${summary.failed} failed (${summary.reasons.join("; ")}).`
+        )
+        setSelectedAppIds(new Set())
+      } else {
+        toast.success(`Generated interview sessions for ${summary.succeeded} candidate${summary.succeeded > 1 ? "s" : ""}.`)
+        setSelectedAppIds(new Set())
+      }
+    } finally {
+      setBulkProcessing(false)
+    }
+  }
+
   const filteredApps = (apps ?? []).filter((app) => {
     const name = (app.candidate_name || "").toLowerCase()
     const email = (app.candidate_email || "").toLowerCase()
     const title = (app.job_title || "").toLowerCase()
-    const q = (search || "").toLowerCase()
+    const q = (deferredSearch || "").toLowerCase()
     const matchesSearch = name.includes(q) || email.includes(q) || title.includes(q)
     const matchesJob = selectedJob === "all" || app.job_id === selectedJob
     
@@ -216,7 +339,7 @@ export function CandidatesPage() {
   // Reset pagination whenever the filter/sort window changes.
   useEffect(() => {
     setPage(1)
-  }, [search, selectedJob, statusFilter])
+  }, [deferredSearch, selectedJob, statusFilter])
 
   const pageCount = Math.max(1, Math.ceil(sortedApps.length / PAGE_SIZE))
   const safePage = Math.min(page, pageCount)
@@ -229,11 +352,6 @@ export function CandidatesPage() {
       setSortKey(key)
       setSortDir(key === "score" ? "desc" : "desc")
     }
-  }
-
-  const SortIcon = ({ active }: { active: boolean }) => {
-    if (!active) return <CaretUpDown className="h-3.5 w-3.5 opacity-50" />
-    return sortDir === "asc" ? <CaretUp className="h-3.5 w-3.5" /> : <CaretDown className="h-3.5 w-3.5" />
   }
 
   const sortableHead = (label: string, key: SortKey, className?: string) => (
@@ -252,7 +370,7 @@ export function CandidatesPage() {
         )}
       >
         {label}
-        <SortIcon active={sortKey === key} />
+        <SortIcon active={sortKey === key} dir={sortDir} />
       </button>
     </TableHead>
   )
@@ -308,7 +426,7 @@ export function CandidatesPage() {
           <Button
             variant={statusFilter === "screening_passed" || statusFilter === "passed" ? "secondary" : "ghost"}
             size="sm"
-            className="text-xs h-8 text-emerald-600 dark:text-emerald-400"
+            className="text-xs h-8 text-success"
             onClick={() => handleStageChange("screening_passed")}
           >
             Passed ({apps?.filter((a) => a.passed_screening).length ?? 0})
@@ -316,7 +434,7 @@ export function CandidatesPage() {
           <Button
             variant={statusFilter === "interview_completed" ? "secondary" : "ghost"}
             size="sm"
-            className="text-xs h-8 text-blue-600 dark:text-blue-400"
+            className="text-xs h-8 text-info"
             onClick={() => handleStageChange("interview_completed")}
           >
             Evaluated ({apps?.filter((a) => a.interview_score != null).length ?? 0})
@@ -348,25 +466,39 @@ export function CandidatesPage() {
           </p>
         </div>
       ) : (
-        <div className="rounded-xl border border-border/60 bg-card shadow-sm overflow-hidden">
-          <Table>
-            <TableHeader>
-              <TableRow className="bg-muted/40">
-                <TableHead>Candidate Profile</TableHead>
-                <TableHead>Target Role</TableHead>
-                {sortableHead("CV Match", "score")}
-                {sortableHead("Applied", "date")}
-                <TableHead>Talent Lifecycle Stage</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
-              </TableRow>
-            </TableHeader>
+        <>
+          {/* Desktop Table */}
+          <div className="hidden md:block rounded-xl border border-border/60 bg-card shadow-sm overflow-hidden">
+            <Table>
+              <TableHeader>
+                <TableRow className="bg-muted/40">
+                  <TableHead className="w-12 text-center">
+                    <input
+                      type="checkbox"
+                      aria-label="Select all candidates"
+                      checked={pageApps.length > 0 && pageApps.every((a) => selectedAppIds.has(a.id))}
+                      onChange={toggleSelectAll}
+                      className="h-4 w-4 rounded border-border accent-primary cursor-pointer align-middle"
+                    />
+                  </TableHead>
+                  <TableHead>Candidate Profile</TableHead>
+                  <TableHead>Target Role</TableHead>
+                  {sortableHead("CV Match", "score")}
+                  {sortableHead("Applied", "date")}
+                  <TableHead>Talent Lifecycle Stage</TableHead>
+                  <TableHead className="text-right">Actions</TableHead>
+                </TableRow>
+              </TableHeader>
             <TableBody>
               {pageApps.map((app) => (
                 <TableRow
                   key={app.id}
                   tabIndex={0}
                   role="button"
-                  className="cursor-pointer transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+                  className={cn(
+                    "cursor-pointer transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60",
+                    selectedAppIds.has(app.id) && "bg-primary/5 hover:bg-primary/10"
+                  )}
                   onClick={() => {
                     setSelectedApp(app)
                     setDrawerOpen(true)
@@ -379,6 +511,15 @@ export function CandidatesPage() {
                     }
                   }}
                 >
+                  <TableCell className="w-12 text-center" onClick={(e) => e.stopPropagation()}>
+                    <input
+                      type="checkbox"
+                      aria-label={`Select ${app.candidate_name || "candidate"}`}
+                      checked={selectedAppIds.has(app.id)}
+                      onChange={(e) => toggleSelect(app.id, e)}
+                      className="h-4 w-4 rounded border-border accent-primary cursor-pointer align-middle"
+                    />
+                  </TableCell>
                   <TableCell>
                     <div className="flex items-center gap-3">
                       <div className="flex h-9 w-9 items-center justify-center rounded-full bg-primary/10 text-primary font-bold text-xs">
@@ -452,6 +593,96 @@ export function CandidatesPage() {
               </Button>
             </div>
           </div>
+          </div>
+
+          {/* Mobile Card Layout */}
+          <div className="md:hidden space-y-3">
+            {pageApps.map((app) => (
+              <div
+                key={app.id}
+                className="p-4 bg-card border border-border/60 rounded-xl shadow-sm cursor-pointer hover:border-primary/40 transition-colors"
+                onClick={() => { setSelectedApp(app); setDrawerOpen(true) }}
+              >
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-9 w-9 items-center justify-center rounded-full bg-primary/10 text-primary font-bold text-xs">
+                      {app.candidate_name ? app.candidate_name.charAt(0).toUpperCase() : "C"}
+                    </div>
+                    <div>
+                      <p className="font-display font-semibold text-sm">{app.candidate_name || "Candidate"}</p>
+                      <p className="text-xs text-muted-foreground">{app.candidate_email || "No email"}</p>
+                    </div>
+                  </div>
+                  <input
+                    type="checkbox"
+                    aria-label={`Select ${app.candidate_name || "candidate"}`}
+                    checked={selectedAppIds.has(app.id)}
+                    onChange={(e) => toggleSelect(app.id, e)}
+                    className="h-4 w-4 rounded border-border accent-primary cursor-pointer"
+                  />
+                </div>
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-muted-foreground">{app.job_title || "—"}</span>
+                  {app.cv_score !== null && app.cv_score !== undefined && (
+                    <Badge variant={app.cv_score >= 70 ? "success" : "secondary"} size="sm">{Math.round(app.cv_score)}%</Badge>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+
+      {/* Floating Bulk Actions Bar */}
+      {selectedAppIds.size > 0 && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 bg-card/95 border border-primary/40 rounded-2xl shadow-2xl backdrop-blur-xl p-3 sm:px-6 flex flex-wrap items-center gap-3 sm:gap-4 animate-in slide-in-from-bottom-5">
+          <div className="flex items-center gap-2">
+            <span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary text-primary-foreground font-bold text-xs">
+              {selectedAppIds.size}
+            </span>
+            <span className="text-xs font-semibold text-foreground">
+              Candidate{selectedAppIds.size > 1 ? "s" : ""} Selected
+            </span>
+          </div>
+
+          <div className="h-4 w-px bg-border/80 hidden sm:block" />
+
+          {/* Bulk Stage Selector */}
+          <Select onValueChange={(val) => handleBulkStageChange(val as CandidateLifecycleStage)} disabled={bulkProcessing}>
+            <SelectTrigger className="h-8 text-xs bg-background/80 w-44">
+              <SelectValue placeholder="Advance Stage…" />
+            </SelectTrigger>
+            <SelectContent>
+              {BULK_STAGE_OPTIONS.map((opt) => (
+                <SelectItem key={opt.stage} value={opt.stage}>
+                  {opt.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          {/* Bulk Invite Button */}
+          <Button
+            size="sm"
+            variant="default"
+            disabled={bulkProcessing}
+            onClick={handleBulkInvite}
+            className="h-8 text-xs gap-1.5 shadow-sm"
+          >
+            <PaperPlaneTilt className="h-3.5 w-3.5" />
+            <span>Generate Invites</span>
+          </Button>
+
+          {/* Clear Selection */}
+          <Button
+            size="sm"
+            variant="ghost"
+            disabled={bulkProcessing}
+            onClick={() => setSelectedAppIds(new Set())}
+            className="h-8 text-xs text-muted-foreground hover:text-foreground"
+          >
+            Clear
+          </Button>
         </div>
       )}
 

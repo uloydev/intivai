@@ -37,6 +37,42 @@ import {
 } from "@/components/ui/dialog"
 import { toast } from "sonner"
 
+const CURRENCY_SYMBOLS: Record<string, string> = {
+  USD: "$",
+  EUR: "€",
+  GBP: "£",
+  JPY: "¥",
+  CNY: "¥",
+  KRW: "₩",
+  INR: "₹",
+  CAD: "C$",
+  AUD: "A$",
+  CHF: "Fr",
+  SGD: "S$",
+  AED: "د.إ",
+  BRL: "R$",
+}
+
+function currencySymbol(cur?: string): string {
+  return CURRENCY_SYMBOLS[(cur || "USD").toUpperCase()] ?? `${(cur || "USD").toUpperCase()} `
+}
+
+function formatSalary(min?: number | null, max?: number | null, cur?: string) {
+  if (!min && !max) return null
+  const sym = currencySymbol(cur)
+  const c = cur || "USD"
+  if (min && max) return `${sym}${(min / 1000).toFixed(0)}k – ${sym}${(max / 1000).toFixed(0)}k ${c}`
+  if (min) return `From ${sym}${(min / 1000).toFixed(0)}k ${c}`
+  if (max) return `Up to ${sym}${(max / 1000).toFixed(0)}k ${c}`
+  return null
+}
+
+function isSupportedResume(f: File): boolean {
+  const mime = ["application/pdf", "application/msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"]
+  if (mime.includes(f.type)) return true
+  const ext = f.name.split(".").pop()?.toLowerCase()
+  return ext === "pdf" || ext === "docx"
+}
 
 export function CareersPage() {
   const navigate = useNavigate()
@@ -153,43 +189,6 @@ export function CareersPage() {
   const selectedSalary = selectedJob
     ? formatSalary(selectedJob.salary_min, selectedJob.salary_max, selectedJob.currency)
     : null
-
-  const CURRENCY_SYMBOLS: Record<string, string> = {
-    USD: "$",
-    EUR: "€",
-    GBP: "£",
-    JPY: "¥",
-    CNY: "¥",
-    KRW: "₩",
-    INR: "₹",
-    CAD: "C$",
-    AUD: "A$",
-    CHF: "Fr",
-    SGD: "S$",
-    AED: "د.إ",
-    BRL: "R$",
-  }
-
-  function currencySymbol(cur?: string): string {
-    return CURRENCY_SYMBOLS[(cur || "USD").toUpperCase()] ?? `${(cur || "USD").toUpperCase()} `
-  }
-
-  function formatSalary(min?: number | null, max?: number | null, cur?: string) {
-    if (!min && !max) return null
-    const sym = currencySymbol(cur)
-    const c = cur || "USD"
-    if (min && max) return `${sym}${(min / 1000).toFixed(0)}k – ${sym}${(max / 1000).toFixed(0)}k ${c}`
-    if (min) return `From ${sym}${(min / 1000).toFixed(0)}k ${c}`
-    if (max) return `Up to ${sym}${(max / 1000).toFixed(0)}k ${c}`
-    return null
-  }
-
-  function isSupportedResume(f: File): boolean {
-    const mime = ["application/pdf", "application/msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"]
-    if (mime.includes(f.type)) return true
-    const ext = f.name.split(".").pop()?.toLowerCase()
-    return ext === "pdf" || ext === "docx"
-  }
 
   return (
     <div className="space-y-12 py-10 px-6 max-w-6xl mx-auto animate-in fade-in duration-500">
@@ -313,7 +312,7 @@ export function CareersPage() {
                       </h2>
                     </div>
 
-                    <Badge className="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20 text-[10px] shrink-0">
+                    <Badge className="bg-success/10 text-success border-success/20 text-[10px] shrink-0">
                       Actively Hiring
                     </Badge>
                   </div>
@@ -370,12 +369,12 @@ export function CareersPage() {
 
       {/* Rich Job Details Modal */}
       <Dialog open={detailModalOpen} onOpenChange={setDetailModalOpen}>
-        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
+        <DialogContent className="sm:max-w-3xl lg:max-w-4xl max-h-[90vh] flex flex-col p-0 overflow-hidden">
           {selectedJob && (
-            <div className="space-y-6 py-2">
-              <DialogHeader>
+            <div className="flex flex-col h-full max-h-[90vh]">
+              <DialogHeader className="p-6 pb-4 border-b border-border/80 bg-card/90 backdrop-blur-sm shrink-0">
                 <div className="flex items-center gap-2 mb-2 flex-wrap">
-                  <Badge variant="outline" className="text-primary border-primary/30 bg-primary/5 text-xs">
+                  <Badge variant="outline" className="text-primary border-primary/30 bg-primary/5 text-xs font-semibold">
                     {selectedJob.org_name || "Company Role"}
                   </Badge>
                   <span className="text-xs text-muted-foreground flex items-center gap-1">
@@ -385,99 +384,149 @@ export function CareersPage() {
                     <Clock className="h-3.5 w-3.5" /> {selectedJob.employment_type || "Full-time"}
                   </span>
                 </div>
-                <DialogTitle className="font-display text-2xl font-bold">
-                  {selectedJob.title}
-                </DialogTitle>
-                {selectedSalary && (
-                  <div className="pt-2">
-                    <span className="px-3 py-1 rounded-xl bg-emerald-950/40 border border-emerald-800/50 text-emerald-300 font-bold text-xs">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                  <DialogTitle className="font-display text-2xl font-bold tracking-tight text-foreground">
+                    {selectedJob.title}
+                  </DialogTitle>
+                  {selectedSalary && (
+                    <span className="inline-flex items-center px-3 py-1 rounded-xl bg-emerald-950/40 border border-emerald-800/50 text-emerald-300 font-bold text-xs shrink-0 self-start sm:self-auto">
                       💰 {selectedSalary}
                     </span>
-                  </div>
-                )}
+                  )}
+                </div>
               </DialogHeader>
 
-              {/* Role Overview */}
-              <div className="space-y-2">
-                <h4 className="text-xs font-bold uppercase tracking-wider text-primary">Role Overview</h4>
-                <p className="text-xs text-muted-foreground leading-relaxed whitespace-pre-line">
-                  {selectedJob.description}
-                </p>
-              </div>
+              {/* Responsive 2-Column Content Body */}
+              <div className="overflow-y-auto p-6 space-y-6 flex-1">
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                  {/* Left Column: Core Scope, Responsibilities & Qualifications */}
+                  <div className="lg:col-span-7 space-y-6">
+                    {/* Role Overview */}
+                    <div className="space-y-2">
+                      <h4 className="text-xs font-bold uppercase tracking-wider text-primary">Role Overview</h4>
+                      <p className="text-xs text-muted-foreground leading-relaxed whitespace-pre-line">
+                        {selectedJob.description}
+                      </p>
+                    </div>
 
-              {/* Key Responsibilities */}
-              {selectedJob.responsibilities && selectedJob.responsibilities.length > 0 && (
-                <div className="space-y-2">
-                  <h4 className="text-xs font-bold uppercase tracking-wider text-primary flex items-center gap-1.5">
-                    <Check className="h-3.5 w-3.5" /> Key Responsibilities
-                  </h4>
-                  <ul className="space-y-1.5">
-                    {selectedJob.responsibilities.map((resp, idx) => (
-                      <li key={idx} className="text-xs text-muted-foreground flex items-start gap-2">
-                        <span className="text-primary font-bold mt-0.5">•</span>
-                        <span>{resp}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-
-              {/* Requirements & Qualifications */}
-              {selectedJob.requirements && selectedJob.requirements.length > 0 && (
-                <div className="space-y-2">
-                  <h4 className="text-xs font-bold uppercase tracking-wider text-primary flex items-center gap-1.5">
-                    <Star className="h-3.5 w-3.5" /> Required Qualifications
-                  </h4>
-                  <ul className="space-y-1.5">
-                    {selectedJob.requirements.map((req, idx) => (
-                      <li key={idx} className="text-xs text-muted-foreground flex items-start gap-2">
-                        <span className="text-primary font-bold mt-0.5">•</span>
-                        <span>{req}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-
-              {/* Nice to Haves */}
-              {selectedJob.nice_to_haves && selectedJob.nice_to_haves.length > 0 && (
-                <div className="space-y-2">
-                  <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
-                    Nice to Haves & Bonus Experience
-                  </h4>
-                  <ul className="space-y-1.5">
-                    {selectedJob.nice_to_haves.map((nice, idx) => (
-                      <li key={idx} className="text-xs text-muted-foreground flex items-start gap-2">
-                        <span className="text-muted-foreground font-bold mt-0.5">◦</span>
-                        <span>{nice}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-
-              {/* Benefits & Perks */}
-              {selectedJob.benefits && selectedJob.benefits.length > 0 && (
-                <div className="space-y-2 p-4 rounded-xl bg-card border border-border/80">
-                  <h4 className="text-xs font-bold uppercase tracking-wider text-emerald-400 flex items-center gap-1.5">
-                    <Gift className="h-3.5 w-3.5" /> Benefits & Compensation
-                  </h4>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
-                    {selectedJob.benefits.map((ben, idx) => (
-                      <div key={idx} className="text-xs text-muted-foreground flex items-center gap-2">
-                        <span className="text-emerald-400 font-bold">✓</span>
-                        <span>{ben}</span>
+                    {/* Key Responsibilities */}
+                    {selectedJob.responsibilities && selectedJob.responsibilities.length > 0 && (
+                      <div className="space-y-2.5">
+                        <h4 className="text-xs font-bold uppercase tracking-wider text-primary flex items-center gap-1.5">
+                          <Check className="h-3.5 w-3.5" /> Key Responsibilities
+                        </h4>
+                        <ul className="space-y-2">
+                          {selectedJob.responsibilities.map((resp, idx) => (
+                            <li key={idx} className="text-xs text-muted-foreground flex items-start gap-2">
+                              <span className="text-primary font-bold mt-0.5">•</span>
+                              <span className="leading-relaxed">{resp}</span>
+                            </li>
+                          ))}
+                        </ul>
                       </div>
-                    ))}
+                    )}
+
+                    {/* Requirements & Qualifications */}
+                    {selectedJob.requirements && selectedJob.requirements.length > 0 && (
+                      <div className="space-y-2.5">
+                        <h4 className="text-xs font-bold uppercase tracking-wider text-primary flex items-center gap-1.5">
+                          <Star className="h-3.5 w-3.5" /> Required Qualifications
+                        </h4>
+                        <ul className="space-y-2">
+                          {selectedJob.requirements.map((req, idx) => (
+                            <li key={idx} className="text-xs text-muted-foreground flex items-start gap-2">
+                              <span className="text-primary font-bold mt-0.5">•</span>
+                              <span className="leading-relaxed">{req}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+
+                    {/* Nice to Haves */}
+                    {selectedJob.nice_to_haves && selectedJob.nice_to_haves.length > 0 && (
+                      <div className="space-y-2">
+                        <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                          Nice to Haves & Bonus Experience
+                        </h4>
+                        <ul className="space-y-1.5">
+                          {selectedJob.nice_to_haves.map((nice, idx) => (
+                            <li key={idx} className="text-xs text-muted-foreground flex items-start gap-2">
+                              <span className="text-muted-foreground font-bold mt-0.5">◦</span>
+                              <span className="leading-relaxed">{nice}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Right Column: Key Facts, Benefits & Assessment Rails */}
+                  <div className="lg:col-span-5 space-y-4">
+                    {/* Role Facts Card */}
+                    <div className="rounded-xl border border-border/80 bg-background/60 p-4 space-y-3">
+                      <h4 className="text-xs font-bold uppercase tracking-wider text-foreground">Position Details</h4>
+                      <div className="space-y-2 text-xs">
+                        <div className="flex justify-between items-center py-1 border-b border-border/40">
+                          <span className="text-muted-foreground">Location</span>
+                          <span className="font-semibold text-foreground">{selectedJob.location || "Remote"}</span>
+                        </div>
+                        <div className="flex justify-between items-center py-1 border-b border-border/40">
+                          <span className="text-muted-foreground">Employment</span>
+                          <span className="font-semibold text-foreground">{selectedJob.employment_type || "Full-time"}</span>
+                        </div>
+                        <div className="flex justify-between items-center py-1 border-b border-border/40">
+                          <span className="text-muted-foreground">Experience</span>
+                          <span className="font-semibold text-foreground">{selectedJob.min_experience}+ years</span>
+                        </div>
+                        <div className="flex justify-between items-center py-1">
+                          <span className="text-muted-foreground">Proctoring Mode</span>
+                          <Badge variant="outline" className="text-[10px] capitalize">
+                            {selectedJob.proctoring_mode || "Optional"}
+                          </Badge>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Required Skills Badges */}
+                    {selectedJob.required_skills && selectedJob.required_skills.length > 0 && (
+                      <div className="rounded-xl border border-border/80 bg-background/60 p-4 space-y-2.5">
+                        <h4 className="text-xs font-bold uppercase tracking-wider text-foreground">Required Tech Stack</h4>
+                        <div className="flex flex-wrap gap-1.5">
+                          {selectedJob.required_skills.map((skill) => (
+                            <Badge key={skill} variant="secondary" className="text-xs bg-muted text-foreground">
+                              {skill}
+                            </Badge>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Benefits & Perks */}
+                    {selectedJob.benefits && selectedJob.benefits.length > 0 && (
+                      <div className="rounded-xl border border-emerald-900/40 bg-emerald-950/20 p-4 space-y-2.5">
+                        <h4 className="text-xs font-bold uppercase tracking-wider text-emerald-400 flex items-center gap-1.5">
+                          <Gift className="h-3.5 w-3.5" /> Benefits & Perks
+                        </h4>
+                        <div className="space-y-2">
+                          {selectedJob.benefits.map((ben, idx) => (
+                            <div key={idx} className="text-xs text-muted-foreground flex items-start gap-2">
+                              <span className="text-emerald-400 font-bold mt-0.5">✓</span>
+                              <span className="leading-relaxed">{ben}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
-              )}
+              </div>
 
-              <DialogFooter className="pt-4 border-t border-border">
+              <DialogFooter className="p-4 px-6 border-t border-border/80 bg-card/90 backdrop-blur-sm shrink-0 flex items-center justify-between sm:justify-between">
                 <Button variant="secondary" onClick={() => setDetailModalOpen(false)}>
                   Close
                 </Button>
-                <Button variant="gradient" onClick={() => handleApplyClick(selectedJob)}>
+                <Button variant="gradient" onClick={() => handleApplyClick(selectedJob)} className="shadow-md shadow-primary/20">
                   Apply for this Role <ArrowRight className="ml-1.5 h-3.5 w-3.5" />
                 </Button>
               </DialogFooter>
@@ -488,19 +537,19 @@ export function CareersPage() {
 
       {/* Application Modal */}
       <Dialog open={applyModalOpen} onOpenChange={setApplyModalOpen}>
-        <DialogContent className="max-w-lg">
+        <DialogContent className="sm:max-w-lg md:max-w-xl max-h-[90vh] flex flex-col p-0 overflow-hidden">
           {!submitted ? (
-            <>
-              <DialogHeader>
+            <div className="flex flex-col h-full max-h-[90vh]">
+              <DialogHeader className="p-6 pb-4 border-b border-border/80 bg-card/90 backdrop-blur-sm shrink-0">
                 <div className="flex items-center gap-2 mb-1">
-                  <Badge variant="outline" className="text-primary border-primary/30 bg-primary/5 text-[10px]">
+                  <Badge variant="outline" className="text-primary border-primary/30 bg-primary/5 text-[10px] font-semibold">
                     Direct Application
                   </Badge>
                   {selectedJob?.org_name && (
                     <span className="text-xs text-muted-foreground">• {selectedJob.org_name}</span>
                   )}
                 </div>
-                <DialogTitle className="font-display text-xl">
+                <DialogTitle className="font-display text-xl font-bold tracking-tight">
                   Apply for {selectedJob?.title}
                 </DialogTitle>
                 <DialogDescription className="text-xs">
@@ -508,7 +557,7 @@ export function CareersPage() {
                 </DialogDescription>
               </DialogHeader>
 
-              <div className="space-y-4 py-2">
+              <div className="overflow-y-auto p-6 space-y-4 flex-1">
                 <div className="space-y-1.5">
                   <Label htmlFor="app-name" className="text-xs font-semibold">Full Name</Label>
                   <Input
@@ -561,7 +610,7 @@ export function CareersPage() {
                 </div>
               </div>
 
-              <DialogFooter>
+              <DialogFooter className="p-4 px-6 border-t border-border/80 bg-card/90 backdrop-blur-sm shrink-0 flex items-center justify-between sm:justify-between">
                 <Button variant="secondary" onClick={() => setApplyModalOpen(false)}>
                   Cancel
                 </Button>
@@ -572,15 +621,16 @@ export function CareersPage() {
                     applyMutation.mutate()
                   }}
                   disabled={!name.trim() || !email.trim() || !file || !!fileError || submitting}
+                  className="shadow-md shadow-primary/20"
                 >
                   <CloudArrowUp className="mr-1.5 h-4 w-4" weight="bold" />
                   {submitting ? "Analyzing & Submitting…" : "Submit Application"}
                 </Button>
               </DialogFooter>
-            </>
+            </div>
           ) : (
-            <div className="py-6 text-center space-y-4">
-              <div className="flex h-16 w-16 mx-auto items-center justify-center rounded-2xl bg-emerald-500/10 text-emerald-500">
+            <div className="p-8 text-center space-y-4">
+              <div className="flex h-16 w-16 mx-auto items-center justify-center rounded-2xl bg-success/10 text-success">
                 <CheckCircle className="h-10 w-10" weight="fill" />
               </div>
               <div>

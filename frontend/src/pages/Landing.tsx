@@ -16,6 +16,7 @@ import {
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
+import { BlurFade } from "@/components/ui/blur-fade"
 import { DemoSimulator } from "@/components/landing/DemoSimulator"
 import { RoiCalculator } from "@/components/landing/RoiCalculator"
 
@@ -38,7 +39,7 @@ export function LandingPage() {
   }, [location])
 
   return (
-    <div className="space-y-24 pb-20 animate-in fade-in duration-700">
+    <div className="space-y-16 md:space-y-24 pb-20 animate-in fade-in duration-700">
       {/* 1. HERO SECTION */}
       <section className="relative pt-12 md:pt-20 px-6 text-center max-w-5xl mx-auto space-y-8">
         <div className="inline-flex items-center gap-2 rounded-full border border-primary/30 bg-primary/10 px-4 py-1.5 text-xs font-semibold text-primary shadow-sm backdrop-blur-md">
@@ -82,11 +83,11 @@ export function LandingPage() {
             <p className="text-xs text-muted-foreground">Deterministic Safety Rails</p>
           </div>
           <div className="space-y-1">
-            <p className="font-display text-3xl font-extrabold text-emerald-500">&lt; 3.0s</p>
+            <p className="font-display text-3xl font-extrabold text-success">&lt; 3.0s</p>
             <p className="text-xs text-muted-foreground">Voice Latency with STT/TTS</p>
           </div>
           <div className="space-y-1">
-            <p className="font-display text-3xl font-extrabold text-blue-500">384-Dim</p>
+            <p className="font-display text-3xl font-extrabold text-info">384-Dim</p>
             <p className="text-xs text-muted-foreground">Vector Semantic Matching</p>
           </div>
         </div>
@@ -96,7 +97,8 @@ export function LandingPage() {
       <DemoSimulator />
 
       {/* 3. HOW IT WORKS LIFECYCLE */}
-      <section id="how-it-works" className="scroll-mt-24 px-6 max-w-6xl mx-auto space-y-12">
+      <BlurFade delay={0.1} inView>
+        <section id="how-it-works" className="scroll-mt-24 px-6 max-w-6xl mx-auto space-y-12">
         <div className="text-center space-y-3">
           <Badge variant="outline" className="text-primary border-primary/30 bg-primary/5 text-xs">
             End-to-End Workflow
@@ -121,7 +123,7 @@ export function LandingPage() {
           </Card>
 
           <Card className="glass border-border/60 p-5 space-y-3 relative overflow-hidden">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-500/10 text-blue-500 font-display font-bold text-sm">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-info/10 text-info font-display font-bold text-sm">
               02
             </div>
             <h3 className="font-display font-bold text-base">Semantic CV Matching</h3>
@@ -141,7 +143,7 @@ export function LandingPage() {
           </Card>
 
           <Card className="glass border-border/60 p-5 space-y-3 relative overflow-hidden">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-500 font-display font-bold text-sm">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-success/10 text-success font-display font-bold text-sm">
               04
             </div>
             <h3 className="font-display font-bold text-base">Scorecards & ATS Sync</h3>
@@ -151,6 +153,7 @@ export function LandingPage() {
           </Card>
         </div>
       </section>
+      </BlurFade>
 
       {/* 4. ENTERPRISE PROCTORING & ANTI-CHEATING SHOWCASE */}
       <section id="proctoring" className="scroll-mt-24 px-6 max-w-6xl mx-auto space-y-12">
@@ -178,7 +181,7 @@ export function LandingPage() {
           </Card>
 
           <Card className="glass border-border/60 p-6 space-y-4 hover:border-primary/40 transition-all shadow-sm">
-            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-500/10 text-amber-500">
+            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-warning/10 text-warning">
               <Lightning className="h-6 w-6" weight="bold" />
             </div>
             <h3 className="font-display font-bold text-lg">Clipboard Paste Telemetry</h3>
@@ -188,7 +191,7 @@ export function LandingPage() {
           </Card>
 
           <Card className="glass border-border/60 p-6 space-y-4 hover:border-primary/40 transition-all shadow-sm">
-            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-500/10 text-emerald-500">
+            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-success/10 text-success">
               <MicrophoneStage className="h-6 w-6" weight="bold" />
             </div>
             <h3 className="font-display font-bold text-lg">Voice Stream Audio Anomaly</h3>
@@ -200,7 +203,8 @@ export function LandingPage() {
       </section>
 
       {/* 5. CORE PLATFORM PILLARS */}
-      <section id="features" className="scroll-mt-24 px-6 max-w-6xl mx-auto space-y-12">
+      <BlurFade delay={0.2} inView>
+        <section id="features" className="scroll-mt-24 px-6 max-w-6xl mx-auto space-y-12">
         <div className="text-center space-y-3">
           <Badge variant="outline" className="text-primary border-primary/30 bg-primary/5 text-xs">
             Complete Architecture
@@ -215,7 +219,7 @@ export function LandingPage() {
 
         <div className="grid gap-6 md:grid-cols-3">
           <Card className="glass border-border/60 hover:border-primary/40 transition-all hover:shadow-xl hover:shadow-primary/5 p-6 space-y-4">
-            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-500/10 text-blue-500">
+            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-info/10 text-info">
               <Cpu className="h-6 w-6" weight="bold" />
             </div>
             <h3 className="font-display font-bold text-lg">Semantic CV Vector Screening</h3>
@@ -235,7 +239,7 @@ export function LandingPage() {
           </Card>
 
           <Card className="glass border-border/60 hover:border-primary/40 transition-all hover:shadow-xl hover:shadow-primary/5 p-6 space-y-4">
-            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-500/10 text-emerald-500">
+            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-success/10 text-success">
               <FilePdf className="h-6 w-6" weight="bold" />
             </div>
             <h3 className="font-display font-bold text-lg">Executive PDF Scorecards</h3>
@@ -270,7 +274,7 @@ export function LandingPage() {
           </div>
 
           <div className="rounded-2xl border border-border/60 bg-card p-5 space-y-2">
-            <Scales className="h-6 w-6 text-emerald-500" weight="bold" />
+            <Scales className="h-6 w-6 text-success" weight="bold" />
             <h4 className="font-display font-bold text-sm">GDPR & AI Bias Mitigation</h4>
             <p className="text-xs text-muted-foreground leading-relaxed">
               Mandatory candidate consent gates before interview execution. Questions are stripped of demographic bias and anchored purely on technical rubrics.
@@ -278,7 +282,7 @@ export function LandingPage() {
           </div>
 
           <div className="rounded-2xl border border-border/60 bg-card p-5 space-y-2">
-            <ShieldCheck className="h-6 w-6 text-blue-500" weight="bold" />
+            <ShieldCheck className="h-6 w-6 text-info" weight="bold" />
             <h4 className="font-display font-bold text-sm">Automated Mailer & ATS Webhooks</h4>
             <p className="text-xs text-muted-foreground leading-relaxed">
               Direct SMTP notifications via Mailpit with invitation magic links and structured JSON payloads ready for ATS pipeline synchronization.
@@ -286,9 +290,11 @@ export function LandingPage() {
           </div>
         </div>
       </section>
+      </BlurFade>
 
       {/* 8. FREQUENTLY ASKED QUESTIONS (FAQ) */}
-      <section id="faq" className="scroll-mt-24 px-6 max-w-3xl mx-auto space-y-6">
+      <BlurFade delay={0.3} inView>
+        <section id="faq" className="scroll-mt-24 px-6 max-w-3xl mx-auto space-y-6">
         <div className="text-center space-y-2">
           <h2 className="font-display text-2xl sm:text-3xl font-bold">Frequently Asked Questions</h2>
           <p className="text-xs sm:text-sm text-muted-foreground">
@@ -319,6 +325,15 @@ export function LandingPage() {
               key={idx}
               className="rounded-2xl border border-border/60 bg-card p-4 transition-all cursor-pointer"
               onClick={() => setOpenFaq(openFaq === idx ? null : idx)}
+              role="button"
+              tabIndex={0}
+              aria-expanded={openFaq === idx}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault()
+                  setOpenFaq(openFaq === idx ? null : idx)
+                }
+              }}
             >
               <div className="flex items-center justify-between gap-2">
                 <h4 className="font-display font-bold text-xs sm:text-sm text-foreground">{item.q}</h4>
@@ -329,15 +344,16 @@ export function LandingPage() {
                   weight="bold"
                 />
               </div>
-              {openFaq === idx && (
+              <div className={`overflow-hidden transition-all duration-300 ease-in-out ${openFaq === idx ? "max-h-40 opacity-100" : "max-h-0 opacity-0"}`}>
                 <p className="text-xs text-muted-foreground pt-2.5 leading-relaxed border-t border-border/40 mt-2.5">
                   {item.a}
                 </p>
-              )}
+              </div>
             </div>
           ))}
         </div>
       </section>
+      </BlurFade>
 
       {/* 9. CALL TO ACTION BANNER */}
       <section className="px-6 max-w-5xl mx-auto">

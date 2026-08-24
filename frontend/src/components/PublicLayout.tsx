@@ -14,10 +14,10 @@ import {
   Question,
 } from "@phosphor-icons/react"
 import type { Icon } from "@phosphor-icons/react"
-import { useTheme } from "@/lib/theme"
+import { useTheme } from "@/lib/theme-context"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
-import { getToken } from "@/lib/auth"
+import { getSession } from "@/lib/auth"
 
 interface PublicNavItem {
   to: string
@@ -53,7 +53,9 @@ export function PublicLayout() {
   const { theme, toggle } = useTheme()
   const location = useLocation()
   const navigate = useNavigate()
-  const authenticated = !!getToken()
+  // G11: expiry-aware check — a stored-but-expired token must not flip the
+  // header CTA to "Workspace" (getSession also purges the dead token).
+  const authenticated = getSession() !== null
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const [announcement, setAnnouncement] = useState("")
   const mobileToggleRef = useRef<HTMLButtonElement>(null)
@@ -181,11 +183,13 @@ export function PublicLayout() {
           <Button
             variant="ghost"
             size="icon"
-            className="rounded-full h-8 w-8 text-muted-foreground hover:text-foreground"
+            className="rounded-full h-8 w-8 text-muted-foreground hover:text-foreground transition-transform duration-300"
             aria-label="Toggle dark mode"
             onClick={toggle}
           >
-            {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+            <span className={cn("transition-transform duration-300 inline-block", theme === "dark" && "rotate-180")}>
+              {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+            </span>
           </Button>
 
           {authenticated ? (
@@ -283,7 +287,9 @@ export function PublicLayout() {
               </p>
               <div className="flex items-center gap-2 text-xs text-muted-foreground pt-1">
                 <ShieldCheck className="h-4 w-4 text-emerald-500" />
-                <span>SOC 2 Type II & GDPR Compliant</span>
+                {/* Compliance wording reflects reality: no SOC 2 certification
+                    exists yet — only defensible posture claims are made. */}
+                <span>Privacy-first platform with GDPR-ready data handling</span>
               </div>
             </div>
 
@@ -386,13 +392,13 @@ export function PublicLayout() {
           <div className="mt-12 flex flex-col items-center justify-between gap-4 border-t border-border/40 pt-6 sm:flex-row text-xs text-muted-foreground">
             <p>© {new Date().getFullYear()} Intivai Inc. All rights reserved.</p>
             <div className="flex items-center gap-6">
-              <Link to="/#security" onClick={(e) => handleSectionClick("security", e)} className="hover:text-primary">
+              <Link to="/privacy" className="hover:text-primary">
                 Privacy Policy
               </Link>
-              <Link to="/#security" onClick={(e) => handleSectionClick("security", e)} className="hover:text-primary">
+              <Link to="/terms" className="hover:text-primary">
                 Terms of Service
               </Link>
-              <Link to="/#security" onClick={(e) => handleSectionClick("security", e)} className="hover:text-primary">
+              <Link to="/security" className="hover:text-primary">
                 Security
               </Link>
             </div>

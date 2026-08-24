@@ -13,6 +13,16 @@ import {
   Trash,
 } from "@phosphor-icons/react"
 import { api } from "@/lib/api"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { getSession } from "@/lib/auth"
 import type { CompanyContextItem, TenantPromptResult } from "@/types/api"
 import { Badge } from "@/components/ui/badge"
@@ -50,6 +60,9 @@ export function CompanyContextPage() {
   const [promptText, setPromptText] = useState("")
   const [contextText, setContextText] = useState("")
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
+  const [pendingTab, setPendingTab] = useState<"prompt" | "knowledge" | null>(null)
+  const [pendingPresetIdx, setPendingPresetIdx] = useState<number | null>(null)
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null)
   const promptTouchedRef = useRef(false)
   const dirtyRef = useRef(false)
 
@@ -67,7 +80,7 @@ export function CompanyContextPage() {
 
   const switchTab = (tab: "prompt" | "knowledge") => {
     if (tab === activeTab) return
-    if (dirtyRef.current && !window.confirm("You have unsaved changes. Discard them and switch tabs?")) return
+    if (dirtyRef.current) { setPendingTab(tab); return }
     setActiveTab(tab)
   }
 
@@ -273,14 +286,7 @@ export function CompanyContextPage() {
                     type="button"
                     key={idx}
                     onClick={() => {
-                      if (
-                        promptTouchedRef.current &&
-                        !window.confirm(
-                          `Replace the current prompt with the "${preset.name}" template? Unsaved edits will be lost.`
-                        )
-                      ) {
-                        return
-                      }
+                      if (promptTouchedRef.current) { setPendingPresetIdx(idx); return }
                       setPromptText(preset.prompt)
                       dirtyRef.current = true
                       toast.info(`Loaded "${preset.name}" preset template`)
@@ -411,15 +417,7 @@ export function CompanyContextPage() {
                           className="text-muted-foreground hover:text-destructive hover:bg-destructive/10"
                           aria-label={`Delete company context version ${ctx.version}`}
                           title="Delete context"
-                          onClick={() => {
-                            if (
-                              window.confirm(
-                                `Delete company context version ${ctx.version}? This permanently removes it from the memory bank.`
-                              )
-                            ) {
-                              deleteContext.mutate(ctx.id)
-                            }
-                          }}
+                          onClick={() => setPendingDeleteId(ctx.id)}
                           disabled={deleteContext.isPending}
                         >
                           <Trash className="h-4 w-4" />
@@ -433,6 +431,57 @@ export function CompanyContextPage() {
           </Card>
         </div>
       )}
+
+      {/* Tab switch confirm */}
+      <AlertDialog open={pendingTab !== null} onOpenChange={(o) => !o && setPendingTab(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Discard unsaved changes?</AlertDialogTitle>
+            <AlertDialogDescription>You have unsaved changes. Discard them and switch tabs?</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setPendingTab(null)}>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={() => { if (pendingTab) { setActiveTab(pendingTab); setPendingTab(null) } }}>Discard &amp; Switch</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Preset template confirm */}
+      <AlertDialog open={pendingPresetIdx !== null} onOpenChange={(o) => !o && setPendingPresetIdx(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Replace current prompt?</AlertDialogTitle>
+            <AlertDialogDescription>This will replace your current prompt with the template. Unsaved edits will be lost.</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setPendingPresetIdx(null)}>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={() => {
+              if (pendingPresetIdx !== null) {
+                setPromptText(PROMPT_PRESETS[pendingPresetIdx].prompt)
+                dirtyRef.current = true
+                toast.info(`Loaded "${PROMPT_PRESETS[pendingPresetIdx].name}" preset template`)
+                setPendingPresetIdx(null)
+              }
+            }}>Replace</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Delete context confirm */}
+      <AlertDialog open={pendingDeleteId !== null} onOpenChange={(o) => !o && setPendingDeleteId(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete context version?</AlertDialogTitle>
+            <AlertDialogDescription>This permanently removes this context version from the memory bank.</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setPendingDeleteId(null)}>Cancel</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" onClick={() => {
+              if (pendingDeleteId) { deleteContext.mutate(pendingDeleteId); setPendingDeleteId(null) }
+            }}>Delete</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

@@ -47,12 +47,13 @@ export function CandidateReviewPage() {
 
   const confirmMutation = useMutation({
     mutationFn: async () => {
+      let parsed: ResumeData
       try {
-        const parsed = JSON.parse(editedData)
-        return await api.post(`/public/candidate-review/${token}/confirm`, parsed)
-      } catch (e) {
+        parsed = JSON.parse(editedData) as ResumeData
+      } catch {
         throw new Error("Invalid JSON format in the editor")
       }
+      return api.post(`/public/candidate-review/${token}/confirm`, parsed)
     },
     onSuccess: () => {
       toast.success("Profile confirmed and submitted for screening!")
