@@ -40,10 +40,12 @@ servers:
 
 paths:
   # ── Health ──────────────────────────────────────────────────────────────
+  # Single definition (deduplicated 2026-08-24, ledger H5 — the same three
+  # paths were redefined near the end of this file and removed).
   /health:
     get:
       tags: [Health]
-      summary: Liveness probe
+      summary: Liveness probe (always 200 when the process is up)
       security: []
       responses:
         "200":
@@ -68,6 +70,10 @@ paths:
           description: All dependencies healthy
         "503":
           description: One or more dependencies unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
 
   # ── Auth ────────────────────────────────────────────────────────────────
   /api/v1/auth/register:
@@ -299,7 +305,14 @@ paths:
                     format: binary
       responses:
         "201":
-          description: Bulk upload result
+          description: >
+            Bulk upload result. Always 201 when the request parses: each
+            submitted file gets an explicit outcome row, so an all-failed
+            batch still returns the batch id with per-file failure reasons.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BulkUploadResult"
         "400":
           $ref: "#/components/responses/BadRequest"
 
@@ -786,9 +799,30 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
 
-  # NOTE: /api/v1/interviews/{id}/voice (WebRTC gated demo) is intentionally NOT
-  # mounted in main.go while voice stays demo-deferred — see ADR-0006. Re-add the
-  # path block when the route ships.
+  # /api/v1/interviews/{id}/voice — WebRTC gated demo, MOUNTED and
+  # auth-guarded (ADR-0006 as amended by ADR-0008). Demo pipeline mocks
+  # STT/LLM; excluded from beta commitments. Spec entry added 2026-08-24
+  # (ledger H1) so the spec matches main.go registration.
+  /api/v1/interviews/{id}/voice:
+    get:
+      tags: [Interviews]
+      summary: Voice interview WebSocket (gated demo — STT/LLM mocked)
+      description: >
+        WebRTC signaling socket for the demo voice interview. Requires a valid
+        auth token; demo-only scope per ADR-0006/0008.
+      parameters:
+        - $ref: "#/components/parameters/InterviewID"
+        - name: ticket
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Access credential for the voice socket (see ADR-0008 follow-up — must be a ws_ticket, never an auth JWT)
+      responses:
+        "101":
+          description: WebSocket upgrade
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 
   # ── Webhooks ───────────────────────────────────────────────────────────
   /api/v1/webhooks:
@@ -1002,6 +1036,12 @@ paths:
                 $ref: "#/components/schemas/PublicApplyResponse"
         "400":
           $ref: "#/components/responses/BadRequest"
+        "429":
+          description: Rate limited (per-IP bucket or per-email daily application cap)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
 
   /api/v1/public/candidate/auth/otp:
     post:
@@ -1174,35 +1214,8 @@ paths:
                   message:
                     type: string
 
-  /health:
-    get:
-      tags: [Health]
-      summary: Liveness probe (always 200 when the process is up)
-      security: []
-      responses:
-        "200": { description: OK }
-
-  /live:
-    get:
-      tags: [Health]
-      summary: Liveness probe
-      security: []
-      responses:
-        "200": { description: OK }
-
-  /ready:
-    get:
-      tags: [Health]
-      summary: Readiness probe (checks Postgres, Redis, MinIO)
-      security: []
-      responses:
-        "200": { description: All dependencies reachable }
-        "503":
-          description: A dependency is unreachable
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+  # (/health, /live, /ready defined once at the top of `paths:` — deduplicated
+  # 2026-08-24, ledger H5.)
 
   /metrics:
     get:
@@ -1272,6 +1285,33 @@ components:
     Language:
       type: string
       enum: [go, python, typescript, javascript]
+
+    BulkUploadOutcome:
+      type: object
+      properties:
+        filename:
+          type: string
+        ok:
+          type: boolean
+        reason:
+          type: string
+          description: Machine-readable skip reason (invalid_candidate_name, storage_failed, persist_failed, enqueue_failed). Omitted when ok.
+          enum: [invalid_candidate_name, storage_failed, persist_failed, enqueue_failed]
+
+    BulkUploadResult:
+      type: object
+      properties:
+        batch_id:
+          type: string
+          format: uuid
+        uploaded:
+          type: integer
+        failed:
+          type: integer
+        outcomes:
+          type: array
+          items:
+            $ref: "#/components/schemas/BulkUploadOutcome"
 
     LoginResponse:
       type: object
@@ -1705,6 +1745,9 @@ components:
 
     PublicApplyResponse:
       type: object
+      description: >
+        Application confirmation. The candidate portal magic link is
+        delivered by email only — never returned in this response.
       properties:
         candidate_id:
           type: string
@@ -1716,9 +1759,6 @@ components:
           type: string
         message:
           type: string
-        portal_token:
-          type: string
-          description: One-time magic token for candidate portal access
 
     CandidateAuthResponse:
       type: object
