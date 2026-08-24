@@ -26,6 +26,9 @@ type InterviewRepository interface {
 	// RecordCodingSession appends a coding snapshot without rewriting the
 	// transcript (same lost-update concern as Touch).
 	RecordCodingSession(ctx context.Context, id uuid.UUID, session CodingSession) error
+	// SetHumanRequested marks the interview as having a candidate-requested
+	// human interviewer (idempotent).
+	SetHumanRequested(ctx context.Context, id uuid.UUID, requested bool) error
 	// ListByOrg lists the org's interviews (RLS-scoped via the applications
 	// join), newest first.
 	ListByOrg(ctx context.Context, orgID uuid.UUID) ([]*Interview, error)

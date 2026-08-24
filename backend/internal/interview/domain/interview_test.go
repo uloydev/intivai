@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -269,5 +270,101 @@ func TestSetClockAndMaxDurationExpiry(t *testing.T) {
 	}
 	if rem := iv.SessionRemaining(); rem != 0 {
 		t.Fatalf("expected 0s remaining after expiry, got %d", rem)
+	}
+}
+
+func TestProcessTopicDialogue_MultiTurnClarificationAndAdvance(t *testing.T) {
+	base := time.Date(2026, 8, 10, 10, 0, 0, 0, time.UTC)
+	iv := mustInterview(t, base) // Has Q1 and Q2
+	_ = iv.Start()
+
+	// --- Question 1 Turn 1: Candidate asks a clarifying question ---
+	next, isComplete, turn, maxTurns, err := iv.ProcessTopicDialogue("Can you clarify if we are designing for single-region or multi-region?", "reply", nil)
+	if err != nil {
+		t.Fatalf("turn 1 failed: %v", err)
+	}
+	if isComplete {
+		t.Fatal("turn 1 reply should not mark topic as complete")
+	}
+	if turn != 1 || maxTurns != 3 {
+		t.Fatalf("turn = %d, maxTurns = %d, want 1, 3", turn, maxTurns)
+	}
+	if next == nil || next.Content != "Q1" {
+		t.Fatalf("next = %+v, want Q1", next)
+	}
+	if iv.LastQuestionIdx != 0 {
+		t.Fatalf("LastQuestionIdx = %d, want 0 (still on Q1)", iv.LastQuestionIdx)
+	}
+
+	// --- Question 1 Turn 2: Candidate provides an architectural design approach ---
+	next, isComplete, turn, maxTurns, err = iv.ProcessTopicDialogue("I will design with Redis cluster and Postgres sharding", "reply", nil)
+	if err != nil {
+		t.Fatalf("turn 2 failed: %v", err)
+	}
+	if isComplete {
+		t.Fatal("turn 2 reply should not mark topic as complete")
+	}
+	if turn != 2 || maxTurns != 3 {
+		t.Fatalf("turn = %d, maxTurns = %d, want 2, 3", turn, maxTurns)
+	}
+	if next == nil || next.Content != "Q1" {
+		t.Fatalf("next = %+v, want Q1", next)
+	}
+
+	// --- Question 1 Turn 3: Final turn on Q1 (hits turn cap MaxTurnsPerTopic=3) ---
+	next, isComplete, turn, _, err = iv.ProcessTopicDialogue("We handle split-brain using Raft consensus quorum", "reply", nil)
+	if err != nil {
+		t.Fatalf("turn 3 failed: %v", err)
+	}
+	if !isComplete {
+		t.Fatal("turn 3 hitting turn cap should mark topic complete")
+	}
+	if turn != 3 {
+		t.Fatalf("turn = %d, want 3", turn)
+	}
+	if next == nil || next.Content != "Q2" {
+		t.Fatalf("next = %+v, want Q2 (advanced to next topic)", next)
+	}
+	if iv.LastQuestionIdx != 1 {
+		t.Fatalf("LastQuestionIdx = %d, want 1", iv.LastQuestionIdx)
+	}
+
+	// --- Question 2 Turn 1: Candidate gives answer and explicitly clicks "Advance" ---
+	next, isComplete, turn, _, err = iv.ProcessTopicDialogue("I align with cross-functional partners via RFCs", "advance", nil)
+	if err != nil {
+		t.Fatalf("Q2 advance failed: %v", err)
+	}
+	if !isComplete {
+		t.Fatal("explicit advance action should mark topic complete")
+	}
+	if turn != 1 {
+		t.Fatalf("turn = %d, want 1", turn)
+	}
+	if next != nil {
+		t.Fatalf("next = %+v, want nil (all questions answered)", next)
+	}
+	_ = iv.Complete()
+	if iv.Status != StatusCompleted {
+		t.Fatalf("status = %s, want completed", iv.Status)
+	}
+
+	// --- Verify TranscriptPairs formatting ---
+	pairs := iv.TranscriptPairs()
+	if len(pairs) != 2 {
+		t.Fatalf("len(pairs) = %d, want 2", len(pairs))
+	}
+	// Q1 transcript should include all 3 turns with markers
+	if pairs[0].Idx != 1 || pairs[0].Category != "technical" {
+		t.Fatalf("pairs[0] = %+v", pairs[0])
+	}
+	if !strings.Contains(pairs[0].Answer, "[Candidate Turn 1 (reply)]") ||
+		!strings.Contains(pairs[0].Answer, "[Candidate Turn 2 (reply)]") ||
+		!strings.Contains(pairs[0].Answer, "[Candidate Turn 3 (reply)]") {
+		t.Fatalf("pairs[0].Answer missing multi-turn markers: %s", pairs[0].Answer)
+	}
+
+	// Q2 transcript single turn
+	if pairs[1].Idx != 2 || pairs[1].Answer != "I align with cross-functional partners via RFCs" {
+		t.Fatalf("pairs[1] = %+v", pairs[1])
 	}
 }

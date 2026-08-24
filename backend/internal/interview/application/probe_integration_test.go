@@ -16,6 +16,7 @@ import (
 	scrrepo "github.com/intivai/backend/internal/screening/infrastructure/persistence"
 	"github.com/intivai/backend/pkg/db"
 	"github.com/intivai/backend/pkg/storage"
+	"github.com/rs/zerolog"
 )
 
 // Shallow answer → deterministic probe follow-up on the same topic; detailed
@@ -61,7 +62,7 @@ func TestProbeFollowUpOnShallowAnswer(t *testing.T) {
 	svc := NewInterviewService(pool,
 		ivrepo.NewPostgresInterviewRepo(pool), ivrepo.NewPostgresTokenRepo(pool), ivrepo.NewPostgresQuestionBank(pool),
 		scrrepo.NewPostgresApplicationRepo(pool), cvrepo.NewPostgresCandidateRepo(pool), jobrepo.NewPostgresJobRepo(pool),
-		ctxrepo.NewPostgresContextRepo(pool), minio, auth.NewJWTProvider("test-secret"), ivdomain.SystemClock(), nil)
+		ctxrepo.NewPostgresContextRepo(pool), minio, auth.NewJWTProvider("test-secret"), ivdomain.SystemClock(), nil, zerolog.Nop())
 	actor := iamActor(orgID, "admin")
 
 	res, err := svc.CreateInterview(ctx, actor, CreateInterviewCommand{ApplicationID: appID, QuestionCount: 2})

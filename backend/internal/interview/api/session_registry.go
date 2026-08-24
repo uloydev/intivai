@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 
@@ -121,8 +122,11 @@ func (r *RedisSessionRegistry) TryAcquire(ctx context.Context, key, sessionID st
 	if err != nil {
 		return false, err
 	}
-	ok, _ := res.(int64)
-	return ok == 1, nil
+	value, ok := res.(int64)
+	if !ok {
+		return false, fmt.Errorf("session acquire returned unexpected Redis result %T", res)
+	}
+	return value == 1, nil
 }
 
 // Touch extends the TTL when sessionID still holds the key.

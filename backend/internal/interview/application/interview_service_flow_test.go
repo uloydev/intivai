@@ -18,6 +18,7 @@ import (
 	scrrepo "github.com/intivai/backend/internal/screening/infrastructure/persistence"
 	"github.com/intivai/backend/pkg/db"
 	"github.com/intivai/backend/pkg/storage"
+	"github.com/rs/zerolog"
 	"gorm.io/gorm"
 )
 
@@ -78,7 +79,7 @@ func seedInterviewApp(t *testing.T, jobStatus string) *seededInterview {
 	svc := NewInterviewService(pool,
 		ivrepo.NewPostgresInterviewRepo(pool), ivrepo.NewPostgresTokenRepo(pool), ivrepo.NewPostgresQuestionBank(pool),
 		scrrepo.NewPostgresApplicationRepo(pool), cvrepo.NewPostgresCandidateRepo(pool), jobrepo.NewPostgresJobRepo(pool),
-		ctxrepo.NewPostgresContextRepo(pool), minio, auth.NewJWTProvider("test-secret"), ivdomain.SystemClock(), nil)
+		ctxrepo.NewPostgresContextRepo(pool), minio, auth.NewJWTProvider("test-secret"), ivdomain.SystemClock(), nil, zerolog.Nop())
 	return &seededInterview{pool: pool, svc: svc, orgID: orgID, appID: appID}
 }
 

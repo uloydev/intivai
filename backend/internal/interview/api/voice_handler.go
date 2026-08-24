@@ -51,7 +51,7 @@ func (h *ChatHandler) RequireVoiceAuth(c *fiber.Ctx) error {
 	}
 	switch claims.Type {
 	case iamapp.TokenTypeWSTicket:
-		if claims.Extra["interview_id"] != c.Params("id") {
+		if claims.Extra.InterviewID != c.Params("id") {
 			return httpapi.Error(c, sharederr.NewDomainError("UNAUTHORIZED", "ticket not bound to this interview"))
 		}
 	case iamapp.TokenTypeAuth:
@@ -84,7 +84,7 @@ func (h *ChatHandler) handleVoiceSession(c *fiberws.Conn) {
 		return
 	}
 
-	sessionID, _ := claims.Extra["session_id"].(string)
+	sessionID := claims.Extra.SessionID
 	if sessionID == "" {
 		sessionID = uuid.NewString() // fallback for recruiter tokens
 	}

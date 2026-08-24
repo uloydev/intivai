@@ -5,6 +5,8 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	stderrors "errors"
+	"fmt"
 	"io"
 	"strings"
 	"time"
@@ -21,6 +23,7 @@ import (
 	"github.com/intivai/backend/internal/shared/errors"
 	"github.com/intivai/backend/pkg/db"
 	"github.com/intivai/backend/pkg/storage"
+	"github.com/rs/zerolog"
 	"gorm.io/gorm"
 )
 
@@ -31,6 +34,7 @@ const ticketTTL = 10 * time.Minute
 type TaskEnqueuer interface {
 	EnqueueEvaluation(ctx context.Context, orgID, interviewID string) error
 	EnqueueInterviewInvitation(ctx context.Context, to, name, jobTitle, interviewID, inviteToken string) error
+	EnqueueHumanRequest(ctx context.Context, to, candidateName, jobTitle, interviewID string) error
 }
 
 // InterviewService — create interviews (recruiter), issue WS tickets
@@ -48,15 +52,21 @@ type InterviewService struct {
 	tokens      application.TokenProvider
 	clock       ivdomain.Clock
 	enqueuer    TaskEnqueuer
+	log         zerolog.Logger
+	// completeFn applies the terminal in_progress → completed transition.
+	// Seam for tests (D25): inject a failure to prove the error is logged and
+	// surfaced, not swallowed. Defaults to the domain Complete method.
+	completeFn func(*ivdomain.Interview) error
 }
 
 func NewInterviewService(pool *gorm.DB, ivRepo ivdomain.InterviewRepository, tokenRepo ivdomain.TokenRepository,
 	bank ivdomain.QuestionBank, appRepo scrdomain.ApplicationRepository, candRepo cvdomain.CandidateRepository,
 	jobRepo jobdomain.JobRepository, contextRepo ctxdomain.ContextRepository, store *storage.Storage,
-	tokens application.TokenProvider, clock ivdomain.Clock, enqueuer TaskEnqueuer) *InterviewService {
+	tokens application.TokenProvider, clock ivdomain.Clock, enqueuer TaskEnqueuer, log zerolog.Logger) *InterviewService {
 	return &InterviewService{pool: pool, ivRepo: ivRepo, tokenRepo: tokenRepo, bank: bank,
 		appRepo: appRepo, candRepo: candRepo, jobRepo: jobRepo, contextRepo: contextRepo,
-		store: store, tokens: tokens, clock: clock, enqueuer: enqueuer}
+		store: store, tokens: tokens, clock: clock, enqueuer: enqueuer, log: log,
+		completeFn: (*ivdomain.Interview).Complete}
 }
 
 type CreateInterviewCommand struct {
@@ -110,7 +120,10 @@ func (s *InterviewService) CreateInterview(ctx context.Context, actor applicatio
 		candName = candidate.Name
 		jobTitle = job.Title
 
-		questions := s.generateQuestions(candidate, job, cmd.QuestionCount)
+		questions, err := s.generateQuestions(candidate, job, cmd.QuestionCount)
+		if err != nil {
+			return err
+		}
 		domainQuestions := make([]ivdomain.Question, 0, len(questions))
 		for i, q := range questions {
 			domainQuestions = append(domainQuestions, ivdomain.Question{Idx: i + 1, Content: q.Prompt, Category: q.Category, Skill: q.Skill})
@@ -135,10 +148,14 @@ func (s *InterviewService) CreateInterview(ctx context.Context, actor applicatio
 		if err := s.ivRepo.Create(tctx, iv); err != nil {
 			return err
 		}
+		inviteToken, err := randomToken()
+		if err != nil {
+			return fmt.Errorf("generate invitation token: %w", err)
+		}
 
 		invite := &ivdomain.InvitationToken{
 			ID: uuid.New(), OrgID: actor.OrgID, InterviewID: iv.ID,
-			Token:     randomToken(),
+			Token:     inviteToken,
 			ExpiresAt: now.Add(7 * 24 * time.Hour),
 		}
 		if err := s.tokenRepo.Create(tctx, invite); err != nil {
@@ -151,7 +168,9 @@ func (s *InterviewService) CreateInterview(ctx context.Context, actor applicatio
 		return nil, err
 	}
 	if s.enqueuer != nil && candEmail != "" && result != nil {
-		_ = s.enqueuer.EnqueueInterviewInvitation(ctx, candEmail, candName, jobTitle, result.InterviewID.String(), result.Token)
+		if err := s.enqueuer.EnqueueInterviewInvitation(ctx, candEmail, candName, jobTitle, result.InterviewID.String(), result.Token); err != nil {
+			s.log.Warn().Err(err).Str("interview_id", result.InterviewID.String()).Msg("failed to enqueue interview invitation email")
+		}
 	}
 	return result, nil
 }
@@ -206,10 +225,7 @@ func (s *InterviewService) IssueTicket(ctx context.Context, cmd IssueTicketComma
 	}
 
 	sessionID := uuid.New()
-	extra := map[string]any{
-		"session_id":   sessionID.String(),
-		"interview_id": cmd.InterviewID.String(),
-	}
+	extra := application.TokenExtra{SessionID: sessionID.String(), InterviewID: cmd.InterviewID.String()}
 	ticket, err := s.tokens.Issue(cmd.InterviewID, invite.OrgID, "candidate", application.TokenTypeWSTicket, ticketTTL, extra)
 	if err != nil {
 		return nil, err
@@ -217,32 +233,103 @@ func (s *InterviewService) IssueTicket(ctx context.Context, cmd IssueTicketComma
 	return &IssueTicketResult{Ticket: ticket, SessionID: sessionID.String(), ExpiresAt: s.clock.Now().Add(ticketTTL)}, nil
 }
 
+// RequestHuman: candidate requests a human interviewer. Sets the flag and
+// notifies the org's recruiters/admins by email. Auth accepts either the
+// invitation token (portal flow) or the WS ticket JWT (in-session request).
+func (s *InterviewService) RequestHuman(ctx context.Context, interviewID uuid.UUID, invitationToken string) error {
+	invite, status := s.tokenRepo.Validate(ctx, invitationToken)
+	if status != ivdomain.TokenValid && status != ivdomain.TokenUsed {
+		// Fall back to the WS ticket JWT — the Chat page only holds the ticket.
+		claims, err := s.tokens.Parse(invitationToken)
+		if err != nil || claims == nil || claims.Type != application.TokenTypeWSTicket {
+			return errors.NewDomainError("TOKEN_INVALID", "invalid invitation token")
+		}
+		if claims.Extra.InterviewID != interviewID.String() {
+			return errors.NewDomainError("TOKEN_MISMATCH", "token does not match this interview")
+		}
+		invite = &ivdomain.InvitationToken{OrgID: claims.OrgID, InterviewID: interviewID}
+	} else if invite == nil || invite.InterviewID != interviewID {
+		return errors.NewDomainError("TOKEN_MISMATCH", "token does not match this interview")
+	}
+
+	var notify []struct {
+		Email    string
+		CandName string
+		JobTitle string
+	}
+	err := db.RunInTx(ctx, s.pool, invite.OrgID.String(), func(tctx context.Context) error {
+		if err := s.ivRepo.SetHumanRequested(tctx, interviewID, true); err != nil {
+			return err
+		}
+		tx, ok := db.TxFrom(tctx)
+		if !ok {
+			return errors.NewDomainError("INTERNAL_ERROR", "no transaction")
+		}
+		return tx.Raw(
+			`SELECT u.email, c.name AS cand_name, j.title AS job_title
+			 FROM applications a
+			 JOIN candidates c ON c.id = a.candidate_id
+			 JOIN jobs j ON j.id = a.job_id
+			 JOIN users u ON u.org_id = a.org_id AND u.role IN ('admin', 'recruiter')
+			 WHERE a.id = (SELECT application_id FROM interviews WHERE id = $1)`,
+			interviewID).Scan(&notify).Error
+	})
+	if err != nil {
+		return err
+	}
+
+	if s.enqueuer != nil {
+		for _, n := range notify {
+			if n.Email == "" {
+				continue
+			}
+			if err := s.enqueuer.EnqueueHumanRequest(ctx, n.Email, n.CandName, n.JobTitle, interviewID.String()); err != nil {
+				s.log.Warn().Err(err).Str("email", n.Email).Str("interview_id", interviewID.String()).Msg("failed to enqueue human request notification")
+			}
+		}
+	}
+	return nil
+}
+
 // ComposePrompt builds the interview system prompt: default + tenant prompt +
 // company context (latest versions) + safety rails. Repo reads run inside a
 // tenant tx (RLS).
 func (s *InterviewService) ComposePrompt(ctx context.Context, orgID uuid.UUID) (string, error) {
 	in := gensvc.ComposerInput{DefaultPrompt: gensvc.DefaultInterviewerPrompt}
+	var contextPath string
 	err := db.RunInTx(ctx, s.pool, orgID.String(), func(tctx context.Context) error {
-		if p, err := s.contextRepo.GetLatestPrompt(tctx, orgID); err == nil {
+		p, err := s.contextRepo.GetLatestPrompt(tctx, orgID)
+		if err == nil {
 			in.TenantPrompt = p.SystemPrompt
+		} else if !stderrors.Is(err, ctxdomain.ErrNotFound) {
+			return fmt.Errorf("load tenant prompt: %w", err)
 		}
 		contexts, err := s.contextRepo.ListContexts(tctx, orgID)
 		if err != nil {
-			return err
+			return fmt.Errorf("list company contexts: %w", err)
 		}
 		if len(contexts) > 0 {
-			latest := contexts[0]
-			if reader, err := s.store.Download(ctx, latest.StoragePath); err == nil {
-				buf := new(strings.Builder)
-				_, _ = io.Copy(buf, reader)
-				_ = reader.Close()
-				in.CompanyContext = buf.String()
-			}
+			contextPath = contexts[0].StoragePath
 		}
 		return nil
 	})
 	if err != nil {
 		return "", err
+	}
+	if contextPath != "" {
+		reader, err := s.store.Download(ctx, contextPath)
+		if err != nil {
+			return "", fmt.Errorf("download company context: %w", err)
+		}
+		buf := new(strings.Builder)
+		if _, err := io.Copy(buf, reader); err != nil {
+			_ = reader.Close()
+			return "", fmt.Errorf("read company context: %w", err)
+		}
+		if err := reader.Close(); err != nil {
+			return "", fmt.Errorf("close company context: %w", err)
+		}
+		in.CompanyContext = buf.String()
 	}
 	return gensvc.ComposeSystemPrompt(in), nil
 }
@@ -270,18 +357,29 @@ func (s *InterviewService) VerifyInterviewOrg(ctx context.Context, orgID uuid.UU
 	})
 }
 
-// AnswerAndAdvance: record answer, persist, return the next question. Shallow
-// answers (weakness, Research §2) produce a deterministic probe follow-up on
-// the same topic; detailed answers move to the next planned question.
-func (s *InterviewService) AnswerAndAdvance(ctx context.Context, orgID string, interviewID uuid.UUID, content string) (*ivdomain.Question, error) {
-	return s.AnswerAndAdvanceWithPacing(ctx, orgID, interviewID, content, nil)
+// TopicDialogueResult holds the state result of processing a multi-turn topic dialogue exchange.
+type TopicDialogueResult struct {
+	NextQuestion    *ivdomain.Question
+	IsTopicComplete bool
+	CurrentTurn     int
+	MaxTurns        int
+	TotalQuestions  int
+	// TransitionErr carries a non-fatal Complete-transition failure (D25):
+	// the dialogue still advances (LLM-failure advance semantics), but the
+	// WS layer emits it on the standard error-frame path instead of the
+	// error vanishing into `_ =`.
+	TransitionErr error
 }
 
-// AnswerAndAdvanceWithPacing: record candidate answer with pacing metrics and advance to next question.
-func (s *InterviewService) AnswerAndAdvanceWithPacing(ctx context.Context, orgID string, interviewID uuid.UUID, content string, pacing *ivdomain.PacingMetrics) (*ivdomain.Question, error) {
-	var next *ivdomain.Question
-	var answered *ivdomain.Question
-	err := db.RunInTx(ctx, s.pool, orgID, func(tctx context.Context) error {
+// ProcessTopicDialogue records a candidate dialogue turn (reply or advance), updates pacing telemetry,
+// and determines whether the active topic remains open for further discussion or transitions to the next question.
+func (s *InterviewService) ProcessTopicDialogue(ctx context.Context, orgID string, interviewID uuid.UUID, content string, action string, pacing *ivdomain.PacingMetrics) (*TopicDialogueResult, error) {
+	orgUUID, err := uuid.Parse(orgID)
+	if err != nil {
+		return nil, errors.NewDomainError("INVALID_ORG_ID", "invalid organization id")
+	}
+	var res TopicDialogueResult
+	err = db.RunInTx(ctx, s.pool, orgID, func(tctx context.Context) error {
 		iv, err := s.ivRepo.GetByID(tctx, interviewID)
 		if err != nil {
 			return err
@@ -291,47 +389,84 @@ func (s *InterviewService) AnswerAndAdvanceWithPacing(ctx context.Context, orgID
 		if iv.Status == ivdomain.StatusExpired {
 			return errors.NewDomainError("INTERVIEW_EXPIRED", "interview expired")
 		}
-		answered = iv.NextQuestion()
-		if err := iv.AnswerWithPacing(content, pacing); err != nil {
+
+		answered := iv.NextQuestion()
+		next, isComplete, turn, maxTurns, err := iv.ProcessTopicDialogue(content, action, pacing)
+		if err != nil {
 			return err
 		}
-		next = iv.NextQuestion()
-		// Weakness probe: follow up on the CURRENT topic (the question just
-		// answered) when the answer was shallow, ensuring we finish exploring the topic before advancing.
-		if answered != nil && !answered.IsProbe && !isProbeQuestion(answered.Content, answered.Category) && gensvc.ShouldProbe(gensvc.ProbeInput{Answer: content}) {
+
+		if isComplete && answered != nil && !answered.IsProbe && gensvc.ShouldProbe(gensvc.ProbeInput{Answer: content}) {
 			probe := gensvc.ProbeQuestion(answered.Category, answered.Skill)
-			if p, err := iv.InsertProbeAfter(answered.Idx, probe.Prompt, probe.Category, probe.Skill); err == nil {
-				// NOTE: iv.OrgID is NOT hydrated by GetByID (interviews have no
-				// org_id column; RLS resolves via applications) — use the arg.
-				if err := s.bank.Create(tctx, uuid.MustParse(orgID), ivdomain.Question{Idx: p.Idx, Content: p.Content, Category: p.Category, Skill: p.Skill, IsProbe: true}); err == nil {
-					next = p
-				}
+			p, insertErr := iv.InsertProbeAfter(answered.Idx, probe.Prompt, probe.Category, probe.Skill)
+			if insertErr != nil {
+				// D25: never swallow — log with interview id + stage; the
+				// dialogue continues without the probe question.
+				s.log.Error().Err(insertErr).Str("interview_id", interviewID.String()).Str("stage", "probe_insert").
+					Msg("probe insertion failed; continuing without probe")
+			} else if createErr := s.bank.Create(tctx, orgUUID, ivdomain.Question{Idx: p.Idx, Content: p.Content, Category: p.Category, Skill: p.Skill, IsProbe: true}); createErr != nil {
+				s.log.Error().Err(createErr).Str("interview_id", interviewID.String()).Str("stage", "probe_persist").
+					Msg("probe persist failed; continuing without probe")
+			} else {
+				next = p
 			}
 		}
-		if next == nil {
-			_ = iv.Complete()
+
+		var transitionErr error
+		if isComplete && next == nil {
+			if completeErr := s.completeFn(iv); completeErr != nil {
+				// D25: e.g. racing ExpireIfNeeded flipped the status. The
+				// answer is already recorded and the advance stands, but the
+				// failure must not vanish: log it and let the WS layer emit
+				// the standard error frame.
+				s.log.Error().Err(completeErr).Str("interview_id", interviewID.String()).Str("stage", "complete").
+					Msg("interview complete transition failed")
+				transitionErr = completeErr
+			}
 		}
+
+		res = TopicDialogueResult{
+			NextQuestion:    next,
+			IsTopicComplete: isComplete,
+			CurrentTurn:     turn,
+			MaxTurns:        maxTurns,
+			TotalQuestions:  len(iv.Questions),
+			TransitionErr:   transitionErr,
+		}
+
 		return s.ivRepo.Update(tctx, iv)
 	})
+	return &res, err
+}
+
+// AnswerAndAdvance: record answer, persist, return the next question.
+func (s *InterviewService) AnswerAndAdvance(ctx context.Context, orgID string, interviewID uuid.UUID, content string) (*ivdomain.Question, error) {
+	next, _, err := s.AnswerAndAdvanceWithPacing(ctx, orgID, interviewID, content, nil)
 	return next, err
 }
 
-func isProbeQuestion(content, category string) bool {
-	lower := strings.ToLower(content)
-	return category == "probe" || strings.Contains(lower, "your answer was brief") || strings.Contains(lower, "could you elaborate")
+// AnswerAndAdvanceWithPacing: record candidate answer with pacing metrics and advance to next question.
+func (s *InterviewService) AnswerAndAdvanceWithPacing(ctx context.Context, orgID string, interviewID uuid.UUID, content string, pacing *ivdomain.PacingMetrics) (*ivdomain.Question, int, error) {
+	res, err := s.ProcessTopicDialogue(ctx, orgID, interviewID, content, "advance", pacing)
+	if err != nil {
+		return nil, 0, err
+	}
+	return res.NextQuestion, res.TotalQuestions, nil
 }
 
 // SessionRemaining calculates remaining seconds before the 30-minute global budget expires.
 func (s *InterviewService) SessionRemaining(ctx context.Context, orgID string, interviewID uuid.UUID) int {
 	var remaining = int(ivdomain.MaxInterviewDuration.Seconds())
-	_ = db.RunInTx(ctx, s.pool, orgID, func(tctx context.Context) error {
+	if err := db.RunInTx(ctx, s.pool, orgID, func(tctx context.Context) error {
 		iv, err := s.ivRepo.GetByID(tctx, interviewID)
 		if err == nil && iv != nil {
 			iv.SetClock(s.clock)
 			remaining = iv.SessionRemaining()
 		}
 		return nil
-	})
+	}); err != nil {
+		s.log.Warn().Err(err).Str("interview_id", interviewID.String()).Msg("session remaining lookup failed; using full budget")
+	}
 	return remaining
 }
 
@@ -473,11 +608,28 @@ func (s *InterviewService) RecordCandidateTelemetry(ctx context.Context, intervi
 		return s.RecordTelemetry(ctx, invite.OrgID.String(), interviewID, event)
 	}
 
-	// Otherwise check if token is a ticket JWT
+	// Otherwise check if token is a ticket JWT — verify org_id matches interview's org
 	claims, err := s.tokens.Parse(token)
 	if err == nil && claims != nil && claims.Type == application.TokenTypeWSTicket {
-		if iid, ok := claims.Extra["interview_id"].(string); ok && iid == interviewID.String() {
-			return s.RecordTelemetry(ctx, claims.OrgID.String(), interviewID, event)
+		if claims.Extra.InterviewID == interviewID.String() {
+			err = db.RunInTx(ctx, s.pool, claims.OrgID.String(), func(tctx context.Context) error {
+				iv, e := s.ivRepo.GetByID(tctx, interviewID)
+				if e != nil {
+					return e
+				}
+				if iv.OrgID != claims.OrgID {
+					return errors.NewDomainError("AUTH_FORBIDDEN", "ticket org does not match this interview")
+				}
+				return s.ivRepo.RecordProctoringEvent(tctx, interviewID, event)
+			})
+			if err != nil {
+				var de *errors.DomainError
+				if stderrors.As(err, &de) {
+					return err
+				}
+				return errors.NewDomainError("AUTH_UNAUTHORIZED", "valid ticket or invitation token required for telemetry")
+			}
+			return nil
 		}
 	}
 
@@ -496,8 +648,8 @@ func (s *InterviewService) RecordCodingSession(ctx context.Context, orgID string
 // TouchInterview refreshes the interview activity marker (column-scoped
 // update; the old full-row Update() could overwrite a concurrently persisted
 // answer with a stale aggregate).
-func (s *InterviewService) TouchInterview(ctx context.Context, orgID string, interviewID uuid.UUID) {
-	_ = db.RunInTx(ctx, s.pool, orgID, func(tctx context.Context) error {
+func (s *InterviewService) TouchInterview(ctx context.Context, orgID string, interviewID uuid.UUID) error {
+	return db.RunInTx(ctx, s.pool, orgID, func(tctx context.Context) error {
 		return s.ivRepo.Touch(tctx, interviewID)
 	})
 }
@@ -510,36 +662,34 @@ func (s *InterviewService) EnqueueEvaluation(ctx context.Context, orgID string, 
 	return s.enqueuer.EnqueueEvaluation(ctx, orgID, interviewID.String())
 }
 
-func (s *InterviewService) generateQuestions(candidate *cvdomain.Candidate, job *jobdomain.Job, count int) []gensvc.Question {
-	profile := gensvc.CandidateProfile{Skills: candidateSkills(candidate), Summary: candidateSummary(candidate)}
+func (s *InterviewService) generateQuestions(candidate *cvdomain.Candidate, job *jobdomain.Job, count int) ([]gensvc.Question, error) {
+	skills, summary, err := candidateProfile(candidate)
+	if err != nil {
+		return nil, err
+	}
+	profile := gensvc.CandidateProfile{Skills: skills, Summary: summary}
 	reqs := gensvc.JobRequirements{Title: job.Title, Description: job.Description, RequiredSkills: job.RequiredSkills}
-	return gensvc.GenerateQuestions(profile, reqs, count)
+	return gensvc.GenerateQuestions(profile, reqs, count), nil
 }
 
-func candidateSkills(c *cvdomain.Candidate) []string {
+func candidateProfile(c *cvdomain.Candidate) ([]string, string, error) {
 	if len(c.CVStructured) == 0 {
-		return nil
+		return nil, c.CVRawText, nil
 	}
 	var rd struct {
-		Skills []string `json:"skills"`
+		Skills  []string `json:"skills"`
+		Summary string   `json:"summary"`
 	}
-	_ = json.Unmarshal(c.CVStructured, &rd)
-	return rd.Skills
+	if err := json.Unmarshal(c.CVStructured, &rd); err != nil {
+		return nil, "", fmt.Errorf("decode candidate profile: %w", err)
+	}
+	return rd.Skills, rd.Summary, nil
 }
 
-func candidateSummary(c *cvdomain.Candidate) string {
-	if len(c.CVStructured) == 0 {
-		return c.CVRawText
-	}
-	var rd struct {
-		Summary string `json:"summary"`
-	}
-	_ = json.Unmarshal(c.CVStructured, &rd)
-	return rd.Summary
-}
-
-func randomToken() string {
+func randomToken() (string, error) {
 	b := make([]byte, 32)
-	_, _ = rand.Read(b)
-	return hex.EncodeToString(b)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
 }

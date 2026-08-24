@@ -26,6 +26,11 @@ const (
 	MsgCodeResult = "code.result"
 )
 
+// ErrCodeTurnInProgress — machine-readable error code for a rejected
+// overlapping answer (D19): an answer frame arrived while the previous
+// turn's LLM stream was still active.
+const ErrCodeTurnInProgress = "turn_in_progress"
+
 // Server → client messages.
 type InterviewStartMessage struct {
 	Type             string `json:"type"`
@@ -38,9 +43,13 @@ type QuestionMessage struct {
 	Type                string `json:"type"`
 	Content             string `json:"content"`
 	Idx                 int    `json:"idx"`
+	TotalQuestions      int    `json:"total_questions,omitempty"`
+	IsProbe             bool   `json:"is_probe,omitempty"`
 	Archetype           string `json:"archetype,omitempty"`             // "conversational" | "system_design" | "coding"
 	TimeLimitSec        int    `json:"time_limit_sec,omitempty"`        // allocated seconds for this question
 	SessionRemainingSec int    `json:"session_remaining_sec,omitempty"` // global interview clock remaining
+	TopicTurn           int    `json:"topic_turn,omitempty"`            // 1-based current dialogue turn for this question
+	MaxTopicTurns       int    `json:"max_topic_turns,omitempty"`       // max dialogue turns allowed for this question (e.g. 3)
 }
 
 type TokenMessage struct {
@@ -49,8 +58,11 @@ type TokenMessage struct {
 }
 
 type ResponseMessage struct {
-	Type    string `json:"type"`
-	Content string `json:"content"`
+	Type            string `json:"type"`
+	Content         string `json:"content"`
+	IsTopicComplete bool   `json:"is_topic_complete,omitempty"`
+	TopicTurn       int    `json:"topic_turn,omitempty"`
+	MaxTopicTurns   int    `json:"max_topic_turns,omitempty"`
 }
 
 // Evaluation status values.
@@ -87,6 +99,7 @@ type AnswerMessage struct {
 	Type            string         `json:"type"`
 	Content         string         `json:"content"`
 	Idx             int            `json:"idx"`
+	Action          string         `json:"action,omitempty"` // "reply" (clarification/dialogue) | "advance" (finalize topic)
 	PacingTelemetry *PacingMetrics `json:"pacing_telemetry,omitempty"`
 }
 

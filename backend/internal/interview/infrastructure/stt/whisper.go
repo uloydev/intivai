@@ -51,8 +51,12 @@ func (c *WhisperClient) Transcribe(ctx context.Context, pcmData []byte, sampleRa
 		return "", fmt.Errorf("failed to copy audio data: %w", err)
 	}
 
-	_ = writer.WriteField("model", "tiny")
-	_ = writer.WriteField("response_format", "json")
+	if err := writer.WriteField("model", "tiny"); err != nil {
+		return "", fmt.Errorf("failed to write whisper model field: %w", err)
+	}
+	if err := writer.WriteField("response_format", "json"); err != nil {
+		return "", fmt.Errorf("failed to write whisper response format: %w", err)
+	}
 
 	if err := writer.Close(); err != nil {
 		return "", fmt.Errorf("failed to close writer: %w", err)
@@ -71,7 +75,10 @@ func (c *WhisperClient) Transcribe(ctx context.Context, pcmData []byte, sampleRa
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		respBody, _ := io.ReadAll(resp.Body)
+		respBody, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return "", fmt.Errorf("whisper server returned status %d; read error body: %w", resp.StatusCode, err)
+		}
 		return "", fmt.Errorf("whisper server returned status %d: %s", resp.StatusCode, string(respBody))
 	}
 

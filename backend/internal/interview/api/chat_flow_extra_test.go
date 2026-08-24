@@ -14,6 +14,7 @@ import (
 	"github.com/gorilla/websocket"
 	ctxrepo "github.com/intivai/backend/internal/context/infrastructure/persistence"
 	cvrepo "github.com/intivai/backend/internal/cv/infrastructure/persistence"
+	iamapp "github.com/intivai/backend/internal/iam/application"
 	"github.com/intivai/backend/internal/iam/infrastructure/auth"
 	ivapp "github.com/intivai/backend/internal/interview/application"
 	ivdomain "github.com/intivai/backend/internal/interview/domain"
@@ -32,6 +33,25 @@ type slowStreamLLM struct{}
 
 func (slowStreamLLM) Chat(ctx context.Context, req llm.ChatRequest) (*llm.ChatResponse, error) {
 	return &llm.ChatResponse{Content: "slow response"}, nil
+}
+
+func TestTicketInterviewIDRejectsMissingAndMalformedClaims(t *testing.T) {
+	cases := []*iamapp.Claims{
+		{},
+		{Extra: iamapp.TokenExtra{}},
+		{Extra: iamapp.TokenExtra{InterviewID: "not-a-uuid"}},
+	}
+	for _, claims := range cases {
+		if id, ok := ticketInterviewID(claims); ok || id != uuid.Nil {
+			t.Fatalf("invalid claims accepted: id=%s ok=%v", id, ok)
+		}
+	}
+
+	want := uuid.New()
+	got, ok := ticketInterviewID(&iamapp.Claims{Extra: iamapp.TokenExtra{InterviewID: want.String()}})
+	if !ok || got != want {
+		t.Fatalf("valid claims rejected: id=%s ok=%v", got, ok)
+	}
 }
 func (slowStreamLLM) ChatStream(ctx context.Context, req llm.ChatRequest) (<-chan string, error) {
 	ch := make(chan string)
@@ -107,7 +127,7 @@ func seedChatOrg(t *testing.T) (*gorm.DB, *ivapp.InterviewService, string, strin
 	svc := ivapp.NewInterviewService(pool,
 		ivrepo.NewPostgresInterviewRepo(pool), ivrepo.NewPostgresTokenRepo(pool), ivrepo.NewPostgresQuestionBank(pool),
 		scrrepo.NewPostgresApplicationRepo(pool), cvrepo.NewPostgresCandidateRepo(pool), jobrepo.NewPostgresJobRepo(pool),
-		ctxrepo.NewPostgresContextRepo(pool), minio, auth.NewJWTProvider("test-secret-for-chat-flow"), ivdomain.SystemClock(), nil)
+		ctxrepo.NewPostgresContextRepo(pool), minio, auth.NewJWTProvider("test-secret-for-chat-flow"), ivdomain.SystemClock(), nil, zerolog.Nop())
 	return pool, svc, orgUUID.String(), appID.String()
 }
 

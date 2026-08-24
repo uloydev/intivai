@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"strings"
 	"sync"
@@ -51,6 +52,12 @@ const (
 	pongWait          = 10 * time.Second
 )
 
+// jsonConn is the outbound surface wsWriter needs from the WS connection
+// (satisfied by *fiberws.Conn); an interface keeps the writer unit-testable.
+type jsonConn interface {
+	WriteJSON(v any) error
+}
+
 // wsWriter serializes all outbound frames through one writer goroutine
 // (gorilla/websocket allows a single concurrent writer), so the read loop,
 // the LLM stream goroutine and the code-run goroutine can all call send safely.
@@ -60,10 +67,11 @@ type wsWriter struct {
 	mu      sync.Mutex
 	closed  bool
 	connCtx context.Context
+	cancel  context.CancelFunc // owned here so teardown order is structural
 }
 
-func newWSWriter(conn *fiberws.Conn, connCtx context.Context) *wsWriter {
-	w := &wsWriter{ch: make(chan any, 64), done: make(chan struct{}), connCtx: connCtx}
+func newWSWriter(conn jsonConn, connCtx context.Context, cancel context.CancelFunc) *wsWriter {
+	w := &wsWriter{ch: make(chan any, 64), done: make(chan struct{}), connCtx: connCtx, cancel: cancel}
 	go func() {
 		defer close(w.done)
 		for frame := range w.ch {
@@ -92,8 +100,13 @@ func (w *wsWriter) sendError(err error) {
 	w.send(errorFrame(err))
 }
 
-// close flushes buffered frames, then stops the writer goroutine.
+// close performs the ordered teardown (D18): cancel fires FIRST — a sender
+// parked on a full channel holds w.mu and can only wake via connCtx.Done, so
+// cancellation must precede the lock acquisition or close deadlocks when the
+// writer goroutine has died mid-stream. With the context canceled no new
+// sender can pass the flag check either, so the mutex wait below is bounded.
 func (w *wsWriter) close() {
+	w.cancel()
 	w.mu.Lock()
 	if !w.closed {
 		w.closed = true
@@ -107,31 +120,45 @@ func (w *wsWriter) close() {
 // goroutine and the interrupt path — exactly one sends it. onSent fires with
 // the dispatched question (used to track the last question for history pairs).
 type turnState struct {
-	mu           sync.Mutex
-	next         *ivdomain.Question
-	questionSent bool
-	remainingSec int
-	onSent       func(q *ivdomain.Question)
+	mu              sync.Mutex
+	next            *ivdomain.Question
+	total           int
+	questionSent    bool
+	remainingSec    int
+	isTopicComplete bool
+	topicTurn       int
+	maxTopicTurns   int
+	onSent          func(q *ivdomain.Question)
 }
 
 func (t *turnState) sendQuestionOnce(send func(any)) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	if !t.questionSent && t.next != nil {
+	if !t.questionSent && t.next != nil && t.isTopicComplete {
 		t.questionSent = true
 		arch, limit := ivdomain.DetermineQuestionArchetype(*t.next)
 		send(ivdomain.QuestionMessage{
 			Type:                ivdomain.MsgQuestion,
 			Content:             t.next.Content,
 			Idx:                 t.next.Idx,
+			TotalQuestions:      t.total,
+			IsProbe:             t.next.IsProbe,
 			Archetype:           arch,
 			TimeLimitSec:        limit,
 			SessionRemainingSec: t.remainingSec,
+			TopicTurn:           1,
+			MaxTopicTurns:       t.maxTopicTurns,
 		})
 		if t.onSent != nil {
 			t.onSent(t.next)
 		}
 	}
+}
+
+func (t *turnState) wasQuestionSent() bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.questionSent
 }
 
 // chatSession bundles the per-connection state shared between the WS read
@@ -144,7 +171,12 @@ type chatSession struct {
 	sessionID   string
 	prompt      string
 
-	historyMu    sync.Mutex
+	historyMu    sync.Mutex    // guards history, lastQuestion, archetype
+	lastTouch    time.Time     // last TouchTimestamp write — debounce
+	touchMu      sync.Mutex    // guards touchMuTimer + idleCheck
+	touchMuTimer *time.Timer   // nil when not pending
+	streamDone   chan struct{} // closed when streamAndRespond exits
+	signalMu     sync.Mutex    // serializes interrupt/resume against stream goroutine
 	history      []gensvc.ContextMessage
 	lastQuestion *ivdomain.Question
 	archetype    string
@@ -152,23 +184,99 @@ type chatSession struct {
 
 	turn         *turnState
 	streamCancel context.CancelFunc
+	// turnActive guards against overlapping answer turns (D19): set while a
+	// turn's LLM stream is in flight, cleared when the stream goroutine exits
+	// (before streamDone closes, so interrupt/resume observe it settled via
+	// the channel happens-before). Guarded by turnMu — kept separate from
+	// signalMu because interrupt/resume hold signalMu while waiting on
+	// streamDone, which would invert against this clear.
+	turnActive bool
+	turnMu     sync.Mutex
 }
 
 // handleInterrupt cancels the in-flight LLM stream and dispatches the next
 // question exactly once (the stream goroutine suppresses it on cancellation).
-func (s *chatSession) handleInterrupt() {
+// In-topic interrupts finalize the topic (advance) so the interview never
+// stalls mid-question — the candidate asked to move on.
+func (s *chatSession) handleInterrupt(h *ChatHandler) {
+	s.signalMu.Lock()
+	defer s.signalMu.Unlock()
 	if s.streamCancel != nil {
 		s.streamCancel() // stops the LLM stream mid-response
-		s.streamCancel = nil
 	}
+	// Wait for streaming goroutine to finish before sending response+next question.
+	// This prevents a resume frame from racing with the post-interrupt frames.
+	if s.streamDone != nil {
+		<-s.streamDone
+		s.streamDone = nil
+	}
+	s.streamCancel = nil
 	s.w.send(ivdomain.ResponseMessage{Type: ivdomain.MsgResponse, Content: "Interrupted."})
+	if s.turn == nil {
+		return
+	}
+	if s.turn.wasQuestionSent() {
+		// Stream-error recovery already dispatched this turn's question.
+		// Do not process another dialogue turn or emit a duplicate question.
+		s.turn = nil
+		return
+	}
+	if !s.turn.isTopicComplete {
+		// Candidate interrupted the AI's in-topic reply: record the topic as
+		// finalized and dispatch the next question. The marker answer keeps
+		// the transcript evaluable.
+		res, err := h.svc.ProcessTopicDialogue(s.ctx, s.orgID, s.interviewID, "The candidate interrupted the AI response.", "advance", nil)
+		if err != nil {
+			s.w.sendError(err)
+			s.turn = nil
+			return
+		}
+		if res.TransitionErr != nil {
+			s.w.sendError(res.TransitionErr)
+		}
+		s.turn = &turnState{
+			next:            res.NextQuestion,
+			total:           res.TotalQuestions,
+			remainingSec:    h.svc.SessionRemaining(s.ctx, s.orgID, s.interviewID),
+			isTopicComplete: res.IsTopicComplete,
+			topicTurn:       res.CurrentTurn,
+			maxTopicTurns:   res.MaxTurns,
+			onSent:          s.onQuestion,
+		}
+	}
 	// The stream goroutine suppresses the next question when its ctx is
 	// canceled; send it here exactly once instead. If the stream already
 	// completed normally, questionSent guards the double-send.
-	if s.turn != nil {
-		s.turn.sendQuestionOnce(s.w.send)
-	}
+	s.turn.sendQuestionOnce(s.w.send)
 	s.turn = nil
+}
+
+// debouncedTouch updates the interview last activity with a 500ms debounce
+// so burst keystrokes / code change frames don't generate concurrent DB writes.
+func (s *chatSession) debouncedTouch(h *ChatHandler) {
+	s.touchMu.Lock()
+	now := time.Now()
+	if now.Sub(s.lastTouch) > 500*time.Millisecond && s.touchMuTimer == nil {
+		s.lastTouch = now
+		s.touchMu.Unlock()
+		if err := h.svc.TouchInterview(s.ctx, s.orgID, s.interviewID); err != nil {
+			h.log.Warn().Err(err).Msg("interview touch failed")
+		}
+		return // no timer needed — immediate touch is safe after cooldown
+	}
+	if s.touchMuTimer != nil {
+		s.touchMuTimer.Stop()
+	}
+	s.touchMuTimer = time.AfterFunc(500*time.Millisecond, func() {
+		s.touchMu.Lock()
+		s.touchMuTimer = nil
+		s.lastTouch = time.Now()
+		s.touchMu.Unlock()
+		if err := h.svc.TouchInterview(s.ctx, s.orgID, s.interviewID); err != nil {
+			h.log.Warn().Err(err).Msg("debounced interview touch failed")
+		}
+	})
+	s.touchMu.Unlock()
 }
 
 // handleTelemetry records a proctoring telemetry frame (tab_switch, paste,
@@ -176,7 +284,11 @@ func (s *chatSession) handleInterrupt() {
 func (s *chatSession) handleTelemetry(h *ChatHandler, m ivdomain.TelemetryMessage) {
 	var evTime time.Time
 	if m.Timestamp != "" {
-		evTime, _ = time.Parse(time.RFC3339, m.Timestamp)
+		var err error
+		evTime, err = time.Parse(time.RFC3339, m.Timestamp)
+		if err != nil {
+			h.log.Warn().Err(err).Msg("invalid telemetry timestamp; using server time")
+		}
 	}
 	if evTime.IsZero() {
 		evTime = time.Now()
@@ -187,7 +299,9 @@ func (s *chatSession) handleTelemetry(h *ChatHandler, m ivdomain.TelemetryMessag
 		QuestionIdx: m.QuestionIdx,
 		Details:     m.Details,
 	}
-	_ = h.svc.RecordTelemetry(s.ctx, s.orgID, s.interviewID, event)
+	if err := h.svc.RecordTelemetry(s.ctx, s.orgID, s.interviewID, event); err != nil {
+		h.log.Error().Err(err).Str("interview_id", s.interviewID.String()).Msg("record telemetry failed")
+	}
 }
 
 // handleCodeRun runs a code.run frame off the read loop (gated on the current
@@ -211,21 +325,30 @@ func (s *chatSession) handleCodeRun(h *ChatHandler, m ivdomain.CodeRunMessage) {
 	go h.runCode(s.ctx, s.w.send, s.orgID, s.interviewID, m)
 }
 
-// handlePacing advances the interview with the answer and its pacing
-// telemetry (keystroke/paste authenticity signals) — the pacing-aware half of
-// the answer flow, kept separate so the pacing contract stays visible.
-func (s *chatSession) handlePacing(h *ChatHandler, m ivdomain.AnswerMessage) (*ivdomain.Question, error) {
-	return h.svc.AnswerAndAdvanceWithPacing(s.ctx, s.orgID, s.interviewID, m.Content, m.PacingTelemetry)
-}
-
-// handleAnswer records the answer, then streams the LLM follow-up and the next
-// question. Returns false to close the connection (an answer rejection is
-// fatal for the read loop).
+// handleAnswer records the dialogue turn, then streams the in-topic LLM follow-up/clarification
+// or the closing transition before advancing to the next question. A second
+// answer while a turn is active is rejected with a turn_in_progress error
+// frame (D19) — processing it would overwrite s.turn/s.streamCancel
+// mid-stream and corrupt the transcript cursor.
 func (s *chatSession) handleAnswer(h *ChatHandler, m ivdomain.AnswerMessage) bool {
-	next, err := s.handlePacing(h, m)
+	s.turnMu.Lock()
+	if s.turnActive {
+		s.turnMu.Unlock()
+		s.w.sendError(sharederrors.NewDomainError(ivdomain.ErrCodeTurnInProgress, "previous answer is still being processed; wait for the response or interrupt"))
+		return true
+	}
+	s.turnActive = true
+	s.turnMu.Unlock()
+
+	res, err := h.svc.ProcessTopicDialogue(s.ctx, s.orgID, s.interviewID, m.Content, m.Action, m.PacingTelemetry)
 	if err != nil {
 		s.w.sendError(err)
 		return false
+	}
+	// A failed Complete transition must not vanish silently — surface it on
+	// the standard error-frame path; the question still dispatches below.
+	if res.TransitionErr != nil {
+		s.w.sendError(res.TransitionErr)
 	}
 	s.historyMu.Lock()
 	if s.lastQuestion != nil {
@@ -233,13 +356,38 @@ func (s *chatSession) handleAnswer(h *ChatHandler, m ivdomain.AnswerMessage) boo
 			gensvc.ContextMessage{Role: gensvc.RoleAssistant, Content: s.lastQuestion.Content},
 			gensvc.ContextMessage{Role: gensvc.RoleUser, Content: m.Content},
 		)
+	} else {
+		s.history = append(s.history, gensvc.ContextMessage{Role: gensvc.RoleUser, Content: m.Content})
 	}
 	s.historyMu.Unlock()
+
 	remSec := h.svc.SessionRemaining(s.ctx, s.orgID, s.interviewID)
-	s.turn = &turnState{next: next, remainingSec: remSec, onSent: s.onQuestion}
+	s.turn = &turnState{
+		next:            res.NextQuestion,
+		total:           res.TotalQuestions,
+		remainingSec:    remSec,
+		isTopicComplete: res.IsTopicComplete,
+		topicTurn:       res.CurrentTurn,
+		maxTopicTurns:   res.MaxTurns,
+		onSent:          s.onQuestion,
+	}
 	streamCtx, cancelStream := context.WithCancel(s.ctx)
 	s.streamCancel = cancelStream
-	go h.streamAndRespond(streamCtx, s, m.Content, next, s.turn)
+	streamDone := make(chan struct{})
+	s.signalMu.Lock()
+	s.streamDone = streamDone
+	s.signalMu.Unlock()
+	go func() {
+		// Registered after close(streamDone) so it runs BEFORE it: observers
+		// waiting on streamDone (interrupt/resume) see turnActive settled.
+		defer close(streamDone)
+		defer func() {
+			s.turnMu.Lock()
+			s.turnActive = false
+			s.turnMu.Unlock()
+		}()
+		h.streamAndRespond(streamCtx, s, m.Content, res.NextQuestion, s.turn)
+	}()
 	return true
 }
 
@@ -334,6 +482,25 @@ func (h *ChatHandler) Ticket(c *fiber.Ctx) error {
 	return httpapi.OK(c, result)
 }
 
+// RequestHuman — POST /candidate/interviews/:id/request-human (candidate,
+// invitation token). Records the candidate's request for a human interviewer.
+func (h *ChatHandler) RequestHuman(c *fiber.Ctx) error {
+	id, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return httpapi.Error(c, sharederrors.NewDomainError("INVALID_INPUT", "invalid interview id"))
+	}
+	var req struct {
+		InvitationToken string `json:"invitation_token"`
+	}
+	if err := c.BodyParser(&req); err != nil {
+		return httpapi.Error(c, sharederrors.NewDomainError("INVALID_INPUT", "invalid body"))
+	}
+	if err := h.svc.RequestHuman(c.UserContext(), id, strings.TrimSpace(req.InvitationToken)); err != nil {
+		return httpapi.Error(c, err)
+	}
+	return httpapi.OK(c, map[string]string{"message": "your request has been noted. a team member will follow up."})
+}
+
 // Telemetry — POST /candidate/interviews/:id/telemetry (candidate beacon/HTTP fallback).
 func (h *ChatHandler) Telemetry(c *fiber.Ctx) error {
 	id, err := uuid.Parse(c.Params("id"))
@@ -368,7 +535,11 @@ func (h *ChatHandler) Telemetry(c *fiber.Ctx) error {
 
 	var evTime time.Time
 	if req.Timestamp != "" {
-		evTime, _ = time.Parse(time.RFC3339, req.Timestamp)
+		var err error
+		evTime, err = time.Parse(time.RFC3339, req.Timestamp)
+		if err != nil {
+			return httpapi.Error(c, sharederrors.NewDomainError("INVALID_INPUT", "invalid telemetry timestamp"))
+		}
 	}
 	if evTime.IsZero() {
 		evTime = time.Now()
@@ -406,11 +577,19 @@ func (h *ChatHandler) RequireTicket(c *fiber.Ctx) error {
 	if err != nil || claims.Type != application.TokenTypeWSTicket {
 		return httpapi.Error(c, sharederrors.NewDomainError("UNAUTHORIZED", "invalid ws ticket"))
 	}
-	if claims.Extra["interview_id"] != c.Params("id") {
+	if claims.Extra.InterviewID != c.Params("id") {
 		return httpapi.Error(c, sharederrors.NewDomainError("UNAUTHORIZED", "ticket not bound to this interview"))
 	}
 	c.Locals("ws_claims", claims)
 	return c.Next()
+}
+
+func ticketInterviewID(claims *application.Claims) (uuid.UUID, bool) {
+	if claims == nil {
+		return uuid.Nil, false
+	}
+	id, err := uuid.Parse(claims.Extra.InterviewID)
+	return id, err == nil
 }
 
 // Chat — WS /candidate/interviews/:id/chat. Single writer goroutine serializes
@@ -428,15 +607,23 @@ func (h *ChatHandler) Chat(origins []string) fiber.Handler {
 			_ = conn.Close()
 			return
 		}
-		interviewID := uuid.MustParse(claims.Extra["interview_id"].(string))
-		sessionID, _ := claims.Extra["session_id"].(string)
+		interviewID, ok := ticketInterviewID(claims)
+		if !ok {
+			_ = conn.WriteJSON(ivdomain.ErrorMessage{Type: ivdomain.MsgError, Message: "invalid ws ticket"})
+			_ = conn.Close()
+			return
+		}
+		sessionID := claims.Extra.SessionID
 		orgID := claims.OrgID.String()
 
+		// Teardown order is owned by wsWriter.close (D18): it cancels
+		// connCtx before touching the writer mutex, so parked senders can
+		// never pin close — the handler always exits and Release runs.
 		connCtx, cancel := context.WithCancel(context.Background())
-		defer cancel()
 
 		ok, err := h.sessions.TryAcquire(connCtx, interviewID.String(), sessionID)
 		if err != nil || !ok {
+			cancel()
 			_ = conn.WriteJSON(ivdomain.ErrorMessage{Type: ivdomain.MsgError, Message: "interview already active on another connection"})
 			_ = conn.Close()
 			return
@@ -445,7 +632,7 @@ func (h *ChatHandler) Chat(origins []string) fiber.Handler {
 			_ = h.sessions.Release(context.Background(), interviewID.String(), sessionID)
 		}()
 
-		w := newWSWriter(conn, connCtx)
+		w := newWSWriter(conn, connCtx, cancel)
 		defer w.close()
 
 		if err := h.svc.StartInterview(connCtx, orgID, interviewID); err != nil {
@@ -453,7 +640,12 @@ func (h *ChatHandler) Chat(origins []string) fiber.Handler {
 			return
 		}
 		// Compose the prompt ONCE per connection (version pinned at connect).
-		prompt := h.composePromptOnce(connCtx, orgID)
+		prompt, err := h.composePromptOnce(connCtx, orgID)
+		if err != nil {
+			h.log.Error().Err(err).Msg("compose interview prompt failed")
+			w.sendError(err)
+			return
+		}
 		// History window seeded from the persisted transcript (resume support);
 		// appended in-session for the current connection. Guarded by historyMu:
 		// the read loop appends while the stream goroutine reads the window.
@@ -540,19 +732,29 @@ func (h *ChatHandler) Chat(origins []string) fiber.Handler {
 					w.send(ivdomain.ErrorMessage{Type: ivdomain.MsgError, Message: "session mismatch"})
 					continue
 				}
+				s.signalMu.Lock()
+				if s.streamCancel != nil {
+					s.streamCancel() // cancel any active stream before resending question
+				}
+				if s.streamDone != nil {
+					<-s.streamDone // drain it so sendStartAndQuestion isn't raced
+					s.streamDone = nil
+				}
+				s.streamCancel = nil
+				s.signalMu.Unlock()
 				h.sendStartAndQuestion(s)
-			case ivdomain.InterruptMessage:
-				s.handleInterrupt()
 			case ivdomain.TelemetryMessage:
 				s.handleTelemetry(h, m)
 			case ivdomain.CodeChangeMessage:
-				h.svc.TouchInterview(connCtx, orgID, interviewID)
+				s.debouncedTouch(h)
 			case ivdomain.CodeRunMessage:
 				s.handleCodeRun(h, m)
 			case ivdomain.AnswerMessage:
 				if !s.handleAnswer(h, m) {
 					return
 				}
+			case ivdomain.InterruptMessage:
+				s.handleInterrupt(h)
 			}
 		}
 	}, fiberws.Config{Origins: origins})
@@ -621,7 +823,7 @@ func (h *ChatHandler) runCode(ctx context.Context, send func(any), orgID string,
 		TestResults: rawTests,
 		Error:       res.Error,
 	})
-	_ = h.svc.RecordCodingSession(ctx, orgID, interviewID, ivdomain.CodingSession{
+	if err := h.svc.RecordCodingSession(ctx, orgID, interviewID, ivdomain.CodingSession{
 		QuestionIdx: m.QuestionIdx,
 		Language:    m.Language,
 		Code:        m.Code,
@@ -634,18 +836,19 @@ func (h *ChatHandler) runCode(ctx context.Context, send func(any), orgID string,
 			TestResults: rawTests,
 			Error:       res.Error,
 		},
-	})
+	}); err != nil {
+		h.log.Error().Err(err).Str("interview_id", interviewID.String()).Msg("record coding session failed")
+	}
 }
 
 // composePromptOnce builds the system prompt at connect time; failures fall
 // back to the default + safety rails.
-func (h *ChatHandler) composePromptOnce(ctx context.Context, orgID string) string {
+func (h *ChatHandler) composePromptOnce(ctx context.Context, orgID string) (string, error) {
 	prompt, err := h.svc.ComposePrompt(ctx, uuid.MustParse(orgID))
 	if err != nil {
-		h.log.Error().Err(err).Msg("compose prompt failed, using default")
-		return gensvc.ComposeSystemPrompt(gensvc.ComposerInput{})
+		return "", err
 	}
-	return prompt
+	return prompt, nil
 }
 
 func (h *ChatHandler) sendStartAndQuestion(s *chatSession) {
@@ -666,9 +869,13 @@ func (h *ChatHandler) sendStartAndQuestion(s *chatSession) {
 			Type:                ivdomain.MsgQuestion,
 			Content:             next.Content,
 			Idx:                 next.Idx,
+			TotalQuestions:      total,
+			IsProbe:             next.IsProbe,
 			Archetype:           arch,
 			TimeLimitSec:        limit,
 			SessionRemainingSec: remSec,
+			TopicTurn:           1,
+			MaxTopicTurns:       ivdomain.MaxTurnsPerTopic,
 		})
 		if s.onQuestion != nil {
 			s.onQuestion(next)
@@ -677,7 +884,7 @@ func (h *ChatHandler) sendStartAndQuestion(s *chatSession) {
 }
 
 // streamAndRespond runs the LLM stream in its own goroutine. On normal
-// completion it sends response + next question; a canceled ctx (interrupt /
+// completion it sends response + next question (if topic completed); a canceled ctx (interrupt /
 // disconnect) suppresses both — the interrupt path dispatches the question.
 // History is trimmed to the sliding window (last 10 Q&A); the total message
 // budget (8K tokens) is enforced before streaming — overruns degrade to an
@@ -686,20 +893,38 @@ func (h *ChatHandler) streamAndRespond(ctx context.Context, s *chatSession, answ
 	msgs := []gensvc.ContextMessage{{Role: gensvc.RoleSystem, Content: s.prompt}}
 	s.historyMu.Lock()
 	historySnapshot := gensvc.TrimContext(s.history, gensvc.DefaultContextWindow)
+	lastQ := s.lastQuestion
 	s.historyMu.Unlock()
 	msgs = append(msgs, historySnapshot...)
 
-	if next != nil {
+	if !turn.isTopicComplete {
+		// In-topic dialogue turn: Candidate asked for clarification or provided partial solution.
+		// LLM should respond in-topic with clarification or deep edge-case probing.
+		topicPrompt := "the current question"
+		if lastQ != nil {
+			topicPrompt = fmt.Sprintf("Question %d: \"%s\"", lastQ.Idx, lastQ.Content)
+		}
 		msgs = append(msgs, gensvc.ContextMessage{
 			Role: gensvc.RoleSystem,
-			Content: "The system is about to ask the candidate the following question: \"" + next.Content + "\"\n" +
-				"Do NOT ask this question yourself, and do NOT ask any other questions. " +
-				"Your task is ONLY to briefly acknowledge the candidate's last answer and provide a natural, professional transition.",
+			Content: fmt.Sprintf("You are an expert AI technical interviewer currently exploring %s with the candidate (Turn %d of %d).\n"+
+				"The candidate just replied: \"%s\".\n\n"+
+				"Instructions:\n"+
+				"1. If the candidate asked a clarifying question (e.g. scoping, expected scale, assumptions), answer it directly, clearly, and concisely without advancing or changing the topic.\n"+
+				"2. If the candidate gave a technical solution, acknowledge their specific points and probe deeper into trade-offs, race conditions, edge cases, failure modes, or bottlenecks on THIS SAME TOPIC.\n"+
+				"3. Keep your response focused and conversational (2-4 sentences). Do NOT transition to any other question.",
+				topicPrompt, turn.topicTurn, turn.maxTopicTurns, answer),
 		})
-	} else {
+	} else if next != nil {
+		// Topic finalized -> transitioning to next topic
 		msgs = append(msgs, gensvc.ContextMessage{
 			Role:    gensvc.RoleSystem,
-			Content: "The interview is now complete. Briefly thank the candidate for their time and conclude the conversation. Do NOT ask any questions.",
+			Content: fmt.Sprintf("The discussion on the previous question is now finalized. Briefly acknowledge the candidate's final response and provide a natural, 1-sentence transition to the next topic: \"%s\". Do NOT ask the next question yourself.", next.Content),
+		})
+	} else {
+		// Final question finished -> conclude interview
+		msgs = append(msgs, gensvc.ContextMessage{
+			Role:    gensvc.RoleSystem,
+			Content: "The entire technical interview is now complete. Thank the candidate warmly for their time and conclude the session. Do NOT ask any further questions.",
 		})
 	}
 
@@ -731,10 +956,25 @@ func (h *ChatHandler) streamAndRespond(ctx context.Context, s *chatSession, answ
 	if ctx.Err() != nil {
 		return // interrupted: response/next question suppressed
 	}
-	s.w.send(ivdomain.ResponseMessage{Type: ivdomain.MsgResponse, Content: final.String()})
-	turn.sendQuestionOnce(s.w.send)
-	if next == nil {
-		h.sendEvaluation(ctx, s.w.send, s.orgID, s.interviewID)
+
+	if !turn.isTopicComplete {
+		s.historyMu.Lock()
+		s.history = append(s.history, gensvc.ContextMessage{Role: gensvc.RoleAssistant, Content: final.String()})
+		s.historyMu.Unlock()
+	}
+
+	s.w.send(ivdomain.ResponseMessage{
+		Type:            ivdomain.MsgResponse,
+		Content:         final.String(),
+		IsTopicComplete: turn.isTopicComplete,
+		TopicTurn:       turn.topicTurn,
+		MaxTopicTurns:   turn.maxTopicTurns,
+	})
+	if turn.isTopicComplete {
+		turn.sendQuestionOnce(s.w.send)
+		if next == nil {
+			h.sendEvaluation(ctx, s.w.send, s.orgID, s.interviewID)
+		}
 	}
 }
 

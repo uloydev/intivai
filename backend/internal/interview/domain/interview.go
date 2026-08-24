@@ -25,6 +25,8 @@ const (
 	MaxInterviewDuration = 30 * time.Minute
 	// PerQuestionTimeout — max wait for a candidate frame (question answer).
 	PerQuestionTimeout = 3 * time.Minute
+	// MaxTurnsPerTopic — max conversational dialogue exchanges on a single question topic.
+	MaxTurnsPerTopic = 3
 )
 
 // Question Archetypes & Stage Timer Gates.
@@ -67,6 +69,8 @@ type Answer struct {
 	Content         string         `json:"content"`
 	AnsweredAt      time.Time      `json:"answered_at"`
 	PacingTelemetry *PacingMetrics `json:"pacing_telemetry,omitempty"`
+	Action          string         `json:"action,omitempty"` // "reply" | "advance"
+	Turn            int            `json:"turn,omitempty"`   // 1-based turn number within this question topic
 }
 
 // Interview aggregate — state machine driven by an injectable clock
@@ -82,6 +86,7 @@ type Interview struct {
 	ContextVersion    int    // company-context version pinned at creation (audit)
 	Evaluation        []byte // post-interview report (evaluation JSONB), hydrated by GetByID
 	ConsentGiven      bool   // GDPR consent captured before interview start
+	HumanRequested    bool   // candidate requested a human interviewer
 	ProctoringEvents  []ProctoringEvent
 	ProctoringSummary ProctoringSummary
 	CodingSessions    []CodingSession
@@ -129,27 +134,71 @@ func (iv *Interview) Start() error {
 	}
 }
 
-// AnswerWithPacing records a candidate answer with pacing metrics, advances the cursor, touches activity.
-func (iv *Interview) AnswerWithPacing(content string, pacing *PacingMetrics) error {
+// TopicTurnCount returns the number of candidate dialogue turns recorded for question idx.
+func (iv *Interview) TopicTurnCount(idx int) int {
+	count := 0
+	for _, a := range iv.Answers {
+		if a.Idx == idx {
+			count++
+		}
+	}
+	return count
+}
+
+// CurrentTopicIdx returns the 1-based index of the currently active question topic.
+func (iv *Interview) CurrentTopicIdx() int {
+	if iv.LastQuestionIdx >= len(iv.Questions) {
+		return len(iv.Questions)
+	}
+	return iv.LastQuestionIdx + 1
+}
+
+// ProcessTopicDialogue records a multi-turn conversational exchange on the active question topic.
+// If action is "reply" and turns < MaxTurnsPerTopic, the topic remains open for dialogue.
+// If action is "advance" or turn reaches MaxTurnsPerTopic, the topic is finalized and the cursor advances.
+func (iv *Interview) ProcessTopicDialogue(content string, action string, pacing *PacingMetrics) (*Question, bool, int, int, error) {
 	if iv.Status != StatusInProgress {
-		return errors.NewDomainError("INTERVIEW_NOT_IN_PROGRESS", "interview is not in progress")
+		return nil, false, 0, 0, errors.NewDomainError("INTERVIEW_NOT_IN_PROGRESS", "interview is not in progress")
 	}
-	if content == "" {
-		return errors.NewDomainError("ANSWER_EMPTY", "answer is empty")
+	if strings.TrimSpace(content) == "" {
+		return nil, false, 0, 0, errors.NewDomainError("ANSWER_EMPTY", "answer is empty")
 	}
-	idx := iv.LastQuestionIdx + 1
-	if idx > len(iv.Questions) {
-		idx = len(iv.Questions)
+	if iv.LastQuestionIdx >= len(iv.Questions) {
+		return nil, true, 0, 0, errors.NewDomainError("NO_ACTIVE_QUESTION", "all interview questions completed")
 	}
+
+	currentIdx := iv.LastQuestionIdx + 1
+	turn := iv.TopicTurnCount(currentIdx) + 1
+	if action != "reply" {
+		action = "advance"
+	}
+
 	iv.Answers = append(iv.Answers, Answer{
-		Idx:             idx,
+		Idx:             currentIdx,
 		Content:         content,
 		AnsweredAt:      iv.clock.Now(),
 		PacingTelemetry: pacing,
+		Action:          action,
+		Turn:            turn,
 	})
-	iv.LastQuestionIdx = idx
 	iv.lastActivity = iv.clock.Now()
-	return nil
+
+	isTopicComplete := action == "advance" || turn >= MaxTurnsPerTopic
+	if isTopicComplete {
+		iv.LastQuestionIdx = currentIdx
+		next := iv.NextQuestion()
+		return next, true, turn, MaxTurnsPerTopic, nil
+	}
+
+	// Topic remains open, return current active question
+	currentQ := iv.NextQuestion()
+	return currentQ, false, turn, MaxTurnsPerTopic, nil
+}
+
+// AnswerWithPacing records a candidate answer with pacing metrics, advances the cursor, touches activity.
+func (iv *Interview) AnswerWithPacing(content string, pacing *PacingMetrics) error {
+	_, _, _, _, err := iv.ProcessTopicDialogue(content, "advance", pacing)
+	return err
 }
 
 // Answer records a candidate answer, advances the cursor, touches activity.
@@ -200,6 +249,9 @@ func (iv *Interview) InsertProbeAfter(currentIdx int, content, category, skill s
 // Complete marks the interview finished (all questions answered or recruiter
 // ended it).
 func (iv *Interview) Complete() error {
+	if iv.Status == StatusExpired || iv.Status == StatusCompleted {
+		return errors.NewDomainError("INTERVIEW_NOT_COMPLETABLE", "interview cannot be completed from status "+string(iv.Status))
+	}
 	if iv.Status != StatusInProgress {
 		return errors.NewDomainError("INTERVIEW_NOT_IN_PROGRESS", "interview is not in progress")
 	}

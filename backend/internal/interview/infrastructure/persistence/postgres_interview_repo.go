@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/google/uuid"
@@ -16,7 +17,7 @@ import (
 // interviewColumns is the column list for the interviews table. GetByID and
 // ByApplication use it unqualified; ListByOrg qualifies it with the iv. alias
 // for the applications join.
-const interviewColumns = `id, application_id, status, transcript, last_question_idx, context_version, evaluation, consent_given, proctoring_events, proctoring_summary, coding_sessions, started_at, completed_at, expires_at, created_at`
+const interviewColumns = `id, application_id, status, transcript, last_question_idx, context_version, evaluation, consent_given, human_requested, proctoring_events, proctoring_summary, coding_sessions, started_at, completed_at, expires_at, created_at`
 
 type PostgresInterviewRepo struct {
 	pool *gorm.DB
@@ -39,7 +40,10 @@ func (r *PostgresInterviewRepo) Create(ctx context.Context, iv *ivdomain.Intervi
 	if err != nil {
 		return err
 	}
-	raw, rawEvents, rawSummary, rawSessions := marshalInterview(iv)
+	raw, rawEvents, rawSummary, rawSessions, err := marshalInterview(iv)
+	if err != nil {
+		return err
+	}
 	return db.WrapError(tx.WithContext(ctx).Exec(
 		`INSERT INTO interviews (id, application_id, type, status, transcript, last_question_idx,
 		 context_version, proctoring_events, proctoring_summary, coding_sessions,
@@ -50,13 +54,20 @@ func (r *PostgresInterviewRepo) Create(ctx context.Context, iv *ivdomain.Intervi
 		iv.StartedAt, iv.CompletedAt, iv.ExpiresAt, iv.CreatedAt).Error)
 }
 
+// GetByID hydrates OrgID through the applications join (interviews have no
+// org_id column; RLS resolves via applications). Domain callers that compare
+// iv.OrgID (telemetry ticket check, recruiter decision ownership) depend on
+// it — keep the join.
 func (r *PostgresInterviewRepo) GetByID(ctx context.Context, id uuid.UUID) (*ivdomain.Interview, error) {
 	tx, err := r.tx(ctx)
 	if err != nil {
 		return nil, err
 	}
 	row := tx.Raw(
-		`SELECT `+interviewColumns+` FROM interviews WHERE id = $1`, id).Row()
+		`SELECT iv.`+strings.ReplaceAll(interviewColumns, ", ", ", iv.")+`, a.org_id
+		 FROM interviews iv
+		 JOIN applications a ON a.id = iv.application_id
+		 WHERE iv.id = $1`, id).Row()
 	return scanInterview(row)
 }
 
@@ -65,7 +76,10 @@ func (r *PostgresInterviewRepo) Update(ctx context.Context, iv *ivdomain.Intervi
 	if err != nil {
 		return err
 	}
-	raw, rawEvents, rawSummary, rawSessions := marshalInterview(iv)
+	raw, rawEvents, rawSummary, rawSessions, err := marshalInterview(iv)
+	if err != nil {
+		return err
+	}
 	return db.WrapError(tx.WithContext(ctx).Exec(
 		`UPDATE interviews SET status = $1, transcript = $2, last_question_idx = $3,
 		 proctoring_events = $4, proctoring_summary = $5, coding_sessions = $6,
@@ -93,18 +107,26 @@ func (r *PostgresInterviewRepo) RecordProctoringEvent(ctx context.Context, id uu
 		return err
 	}
 	var events []ivdomain.ProctoringEvent
-	_ = json.Unmarshal(rawEvents, &events)
+	if err := decodeJSONB(rawEvents, &events); err != nil {
+		return fmt.Errorf("decode proctoring events: %w", err)
+	}
 	events = append(events, event)
 	// The summary reflects the FULL event history (dropped raw events must
 	// not silently weaken the integrity score)…
-	summary, _ := json.Marshal(ivdomain.CalculateProctoringSummary(events))
+	summary, err := json.Marshal(ivdomain.CalculateProctoringSummary(events))
+	if err != nil {
+		return fmt.Errorf("encode proctoring summary: %w", err)
+	}
 	// …but raw events are retention-capped (design decision): keep the most
 	// recent 500 so the JSONB column cannot grow unboundedly per interview.
 	const maxStoredEvents = 500
 	if len(events) > maxStoredEvents {
 		events = events[len(events)-maxStoredEvents:]
 	}
-	raw, _ := json.Marshal(events)
+	raw, err := json.Marshal(events)
+	if err != nil {
+		return fmt.Errorf("encode proctoring events: %w", err)
+	}
 	return tx.WithContext(ctx).Exec(
 		`UPDATE interviews SET
 		   proctoring_events = $1,
@@ -130,7 +152,10 @@ func (r *PostgresInterviewRepo) RecordCodingSession(ctx context.Context, id uuid
 	if err != nil {
 		return err
 	}
-	raw, _ := json.Marshal(session)
+	raw, err := json.Marshal(session)
+	if err != nil {
+		return fmt.Errorf("encode coding session: %w", err)
+	}
 	return tx.WithContext(ctx).Exec(
 		`UPDATE interviews SET
 		   coding_sessions = COALESCE(coding_sessions, '[]'::jsonb) || $1::jsonb,
@@ -168,13 +193,25 @@ func (r *PostgresInterviewRepo) SetConsent(ctx context.Context, id uuid.UUID) er
 		`UPDATE interviews SET consent_given = true, updated_at = NOW() WHERE id = $1`, id).Error)
 }
 
+func (r *PostgresInterviewRepo) SetHumanRequested(ctx context.Context, id uuid.UUID, requested bool) error {
+	tx, err := r.tx(ctx)
+	if err != nil {
+		return err
+	}
+	return db.WrapError(tx.WithContext(ctx).Exec(
+		`UPDATE interviews SET human_requested = $1, updated_at = NOW() WHERE id = $2`, requested, id).Error)
+}
+
 func (r *PostgresInterviewRepo) ByApplication(ctx context.Context, applicationID uuid.UUID) ([]*ivdomain.Interview, error) {
 	tx, err := r.tx(ctx)
 	if err != nil {
 		return nil, err
 	}
 	rows, err := tx.Raw(
-		`SELECT `+interviewColumns+` FROM interviews WHERE application_id = $1 ORDER BY created_at DESC`, applicationID).Rows()
+		`SELECT iv.`+strings.ReplaceAll(interviewColumns, ", ", ", iv.")+`, a.org_id
+		 FROM interviews iv
+		 JOIN applications a ON a.id = iv.application_id
+		 WHERE iv.application_id = $1 ORDER BY iv.created_at DESC`, applicationID).Rows()
 	if err != nil {
 		return nil, err
 	}
@@ -198,7 +235,7 @@ func (r *PostgresInterviewRepo) ListByOrg(ctx context.Context, orgID uuid.UUID) 
 		return nil, err
 	}
 	rows, err := tx.Raw(
-		`SELECT iv.`+strings.ReplaceAll(interviewColumns, ", ", ", iv.")+`
+		`SELECT iv.`+strings.ReplaceAll(interviewColumns, ", ", ", iv.")+`, a.org_id
 		 FROM interviews iv
 		 JOIN applications a ON a.id = iv.application_id
 		 WHERE a.org_id = $1
@@ -225,12 +262,31 @@ type transcript struct {
 
 // marshalInterview encodes the JSONB columns shared by Create and Update
 // (transcript, proctoring events/summary, coding sessions).
-func marshalInterview(iv *ivdomain.Interview) (rawTranscript, rawEvents, rawSummary, rawSessions []byte) {
-	raw, _ := json.Marshal(transcript{Questions: iv.Questions, Answers: iv.Answers})
-	rawEvents, _ = json.Marshal(iv.ProctoringEvents)
-	rawSummary, _ = json.Marshal(iv.ProctoringSummary)
-	rawSessions, _ = json.Marshal(iv.CodingSessions)
-	return raw, rawEvents, rawSummary, rawSessions
+func marshalInterview(iv *ivdomain.Interview) (rawTranscript, rawEvents, rawSummary, rawSessions []byte, err error) {
+	rawTranscript, err = json.Marshal(transcript{Questions: iv.Questions, Answers: iv.Answers})
+	if err != nil {
+		return nil, nil, nil, nil, fmt.Errorf("encode transcript: %w", err)
+	}
+	rawEvents, err = json.Marshal(iv.ProctoringEvents)
+	if err != nil {
+		return nil, nil, nil, nil, fmt.Errorf("encode proctoring events: %w", err)
+	}
+	rawSummary, err = json.Marshal(iv.ProctoringSummary)
+	if err != nil {
+		return nil, nil, nil, nil, fmt.Errorf("encode proctoring summary: %w", err)
+	}
+	rawSessions, err = json.Marshal(iv.CodingSessions)
+	if err != nil {
+		return nil, nil, nil, nil, fmt.Errorf("encode coding sessions: %w", err)
+	}
+	return rawTranscript, rawEvents, rawSummary, rawSessions, nil
+}
+
+func decodeJSONB[T any](raw []byte, dst *T) error {
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil
+	}
+	return json.Unmarshal(raw, dst)
 }
 
 type rowScanner interface {
@@ -246,30 +302,29 @@ func scanInterview(row rowScanner) (*ivdomain.Interview, error) {
 		rawSessions   []byte
 	)
 	err := row.Scan(&iv.ID, &iv.ApplicationID, &iv.Status, &rawTranscript, &iv.LastQuestionIdx,
-		&iv.ContextVersion, &iv.Evaluation, &iv.ConsentGiven, &rawEvents, &rawSummary, &rawSessions,
-		&iv.StartedAt, &iv.CompletedAt, &iv.ExpiresAt, &iv.CreatedAt)
+		&iv.ContextVersion, &iv.Evaluation, &iv.ConsentGiven, &iv.HumanRequested, &rawEvents, &rawSummary, &rawSessions,
+		&iv.StartedAt, &iv.CompletedAt, &iv.ExpiresAt, &iv.CreatedAt, &iv.OrgID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ivdomain.ErrNotFound
 	}
 	if err != nil {
 		return nil, err
 	}
-	if len(rawTranscript) > 0 {
-		var t transcript
-		if err := json.Unmarshal(rawTranscript, &t); err == nil {
-			iv.Questions = t.Questions
-			iv.Answers = t.Answers
-		}
+	var t transcript
+	if err := decodeJSONB(rawTranscript, &t); err != nil {
+		return nil, fmt.Errorf("decode transcript: %w", err)
 	}
-	if len(rawEvents) > 0 {
-		_ = json.Unmarshal(rawEvents, &iv.ProctoringEvents)
+	if err := decodeJSONB(rawEvents, &iv.ProctoringEvents); err != nil {
+		return nil, fmt.Errorf("decode proctoring events: %w", err)
 	}
-	if len(rawSummary) > 0 {
-		_ = json.Unmarshal(rawSummary, &iv.ProctoringSummary)
+	if err := decodeJSONB(rawSummary, &iv.ProctoringSummary); err != nil {
+		return nil, fmt.Errorf("decode proctoring summary: %w", err)
 	}
-	if len(rawSessions) > 0 {
-		_ = json.Unmarshal(rawSessions, &iv.CodingSessions)
+	if err := decodeJSONB(rawSessions, &iv.CodingSessions); err != nil {
+		return nil, fmt.Errorf("decode coding sessions: %w", err)
 	}
+	iv.Questions = t.Questions
+	iv.Answers = t.Answers
 
 	iv.SetClock(ivdomain.SystemClock())
 	return &iv, nil

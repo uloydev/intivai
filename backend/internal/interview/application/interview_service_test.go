@@ -16,6 +16,7 @@ import (
 	scrrepo "github.com/intivai/backend/internal/screening/infrastructure/persistence"
 	"github.com/intivai/backend/pkg/db"
 	"github.com/intivai/backend/pkg/storage"
+	"github.com/rs/zerolog"
 )
 
 // RED: archived jobs must not produce interviews (consistent with the
@@ -67,7 +68,7 @@ func TestCreateInterviewRejectsArchivedJob(t *testing.T) {
 	svc := NewInterviewService(pool,
 		ivrepo.NewPostgresInterviewRepo(pool), ivrepo.NewPostgresTokenRepo(pool), ivrepo.NewPostgresQuestionBank(pool),
 		scrrepo.NewPostgresApplicationRepo(pool), cvrepo.NewPostgresCandidateRepo(pool), jobrepo.NewPostgresJobRepo(pool),
-		ctxrepo.NewPostgresContextRepo(pool), minio, auth.NewJWTProvider("test-secret"), ivdomain.SystemClock(), nil)
+		ctxrepo.NewPostgresContextRepo(pool), minio, auth.NewJWTProvider("test-secret"), ivdomain.SystemClock(), nil, zerolog.Nop())
 
 	actor := iamActor(orgID, "admin")
 	_, err = svc.CreateInterview(ctx, actor, CreateInterviewCommand{ApplicationID: appID, QuestionCount: 3})
@@ -85,6 +86,13 @@ type spyEnqueuer struct {
 	lastInviteToken string
 }
 
+func TestProcessTopicDialogueRejectsInvalidOrgID(t *testing.T) {
+	svc := &InterviewService{}
+	if _, err := svc.ProcessTopicDialogue(context.Background(), "not-a-uuid", uuid.New(), "answer", "reply", nil); err == nil {
+		t.Fatal("expected invalid organization id error")
+	}
+}
+
 func (s *spyEnqueuer) EnqueueEvaluation(ctx context.Context, orgID, interviewID string) error {
 	s.lastOrgID = orgID
 	s.lastInterviewID = interviewID
@@ -96,6 +104,14 @@ func (s *spyEnqueuer) EnqueueInterviewInvitation(ctx context.Context, to, name, 
 	s.lastCandName = name
 	s.lastJobTitle = jobTitle
 	s.lastInviteToken = inviteToken
+	return nil
+}
+
+func (s *spyEnqueuer) EnqueueHumanRequest(ctx context.Context, to, candidateName, jobTitle, interviewID string) error {
+	s.lastTo = to
+	s.lastCandName = candidateName
+	s.lastJobTitle = jobTitle
+	s.lastInterviewID = interviewID
 	return nil
 }
 
@@ -148,7 +164,7 @@ func TestCreateInterviewDispatchesInvitationEmail(t *testing.T) {
 	svc := NewInterviewService(pool,
 		ivrepo.NewPostgresInterviewRepo(pool), ivrepo.NewPostgresTokenRepo(pool), ivrepo.NewPostgresQuestionBank(pool),
 		scrrepo.NewPostgresApplicationRepo(pool), cvrepo.NewPostgresCandidateRepo(pool), jobrepo.NewPostgresJobRepo(pool),
-		ctxrepo.NewPostgresContextRepo(pool), minio, auth.NewJWTProvider("test-secret"), ivdomain.SystemClock(), spy)
+		ctxrepo.NewPostgresContextRepo(pool), minio, auth.NewJWTProvider("test-secret"), ivdomain.SystemClock(), spy, zerolog.Nop())
 
 	actor := iamActor(orgID, "admin")
 	res, err := svc.CreateInterview(ctx, actor, CreateInterviewCommand{ApplicationID: appID, QuestionCount: 3})
