@@ -1,0 +1,96 @@
+# A19: six Playwright specs exist but ran nowhere automated (one spec, F18,
+# stalls). DECISION: run them nightly, allow-fail, until F18 is fixed — then
+# flip continue-on-error to false and consider PR-gating.
+name: E2E Nightly
+
+on:
+  schedule:
+    - cron: "30 20 * * *" # ~03:30 WIB daily
+  workflow_dispatch:
+
+jobs:
+  e2e:
+    name: Playwright e2e (non-blocking)
+    runs-on: ubuntu-latest
+    # NON-BLOCKING by decision (F18 stalls one spec). Loud marker below.
+    continue-on-error: true
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      # Same stack pattern as ci.yml backend-smoke, but WITH the dev overlay:
+      # the overlay maps app → host :8081, which is what the vite /api proxy
+      # targets (frontend/vite.config.ts).
+      - name: Boot stack (docker compose base + dev overlay)
+        working-directory: .
+        run: docker compose --env-file .env.ci -f docker-compose.yml -f docker-compose.dev.yml up -d --build
+        env:
+          INTIVAI_LLM_API_KEY: ${{ secrets.INTIVAI_LLM_API_KEY }}
+
+      - name: Wait for API health (:8081)
+        run: |
+          for i in $(seq 1 60); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8081/health || true)
+            [ "$code" = "200" ] && break
+            sleep 2
+          done
+          [ "$code" = "200" ] || { echo "app not healthy"; exit 1; }
+
+      - name: Seed demo data
+        working-directory: .
+        run: make seed
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Start Vite dev server (:5173)
+        run: |
+          nohup npm run dev -- --host > /tmp/vite.log 2>&1 &
+          ok=""
+          for i in $(seq 1 60); do
+            if curl -sf http://localhost:5173 >/dev/null; then ok=1; break; fi
+            sleep 2
+          done
+          [ -n "$ok" ] || { cat /tmp/vite.log; exit 1; }
+
+      - name: Run Playwright (workers:1 per playwright.config.ts)
+        run: npx playwright test
+        env:
+          INTIVAI_LLM_API_KEY: ${{ secrets.INTIVAI_LLM_API_KEY }}
+
+      - name: Upload traces/screenshots/report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-artifacts
+          path: |
+            frontend/playwright-report/
+            frontend/test-results/
+          retention-days: 7
+          if-no-files-found: ignore
+
+      - name: Nightly e2e status marker
+        if: always()
+        run: |
+          {
+            echo "## NIGHTLY E2E — non-blocking until F18 fixed"
+            echo ""
+            echo "Job result: ${{ job.status }} (continue-on-error: true)"
+            echo "Flip \`continue-on-error: false\` in e2e-nightly.yml once F18 lands."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Tear down
+        if: always()
+        working-directory: .
+        run: docker compose --env-file .env.ci -f docker-compose.yml -f docker-compose.dev.yml down -v
