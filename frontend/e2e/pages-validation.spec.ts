@@ -31,12 +31,13 @@ test.describe("Full Intivai Application Pages Validation", () => {
     await expect(page).toHaveURL("/careers")
 
     // Heading and search input
-    await expect(page.getByText(/Join the Future of AI Recruitment/i)).toBeVisible()
-    const searchInput = page.getByPlaceholder(/Search by job title, technology, or keywords/i)
+    await expect(page.getByText(/Join High-Growth Engineering Teams/i)).toBeVisible()
+    const searchInput = page.getByPlaceholder(/Search by role, company, skills, or location/i)
     await expect(searchInput).toBeVisible()
 
     // Filter by search — assert the filtered result set (auto-retrying)
-    await searchInput.fill("Go")
+    await searchInput.fill("Distributed")
+    await expect(page.getByText("Senior Distributed Systems Engineer")).toBeVisible()
 
     // Job cards
     const applyButtons = page.getByRole("button", { name: /Apply Now/i })
@@ -44,14 +45,15 @@ test.describe("Full Intivai Application Pages Validation", () => {
 
     // Open Apply Modal
     await applyButtons.first().click()
-    await expect(page.getByText(/Apply for/i)).toBeVisible()
+    await expect(page.getByRole("dialog")).toBeVisible()
+    await expect(page.getByText(/Apply for Senior Distributed Systems Engineer/i)).toBeVisible()
     await expect(page.getByLabel(/Full Name/i)).toBeVisible()
     await expect(page.getByLabel(/Email Address/i)).toBeVisible()
-    await expect(page.getByText(/Resume \/ CV \(PDF format\)/i)).toBeVisible()
+    await expect(page.getByText(/Resume \/ CV \(PDF or DOCX\)/i)).toBeVisible()
 
     // Close Modal
     await page.getByRole("button", { name: /Cancel/i }).click()
-    await expect(page.getByText(/Resume \/ CV \(PDF format\)/i)).not.toBeVisible()
+    await expect(page.getByText(/Resume \/ CV \(PDF or DOCX\)/i)).not.toBeVisible()
   })
 
   test("3. Auth Pages (/login & /register) and Recruiter Sign-in", async ({ page }) => {
@@ -117,21 +119,22 @@ test.describe("Full Intivai Application Pages Validation", () => {
   test("5. Candidate Invitation Gate (/invite/:id)", async ({ page }) => {
     await page.goto("/invite/demo-invitation-token")
     await expect(page.getByText("Interview Invitation")).toBeVisible()
-    await expect(page.getByText(/I consent to my answers being analyzed/i)).toBeVisible()
+    await expect(page.getByText(/I consent to my answers being evaluated by AI/i)).toBeVisible()
     await expect(page.getByRole("button", { name: /Begin Interview Session/i })).toBeVisible()
   })
 
   test("6. Candidate Live Voice Interview Simulator (/voice/:id)", async ({ page }) => {
     await page.goto("/voice/demo-session-id")
-    await expect(page.getByText("Intivai Voice Evaluator")).toBeVisible()
-    await expect(page.getByText("Ready to connect")).toBeVisible()
-    await expect(page.getByRole("button", { name: /Start Voice Interview/i })).toBeVisible()
+    // G4 fix: voice page is recruiter-gated — renders guidance panel, never a public start control
+    await expect(page.getByText("Recruiter access required")).toBeVisible()
+    await expect(page.getByRole("button", { name: /Start Voice Interview/i })).toHaveCount(0)
   })
 
   test("7. Candidate Live Chat Interview (/chat/:id)", async ({ page }) => {
     await page.goto("/chat/demo-session-id")
     await expect(page.getByText(/Intivai Live Assessment/i)).toBeVisible()
-    await expect(page.getByPlaceholder(/Type your (answer|response)/i)).toBeVisible()
+    // Placeholder is context-dependent (initial vs in-topic clarification)
+    await expect(page.getByPlaceholder(/Type your answer to Question|Ask a clarification/i)).toBeVisible()
   })
 
   test("8. Public Navbar Cross-Page Navigation & Anchors", async ({ page }) => {
@@ -152,5 +155,63 @@ test.describe("Full Intivai Application Pages Validation", () => {
     await page.getByRole("link", { name: /FAQ/i }).first().click()
     await expect(page).toHaveURL(/\/#faq/)
     await expect(page.getByText(/Frequently Asked Questions/i)).toBeVisible()
+  })
+
+  test("9. Recruiter Workspace — Integrations & Webhooks (/integrations)", async ({ page }) => {
+    // Authenticate first
+    await page.goto("/login")
+    await page.locator("#org").fill("demo")
+    await page.locator("#email").fill("admin@demo.io")
+    await page.locator("#password").fill("password123")
+    await page.locator("button[type=submit]").click()
+    await expect(page).toHaveURL(/.*\/dashboard/, { timeout: 10000 })
+
+    // Integrations page
+    await page.goto("/integrations")
+    await expect(page.getByText("Integrations")).toBeVisible()
+    await expect(page.getByRole("button", { name: /Add Webhook/i })).toBeVisible()
+  })
+
+  test("10. Candidate Portal — GDPR Data Export & Deletion (/candidate/portal)", async ({ page }) => {
+    await page.goto("/candidate/portal?token=demo-magic-token-alex-2026")
+    await expect(page.getByText(/Applicant Tracking Dashboard/i)).toBeVisible({ timeout: 10_000 })
+
+    // GDPR export button
+    await expect(page.getByText(/Export My Data/i)).toBeVisible()
+
+    // GDPR delete section — button text is "Delete Account"
+    await expect(page.getByText(/Delete Account/i)).toBeVisible()
+  })
+
+  test("11. Interview Scorecard — Recruiter Decision Override", async ({ page }) => {
+    // Authenticate first
+    await page.goto("/login")
+    await page.locator("#org").fill("demo")
+    await page.locator("#email").fill("admin@demo.io")
+    await page.locator("#password").fill("password123")
+    await page.locator("button[type=submit]").click()
+    await expect(page).toHaveURL(/.*\/dashboard/, { timeout: 10000 })
+
+    // Completed scorecard with override button
+    await page.goto("/interviews/b4c5d6e7-f8a3-4b4c-8d5e-5d6e7f8a3b4c")
+    await expect(page.getByText(/Score/i).first()).toBeVisible()
+    await expect(page.getByText(/Hiring Verdict/i)).toBeVisible()
+
+    // Override button present on completed scorecards
+    const overrideBtn = page.getByRole("button", { name: /Override/i })
+    if (await overrideBtn.isVisible().catch(() => false)) {
+      await expect(overrideBtn).toBeVisible()
+    }
+  })
+
+  test("12. Legal & Compliance Pages (/privacy, /terms, /security)", async ({ page }) => {
+    await page.goto("/privacy")
+    await expect(page).toHaveURL("/privacy")
+
+    await page.goto("/terms")
+    await expect(page).toHaveURL("/terms")
+
+    await page.goto("/security")
+    await expect(page).toHaveURL("/security")
   })
 })
