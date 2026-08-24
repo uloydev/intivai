@@ -306,12 +306,13 @@ similar, _ := mn.Recall(ctx,
 
 ## Phase 5: Voice Interview (Week 13-16) — POST-MVP, ONLY with a paying customer
 
-> Scope history and final decision: **ADR-0006**. Short version: deferred
-> (2026-08-18), briefly re-pivoted as MVP (P4_Plan D6), settled as
-> demo-only/out-of-critical-path — the WS route, Pion signaling, VAD/STT/TTS
-> adapters, and an FE voice page ship as a gated sales demo; real Opus
-> decode/encode remains unimplemented and the route is NOT mounted in
-> main.go. Full Phase 5 lands only when a paying customer requires it.
+> Scope history and final decision: **ADR-0006**, amended by **ADR-0008**
+> (2026-08-24): deferred (2026-08-18), briefly re-pivoted as MVP (P4_Plan D6),
+> settled as demo-only/out-of-critical-path — the WS route, Pion signaling,
+> VAD/STT/TTS adapters, and an FE voice page ship as a gated sales demo; real
+> Opus decode/encode remains unimplemented. The route IS mounted (auth-guarded)
+> so staged demos work without rebuilds; it stays demo-gated and excluded from
+> beta commitments. Full Phase 5 lands only when a paying customer requires it.
 
 **Goal:** Real-time voice interview via WebRTC + Whisper STT + Edge TTS
 
@@ -357,13 +358,17 @@ Browser mic → Opus → WebRTC (Pion) → PCM → VAD (silero-vad) → segment 
 | **Total per turn** | **~3-5s** |
 
 ### Testing Criteria
-- [x] WebRTC connection established (browser ↔ server)
-- [x] VAD segmentation: energy-based VAD / speech detector
-- [x] Audio streaming & handling via WebRTC / WebSocket signaling
-- [x] Whisper STT adapter (whisper.cpp docker sidecar)
-- [x] LLM generates response
-- [x] Edge TTS returns audio
-- [x] Audio played back in browser
+> 2026-08-24 honesty pass (H3): the `[x]` rows below were executed against the
+> **mocked** demo pipeline only (STT/LLM mocked per design-decisions §3 and
+> ADR-0006/0008); they do not certify production voice. Real-STT criteria stay
+> unchecked until P5 proper.
+- [x] WebRTC connection established (browser ↔ server) — demo pipeline
+- [x] VAD segmentation: energy-based VAD / speech detector — demo pipeline
+- [x] Audio streaming & handling via WebRTC / WebSocket signaling — demo pipeline
+- [ ] Whisper STT adapter with real transcription (demo mocks STT)
+- [x] LLM generates response — demo pipeline
+- [ ] Edge TTS returns real audio (demo pipeline mocked)
+- [ ] Audio played back in browser from real TTS output
 - [ ] TURN server fallback works (UDP blocked)
 - [ ] Recording saved to MinIO
 - [ ] 5 concurrent voice sessions stable

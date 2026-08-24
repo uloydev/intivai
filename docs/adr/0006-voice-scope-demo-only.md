@@ -1,6 +1,6 @@
 # ADR-0006: Voice interview scope — demo only, out of the beta critical path
 
-- **Status:** accepted (settles D6)
+- **Status:** accepted (settles D6). 2026-08-24: unmount clause amended by **ADR-0008** — route stays mounted, demo-gated; scope decision unchanged
 - **Date:** 2026-08-24 (history: deferred 2026-08-18; pivoted back 2026-08-18 in P4_Plan D6)
 - **Deciders:** EM
 
@@ -10,7 +10,7 @@ Voice was originally gated on a paying customer (`docs/engineering/roadmap.md`, 
 
 ## Decision
 
-**Voice is demo-only and NOT on the beta critical path.** The gated demo (Pion signaling, VAD/STT/TTS adapters, FE `/voice/:id`) stays as a sales artifact. The backend route stays unmounted in `main.go` (the OpenAPI spec records this explicitly). Full Phase 5 (real duplex audio, TURN, recording) lands only when a paying customer requires it — the original phase gate stands.
+**Voice is demo-only and NOT on the beta critical path.** The gated demo (Pion signaling, VAD/STT/TTS adapters, FE `/voice/:id`) stays as a sales artifact. ~~The backend route stays unmounted in `main.go` (the OpenAPI spec records this explicitly).~~ **Amended 2026-08-24 by ADR-0008:** the route is in fact mounted and stays mounted; documents were corrected instead. Full Phase 5 (real duplex audio, TURN, recording) lands only when a paying customer requires it — the original phase gate stands.
 
 ## Alternatives Considered
 

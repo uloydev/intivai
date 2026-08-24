@@ -52,8 +52,8 @@ reasoning. Status markers: ✅ implemented as designed · ⚠️ deviated (reaso
 | §4.3 Mnemosyne bank per tenant | ✅ SQLite (dev) + **pgvector bank (prod)** + cosine recall | `memory/infrastructure/{native,postgres}` |
 | §4.3 fastembed bge-small | ⚠️ cybertron (pure Go) with `multi-qa-MiniLM-L6-cos-v1` default — bge-small is gated on HuggingFace; set `EMBED_MODEL_NAME` when accessible | `embedding/` |
 | §4.4 Asynq queue | ✅ task names single-sourced; workers for parse, extract, score, eval, email | `pkg/queue` + `internal/*/application` |
-| §4.5 golang-migrate embedded | ✅ migrations 001–009, `-migrate-only` mode | `pkg/db/` |
-| §4.6 Observability | ✅ JSON logs, health/ready probes (DB/Redis/MinIO), Sentry integration, Prometheus metrics | `pkg/logger`, `pkg/metrics`, `cmd/server` |
+| §4.5 golang-migrate embedded | ✅ migrations 001–025, `-migrate-only` mode | `pkg/db/` |
+| §4.6 Observability | ✅ JSON logs, health/ready probes (DB/Redis/MinIO), Prometheus metrics; ✅ Sentry backend wired (`pkg/observability`: DSN-gated init, fibersentry middleware, worker panic capture, request/org-id tags; no prod DSN yet); FE Sentry wired | `pkg/logger`, `pkg/metrics`, `pkg/observability`, `cmd/server` |
 | §4.7 CORS/CSWSH | ✅ origin allowlist (CORS + WS), `?ticket=` for browsers | `httpmw/cors.go`, `interview/api` |
 | §4.8 Rate limiting | ✅ Redis sliding window (auth/tenant/user), fail-open | `httpmw/ratelimit.go` |
 | §4.9 Stack | ✅ GORM over pgx stdlib, Fiber, MinIO, React 19 + TypeScript + Vite | everywhere |
@@ -636,10 +636,11 @@ truth; the evaluator struct in §5 mirrors it. Dimension weights must sum to ≈
 
 ## 3. AI Interview (Voice/Video)
 
-> **Status: gated demo — NOT mounted in production routing.** STT/LLM are
-> mocked and Opus decode/encode is unimplemented; see the sync table above and
-> ADR-0006 for the scope history. Everything below is design intent, not a
-> description of shipped behavior.
+> **Status: gated demo — route mounted, auth-guarded (ADR-0008, 2026-08-24).**
+> STT/LLM are mocked and Opus decode/encode is unimplemented; the WS route is
+> reachable for staged demos only. See the sync table above and ADR-0006/0008
+> for the scope history. Everything below is design intent, not a description
+> of shipped behavior.
 
 ### ⚠️ Recommendation: Open Source / Self-Hosted (MVP)
 
