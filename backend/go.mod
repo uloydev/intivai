@@ -5,6 +5,7 @@ go 1.26.1
 require (
 	github.com/ansrivas/fiberprometheus/v2 v2.18.0
 	github.com/getsentry/sentry-go v0.48.0
+	github.com/gofiber/contrib/fibersentry v1.0.8
 	github.com/gofiber/contrib/websocket v1.3.4
 	github.com/gofiber/fiber/v2 v2.52.14
 	github.com/golang-jwt/jwt/v5 v5.3.1
@@ -17,6 +18,7 @@ require (
 	github.com/ledongthuc/pdf v0.0.0-20250511090121-5959a4027728
 	github.com/lib/pq v1.10.9
 	github.com/minio/minio-go/v7 v7.2.1
+	github.com/nguyenthenguyen/docx v0.0.0-20230621112118-9c8e795a11db
 	github.com/nlpodyssey/cybertron v0.2.1
 	github.com/pdfcpu/pdfcpu v0.14.0
 	github.com/pgvector/pgvector-go v0.4.1
