@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -14,9 +15,9 @@ import (
 	"time"
 
 	"github.com/ansrivas/fiberprometheus/v2"
-	"github.com/getsentry/sentry-go"
+	fibersentry "github.com/gofiber/contrib/fibersentry"
 	"github.com/gofiber/fiber/v2"
-	"github.com/gofiber/fiber/v2/middleware/recover"
+	fiberRecover "github.com/gofiber/fiber/v2/middleware/recover"
 	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
 	ctxapi "github.com/intivai/backend/internal/context/api"
@@ -33,6 +34,10 @@ import (
 	"github.com/intivai/backend/internal/iam/application"
 	"github.com/intivai/backend/internal/iam/infrastructure/auth"
 	iamrepo "github.com/intivai/backend/internal/iam/infrastructure/persistence"
+	intapi "github.com/intivai/backend/internal/integration/api"
+	intapp "github.com/intivai/backend/internal/integration/application"
+	intdomain "github.com/intivai/backend/internal/integration/domain"
+	intrepo "github.com/intivai/backend/internal/integration/infrastructure/persistence"
 	ivapi "github.com/intivai/backend/internal/interview/api"
 	ivapp "github.com/intivai/backend/internal/interview/application"
 	ivdomain "github.com/intivai/backend/internal/interview/domain"
@@ -57,10 +62,14 @@ import (
 	"github.com/intivai/backend/pkg/db"
 	"github.com/intivai/backend/pkg/logger"
 	"github.com/intivai/backend/pkg/mailer"
+	"github.com/intivai/backend/pkg/observability"
 	"github.com/intivai/backend/pkg/queue"
 	"github.com/intivai/backend/pkg/storage"
 	"github.com/rs/zerolog"
 )
+
+// version is overridden at build time via -ldflags "-X main.version=...".
+var version = "dev"
 
 // interviewEnqueuer — async evaluation retry and candidate invitation emails via the shared asynq client.
 type interviewEnqueuer struct {
@@ -87,6 +96,18 @@ func (e interviewEnqueuer) EnqueueInterviewInvitation(ctx context.Context, to, n
 	return err
 }
 
+func (e interviewEnqueuer) EnqueueHumanRequest(ctx context.Context, to, candidateName, jobTitle, interviewID string) error {
+	reportURL := fmt.Sprintf("%s/interviews/%s", strings.TrimSuffix(e.publicURL, "/"), interviewID)
+	_, err := e.client.Enqueue(ctx, notifapp.TaskSendEmail, notifapp.SendEmailPayload{
+		Type:          notifapp.EmailTypeHumanRequest,
+		To:            to,
+		CandidateName: candidateName,
+		JobTitle:      jobTitle,
+		ReportURL:     reportURL,
+	})
+	return err
+}
+
 func main() {
 	migrateOnly := flag.Bool("migrate-only", false, "apply migrations with INTIVAI_MIGRATE_URL and exit")
 	flag.Parse()
@@ -97,16 +118,10 @@ func main() {
 	}
 	logger := logger.New(cfg.App.Env)
 
-	if cfg.Sentry.DSN != "" {
-		if err := sentry.Init(sentry.ClientOptions{
-			Dsn:              cfg.Sentry.DSN,
-			Environment:      cfg.App.Env,
-			TracesSampleRate: 0.1,
-		}); err != nil {
-			logger.Warn().Err(err).Msg("sentry init")
-		} else {
-			defer sentry.Flush(2 * time.Second)
-		}
+	if err := observability.Init(cfg, observability.WithRelease(version)); err != nil {
+		logger.Warn().Err(err).Msg("sentry init")
+	} else if cfg.Sentry.DSN != "" {
+		defer observability.Flush(2 * time.Second)
 	}
 
 	if *migrateOnly {
@@ -152,12 +167,12 @@ func main() {
 	// --- LLM + memory ---
 	var fallback llm.Provider
 	if cfg.LLM.FallbackBaseURL != "" {
-		fallback = llm.NewDeepSeekProvider(cfg.LLM.FallbackAPIKey, cfg.LLM.FallbackBaseURL, cfg.LLM.DeepSeekModel)
+		fallback = llm.NewOpenAIProvider("fallback", cfg.LLM.FallbackAPIKey, cfg.LLM.FallbackBaseURL, cfg.LLM.Model, cfg.LLM.TimeoutSeconds)
 	}
 	tokenLedger := llm.NewRedisTokenLedger(rdb, 100_000) // Default 100k daily cap for now
 
 	llmClient := llm.NewClient(
-		llm.NewDeepSeekProvider(cfg.LLM.DeepSeekAPIKey, cfg.LLM.DeepSeekBaseURL, cfg.LLM.DeepSeekModel),
+		llm.NewOpenAIProvider(cfg.LLM.ProviderName, cfg.LLM.APIKey, cfg.LLM.BaseURL, cfg.LLM.Model, cfg.LLM.TimeoutSeconds),
 		fallback,
 		tokenLedger,
 		cfg.LLM.MaxRetries,
@@ -213,8 +228,45 @@ func main() {
 	ivRepo := ivrepo.NewPostgresInterviewRepo(pool)
 	tokenRepo := ivrepo.NewPostgresTokenRepo(pool)
 	questionBank := ivrepo.NewPostgresQuestionBank(pool)
-	evalWorker := evalapp.NewEvaluationWorker(pool, ivRepo, evalllm.NewEvaluator(llmClient), queueClient, cfg.App.PublicURL, logger)
-	interviewService := ivapp.NewInterviewService(pool, ivRepo, tokenRepo, questionBank, appRepo, candidateRepo, jobRepo, contextRepo, store, tokens, ivdomain.SystemClock(), interviewEnqueuer{client: queueClient, publicURL: cfg.App.PublicURL})
+	evalWorker := evalapp.NewEvaluationWorker(pool, ivRepo, evalllm.NewEvaluator(llmClient), queueClient, cfg.App.PublicURL, logger).WithWebhookDispatch(func(ctx context.Context, orgID uuid.UUID, event intdomain.WebhookEvent, payload []byte) {
+		// Query active webhook configs, create deliveries, enqueue — all inside
+		// a tenant tx so FORCED RLS (025) applies and delivery insert + enqueue
+		// commit atomically (enqueue failure rolls the delivery back).
+		eventJSON, err := json.Marshal([]string{string(event)})
+		if err != nil {
+			logger.Error().Err(err).Str("event", string(event)).Msg("webhook dispatch: marshal event failed")
+			return
+		}
+		if err := db.RunInTx(ctx, pool, orgID.String(), func(tctx context.Context) error {
+			var configs []struct {
+				ID  uuid.UUID
+				URL string
+			}
+			if err := pool.WithContext(tctx).Raw(
+				`SELECT id, url FROM webhook_configs WHERE org_id = $1 AND active = true AND events @> $2::jsonb`, orgID, string(eventJSON)).Scan(&configs).Error; err != nil {
+				return fmt.Errorf("query webhook configs: %w", err)
+			}
+			for _, whCfg := range configs {
+				deliveryID := uuid.New()
+				if err := pool.WithContext(tctx).Exec(
+					`INSERT INTO webhook_deliveries (id, org_id, webhook_id, event, payload, final_status, attempts, created_at, updated_at) VALUES ($1, $2, $3, $4, $5::jsonb, 'pending', 0, NOW(), NOW())`,
+					deliveryID, orgID, whCfg.ID, string(event), string(payload)).Error; err != nil {
+					return fmt.Errorf("insert webhook delivery: %w", err)
+				}
+				pl, err := json.Marshal(intapp.DeliverWebhookPayload{DeliveryID: deliveryID.String(), OrgID: orgID.String()})
+				if err != nil {
+					return fmt.Errorf("marshal delivery payload: %w", err)
+				}
+				if _, err := queueClient.Enqueue(ctx, intapp.TaskDeliverWebhook, pl, asynq.MaxRetry(3)); err != nil {
+					return fmt.Errorf("enqueue webhook delivery: %w", err)
+				}
+			}
+			return nil
+		}); err != nil {
+			logger.Error().Err(err).Str("org_id", orgID.String()).Str("event", string(event)).Msg("webhook dispatch failed")
+		}
+	})
+	interviewService := ivapp.NewInterviewService(pool, ivRepo, tokenRepo, questionBank, appRepo, candidateRepo, jobRepo, contextRepo, store, tokens, ivdomain.SystemClock(), interviewEnqueuer{client: queueClient, publicURL: cfg.App.PublicURL}, logger)
 	sessionRegistry := ivapi.NewRedisSessionRegistry(rdb, 35*time.Minute)
 	chatHandler := ivapi.NewChatHandler(interviewService, llmClient, tokens, logger, sessionRegistry)
 	evalService := evalapp.NewEvaluationService(pool, ivRepo, appRepo, candidateRepo, jobRepo, store)
@@ -229,7 +281,7 @@ func main() {
 	}, logger)
 	emailWorker := notifapp.NewEmailWorker(mailClient, logger)
 	portalRepo := scrrepo.NewPostgresCandidatePortalRepo(pool)
-	publicJobHandler := jobapi.NewPublicJobHandler(pool, jobRepo, candidateRepo, appRepo, store, queueClient, portalRepo)
+	publicJobHandler := jobapi.NewPublicJobHandler(pool, jobRepo, candidateRepo, appRepo, store, queueClient, portalRepo, cfg.App.PublicURL)
 	candidatePortalHandler := scrapi.NewCandidatePortalHandler(portalRepo, tokens, queueClient, cfg.App.PublicURL)
 	// --- Sandbox sidecar (ADR-0002): the app talks to the sandbox executor
 	// over mTLS gRPC; it never executes code itself. Fail closed when the
@@ -251,6 +303,12 @@ func main() {
 	sandboxHandler := sbapi.NewSandboxHandler(sandboxService)
 	chatHandler.WithCodeRunner(codeRunner)
 
+	// --- Webhooks ---
+	webhookRepo := intrepo.NewPostgresWebhookRepo(pool)
+	webhookService := intapp.NewWebhookService(webhookRepo)
+	webhookHandler := intapi.NewWebhookHandler(webhookService, logger)
+	webhookWorker := intapp.NewWebhookWorker(webhookRepo, pool, logger)
+
 	// --- Workers ---
 	parseWorker := cvapp.NewParseWorker(pool, candidateRepo, store, queueClient, logger)
 	extractWorker := cvapp.NewExtractWorker(pool, candidateRepo, appRepo, jobRepo, llmClient, queueClient, cfg.App.PublicURL, logger)
@@ -258,6 +316,18 @@ func main() {
 	indexWorker := ctxapp.NewIndexWorker(pool, contextRepo, store, memoryFactory, logger)
 	rubricWorker := jobapp.NewRubricWorker(pool, jobRepo, llmClient, logger)
 	workerMux := asynq.NewServeMux()
+	workerMux.Use(func(h asynq.Handler) asynq.Handler {
+		return asynq.HandlerFunc(func(ctx context.Context, task *asynq.Task) (err error) {
+			defer func() {
+				if r := recover(); r != nil {
+					observability.CapturePanic(ctx, r)
+					logger.Error().Interface("panic", r).Str("task", task.Type()).Msg("worker panic recovered")
+					err = fmt.Errorf("worker panic in %s: %v", task.Type(), r)
+				}
+			}()
+			return h.ProcessTask(ctx, task)
+		})
+	})
 	syncWorker.Register(workerMux)
 	parseWorker.Register(workerMux)
 	extractWorker.Register(workerMux)
@@ -266,6 +336,7 @@ func main() {
 	rubricWorker.Register(workerMux)
 	evalWorker.Register(workerMux)
 	emailWorker.Register(workerMux)
+	webhookWorker.Register(workerMux)
 
 	// --- HTTP ---
 	app := fiber.New(fiber.Config{
@@ -278,7 +349,10 @@ func main() {
 	prometheus.RegisterAt(app, "/metrics")
 	app.Use(prometheus.Middleware)
 
-	app.Use(recover.New())
+	// Sentry wraps recovery: it captures panics and repanics so the standard
+	// recover middleware still logs and converts them to 500s.
+	app.Use(fibersentry.New(fibersentry.Config{Repanic: true}))
+	app.Use(fiberRecover.New())
 	app.Use(httpmw.RequestID(logger))
 	app.Use(httpmw.Audit(logger))
 	app.Use(httpmw.CORS(cfg.App.AllowedOrigins))
@@ -311,6 +385,9 @@ func main() {
 	publicRateLimit := httpmw.RateLimit(rdb, 100, time.Minute, func(c *fiber.Ctx) string {
 		return "public:" + c.IP()
 	})
+	// Public apply gets its own tighter per-IP bucket — it is the only
+	// unauthenticated endpoint that writes (candidate + application rows).
+	publicApplyRateLimit := httpmw.RateLimit(rdb, cfg.RateLimit.AuthPerMin, time.Minute, httpmw.IPKey("public-apply:"))
 	tenantRateLimit := httpmw.RateLimit(rdb, cfg.RateLimit.TenantPerMin, time.Minute, func(c *fiber.Ctx) string {
 		if actor, ok := api.Actor(c); ok {
 			return "tenant:" + actor.OrgID.String()
@@ -333,7 +410,7 @@ func main() {
 	publicRoutes := v1.Group("/public", publicRateLimit)
 	publicRoutes.Get("/jobs", publicJobHandler.ListPublicJobs)
 	publicRoutes.Get("/jobs/:id", publicJobHandler.GetPublicJob)
-	publicRoutes.Post("/jobs/:id/apply", authRateLimit, publicJobHandler.Apply)
+	publicRoutes.Post("/jobs/:id/apply", publicApplyRateLimit, publicJobHandler.Apply)
 	publicRoutes.Post("/candidate/auth/otp", authRateLimit, candidatePortalHandler.RequestOTP)
 	publicRoutes.Post("/candidate/auth/verify", authRateLimit, candidatePortalHandler.VerifyOTP)
 	publicRoutes.Get("/candidate-review/:token", cvHandler.ReviewProfile)
@@ -352,6 +429,7 @@ func main() {
 	v1.Delete("/candidate/portal/me", authRateLimit, candidatePortalHandler.RequireCandidateAuth, candidatePortalHandler.DeleteMe)
 	v1.Post("/candidate/interviews/:id/consent", authRateLimit, chatHandler.Consent)
 	v1.Post("/candidate/interviews/:id/ticket", authRateLimit, chatHandler.Ticket)
+	v1.Post("/candidate/interviews/:id/request-human", authRateLimit, chatHandler.RequestHuman)
 	v1.Post("/candidate/interviews/:id/telemetry", userRateLimit, chatHandler.Telemetry)
 	v1.Get("/candidate/interviews/:id/chat", chatHandler.RequireTicket, chatHandler.Chat(cfg.App.AllowedOrigins))
 	chatHandler.RegisterVoiceRoutes(v1, cfg.App.AllowedOrigins)
@@ -389,7 +467,15 @@ func main() {
 	authed.Get("/interviews", evalHandler.ListInterviews)
 	authed.Get("/interviews/:id", evalHandler.GetInterview)
 	authed.Get("/interviews/:id/report/pdf", evalHandler.GetInterviewPDF)
+	authed.Put("/interviews/:id/decision", evalHandler.UpdateDecision)
 	authed.Get("/candidates/:id/report", evalHandler.GetCandidateReport)
+
+	authed.Post("/webhooks", webhookHandler.Create)
+	authed.Get("/webhooks", webhookHandler.List)
+	authed.Get("/webhooks/:id", webhookHandler.Get)
+	authed.Patch("/webhooks/:id", webhookHandler.Update)
+	authed.Delete("/webhooks/:id", webhookHandler.Delete)
+	authed.Get("/webhooks/:id/deliveries", webhookHandler.ListDeliveries)
 
 	// --- Worker (asynq) ---
 	worker := queue.NewServer(cfg.Redis.Addr, 10, logger)
@@ -425,9 +511,7 @@ func errorHandler(c *fiber.Ctx, err error) error {
 	if logger, ok := c.Locals("logger").(zerolog.Logger); ok {
 		logger.Error().Err(err).Msg("unhandled error")
 	}
-	if sentry.CurrentHub().Client() != nil {
-		sentry.CaptureException(err)
-	}
+	observability.CaptureError(observability.FiberContext(c), err)
 	return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "internal server error"})
 }
 
