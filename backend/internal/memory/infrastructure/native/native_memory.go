@@ -41,7 +41,7 @@ func (f *NativeFactory) getDB(orgID string, path string) (*sql.DB, error) {
 	if db, ok := f.dbs[orgID]; ok {
 		return db, nil
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		return nil, fmt.Errorf("create bank dir: %w", err)
 	}
 	dsn := path + "?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)"
@@ -96,9 +96,13 @@ func (m *NativeMemory) Remember(ctx context.Context, entityType, summary string,
 	if err := m.open(); err != nil {
 		return err
 	}
-	_, err := m.db.ExecContext(ctx,
+	id, err := newID()
+	if err != nil {
+		return fmt.Errorf("generate memory id: %w", err)
+	}
+	_, err = m.db.ExecContext(ctx,
 		`INSERT INTO memories (id, entity_type, content, importance) VALUES (?, ?, ?, ?)`,
-		newID(), entityType, summary, importance)
+		id, entityType, summary, importance)
 	return err
 }
 
@@ -174,8 +178,10 @@ func scanHits(rows *sql.Rows) ([]memdomain.MemoryHit, error) {
 	return hits, rows.Err()
 }
 
-func newID() string {
+func newID() (string, error) {
 	b := make([]byte, 16)
-	_, _ = randRead(b)
-	return fmt.Sprintf("%x", b)
+	if _, err := randRead(b); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%x", b), nil
 }

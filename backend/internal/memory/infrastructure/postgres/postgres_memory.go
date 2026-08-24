@@ -9,6 +9,7 @@ import (
 	memdomain "github.com/intivai/backend/internal/memory/domain"
 	"github.com/intivai/backend/pkg/db"
 	"github.com/pgvector/pgvector-go"
+	"github.com/rs/zerolog/log"
 	"gorm.io/gorm"
 )
 
@@ -74,6 +75,8 @@ func (b *PostgresBank) Remember(ctx context.Context, entityType, summary string,
 			if v, err := b.embed.Embed(ctx, summary); err == nil {
 				pgv := pgvector.NewVector(v)
 				vec = &pgv
+			} else {
+				log.Warn().Err(err).Str("org_id", b.orgID).Msg("memory embedding failed; storing keyword-only memory")
 			}
 		}
 		return tx.Exec(
@@ -87,6 +90,8 @@ func (b *PostgresBank) Recall(ctx context.Context, query, budget string) ([]memd
 	if b.embed != nil {
 		if qv, err := b.embed.Embed(ctx, query); err == nil {
 			return b.cosineRecall(ctx, qv)
+		} else {
+			log.Warn().Err(err).Str("org_id", b.orgID).Msg("memory query embedding failed; using keyword recall")
 		}
 	}
 	return b.query(ctx,

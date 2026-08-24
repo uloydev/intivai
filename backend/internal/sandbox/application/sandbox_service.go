@@ -99,12 +99,16 @@ func (s *SandboxService) EvaluateCode(ctx context.Context, orgID string, languag
 // SaveCodingSession persists the coding session snapshot onto the interview aggregate.
 func (s *SandboxService) SaveCodingSession(ctx context.Context, orgID string, interviewID uuid.UUID, session domain.CodingSession) error {
 	var finalRes *ivdomain.ExecutionResult
-	if raw, err := json.Marshal(session.FinalResult); err == nil {
-		_ = json.Unmarshal(raw, &finalRes)
+	if raw, err := json.Marshal(session.FinalResult); err != nil {
+		return fmt.Errorf("marshal final coding result: %w", err)
+	} else if err := json.Unmarshal(raw, &finalRes); err != nil {
+		return fmt.Errorf("unmarshal final coding result: %w", err)
 	}
 	var aiReview *ivdomain.CodeReview
-	if raw, err := json.Marshal(session.AICodeReview); err == nil {
-		_ = json.Unmarshal(raw, &aiReview)
+	if raw, err := json.Marshal(session.AICodeReview); err != nil {
+		return fmt.Errorf("marshal coding review: %w", err)
+	} else if err := json.Unmarshal(raw, &aiReview); err != nil {
+		return fmt.Errorf("unmarshal coding review: %w", err)
 	}
 	subTime := session.SubmittedAt
 	if subTime.IsZero() {
