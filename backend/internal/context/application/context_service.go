@@ -17,7 +17,6 @@ import (
 	iamdomain "github.com/intivai/backend/internal/iam/domain"
 	memdomain "github.com/intivai/backend/internal/memory/domain"
 	sharederr "github.com/intivai/backend/internal/shared/errors"
-	"github.com/intivai/backend/internal/shared/uuidx"
 	"github.com/intivai/backend/pkg/db"
 	"github.com/intivai/backend/pkg/queue"
 	"github.com/intivai/backend/pkg/storage"
@@ -111,9 +110,11 @@ func (s *ContextService) UploadContext(ctx context.Context, actor application.Au
 	if created {
 		if err := s.store.Upload(ctx, storagePath, strings.NewReader(string(content)), int64(len(content)), mimeOf(contentType)); err != nil {
 			// Orphaned row without the object — best-effort cleanup + fail.
-			_ = db.RunInTx(ctx, s.pool, actor.OrgID.String(), func(tctx context.Context) error {
+			if cleanupErr := db.RunInTx(ctx, s.pool, actor.OrgID.String(), func(tctx context.Context) error {
 				return s.repo.DeleteContext(tctx, actor.OrgID, cc.ID)
-			})
+			}); cleanupErr != nil {
+				s.log.Error().Err(cleanupErr).Str("context_id", cc.ID.String()).Msg("cleanup orphaned context row failed")
+			}
 			return nil, err
 		}
 	}
@@ -233,16 +234,27 @@ func (w *IndexWorker) handle(ctx context.Context, t *asynq.Task) error {
 	if err := json.Unmarshal(t.Payload(), &p); err != nil {
 		return asynq.SkipRetry
 	}
-	ctxID := uuidx.MustParse(p.ContextID)
+	ctxID, err := uuid.Parse(p.ContextID)
+	if err != nil {
+		return asynq.SkipRetry
+	}
 
 	var cc *ctxdomain.CompanyContext
-	err := db.RunInTx(ctx, w.pool, p.OrgID, func(tctx context.Context) error {
+	err = db.RunInTx(ctx, w.pool, p.OrgID, func(tctx context.Context) error {
 		var err error
 		cc, err = w.repo.GetContextByID(tctx, ctxID)
 		return err
 	})
 	if err != nil {
-		return asynq.SkipRetry
+		if sharederr.PermanentWorkerError(err, ctxdomain.ErrNotFound) {
+			// The context row is gone (or belongs elsewhere): retrying can
+			// never succeed.
+			return asynq.SkipRetry
+		}
+		// Transient load failure — the queue must retry, skipping would
+		// strand the context unindexed forever (finding D20).
+		w.log.Warn().Err(err).Str("context_id", p.ContextID).Str("org_id", p.OrgID).Msg("index_context load failed — task will retry")
+		return fmt.Errorf("load context %s: %w", p.ContextID, err)
 	}
 
 	content, err := w.store.Download(ctx, cc.StoragePath)

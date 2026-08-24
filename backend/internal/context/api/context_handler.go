@@ -38,7 +38,10 @@ func (h *ContextHandler) UploadContext(c *fiber.Ctx) error {
 	if _, err := h.orgFromPath(c); err != nil {
 		return httpapi.Error(c, err)
 	}
-	actor, _ := api.Actor(c)
+	actor, err := api.RequireActor(c)
+	if err != nil {
+		return httpapi.Error(c, err)
+	}
 
 	contentType := ctxdomain.TypeText
 	var content []byte
@@ -79,7 +82,10 @@ func (h *ContextHandler) ListContexts(c *fiber.Ctx) error {
 	if _, err := h.orgFromPath(c); err != nil {
 		return httpapi.Error(c, err)
 	}
-	actor, _ := api.Actor(c)
+	actor, err := api.RequireActor(c)
+	if err != nil {
+		return httpapi.Error(c, err)
+	}
 	result, err := h.svc.ListContexts(c.UserContext(), actor)
 	if err != nil {
 		return httpapi.Error(c, err)
@@ -91,7 +97,10 @@ func (h *ContextHandler) SetPrompt(c *fiber.Ctx) error {
 	if _, err := h.orgFromPath(c); err != nil {
 		return httpapi.Error(c, err)
 	}
-	actor, _ := api.Actor(c)
+	actor, err := api.RequireActor(c)
+	if err != nil {
+		return httpapi.Error(c, err)
+	}
 	var req struct {
 		SystemPrompt string `json:"system_prompt"`
 	}
@@ -109,7 +118,10 @@ func (h *ContextHandler) GetPrompt(c *fiber.Ctx) error {
 	if _, err := h.orgFromPath(c); err != nil {
 		return httpapi.Error(c, err)
 	}
-	actor, _ := api.Actor(c)
+	actor, err := api.RequireActor(c)
+	if err != nil {
+		return httpapi.Error(c, err)
+	}
 	result, err := h.svc.GetPrompt(c.UserContext(), actor)
 	if err != nil {
 		return httpapi.Error(c, err)
@@ -123,7 +135,10 @@ func (h *ContextHandler) Delete(c *fiber.Ctx) error {
 	if _, err := h.orgFromPath(c); err != nil {
 		return httpapi.Error(c, err)
 	}
-	actor, _ := api.Actor(c)
+	actor, err := api.RequireActor(c)
+	if err != nil {
+		return httpapi.Error(c, err)
+	}
 	ctxID, err := uuid.Parse(c.Params("contextID"))
 	if err != nil {
 		return httpapi.Error(c, sharederr.NewDomainError("BAD_REQUEST", "invalid context id"))
