@@ -84,3 +84,29 @@ func (h *EvaluationHandler) GetInterviewPDF(c *fiber.Ctx) error {
 	c.Set("Content-Disposition", `attachment; filename="interview_report.pdf"`)
 	return c.SendStream(pdfReader)
 }
+
+// UpdateDecision — PUT /interviews/:id/decision (recruiter override).
+func (h *EvaluationHandler) UpdateDecision(c *fiber.Ctx) error {
+	actor, ok := api.Actor(c)
+	if !ok {
+		return httpapi.Error(c, sharederr.NewDomainError("UNAUTHORIZED", "unauthorized"))
+	}
+	id, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return httpapi.Error(c, sharederr.NewDomainError("BAD_REQUEST", "invalid interview id"))
+	}
+	var req struct {
+		Recommendation string `json:"recommendation"`
+		Reason         string `json:"reason"`
+	}
+	if err := c.BodyParser(&req); err != nil {
+		return httpapi.Error(c, sharederr.NewDomainError("BAD_REQUEST", "invalid body"))
+	}
+	if req.Recommendation == "" || req.Reason == "" {
+		return httpapi.Error(c, sharederr.NewDomainError("BAD_REQUEST", "recommendation and reason are required"))
+	}
+	if err := h.svc.UpdateDecision(c.UserContext(), actor, id, req.Recommendation, req.Reason); err != nil {
+		return httpapi.Error(c, err)
+	}
+	return httpapi.OK(c, map[string]string{"status": "updated"})
+}

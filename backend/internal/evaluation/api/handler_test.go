@@ -86,7 +86,7 @@ func seedHandlerScenario(t *testing.T) (*fiber.App, string, uuid.UUID, uuid.UUID
 	app.Get("/interviews/:id", iamapi.AuthMiddleware(jwt), handler.GetInterview)
 	app.Get("/candidates/:id/report", iamapi.AuthMiddleware(jwt), handler.GetCandidateReport)
 
-	token, err := jwt.Issue(uuid.New(), orgID, "admin", iamapp.TokenTypeAuth, time.Hour, nil)
+	token, err := jwt.Issue(uuid.New(), orgID, "admin", iamapp.TokenTypeAuth, time.Hour, iamapp.TokenExtra{})
 	if err != nil {
 		t.Fatal(err)
 	}

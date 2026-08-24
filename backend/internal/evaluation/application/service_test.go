@@ -1,8 +1,12 @@
 package application
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	stderrors "errors"
+	"fmt"
+	"io"
 	"os"
 	"testing"
 
@@ -13,6 +17,7 @@ import (
 	ivrepo "github.com/intivai/backend/internal/interview/infrastructure/persistence"
 	jobrepo "github.com/intivai/backend/internal/job/infrastructure/persistence"
 	scrrepo "github.com/intivai/backend/internal/screening/infrastructure/persistence"
+	sharederr "github.com/intivai/backend/internal/shared/errors"
 	"github.com/intivai/backend/pkg/db"
 )
 
@@ -186,5 +191,111 @@ func TestListInterviewsCrossOrgEmpty(t *testing.T) {
 	}
 	if len(list) != 0 {
 		t.Fatalf("cross-org list len = %d, want 0", len(list))
+	}
+}
+
+// fakeFileStore — in-memory storage.FileStorage for PDF cache-path tests.
+type fakeFileStore struct{ objects map[string][]byte }
+
+func newFakeFileStore() *fakeFileStore { return &fakeFileStore{objects: map[string][]byte{}} }
+
+func (f *fakeFileStore) Upload(_ context.Context, path string, r io.Reader, _ int64, _ string) error {
+	b, err := io.ReadAll(r)
+	if err != nil {
+		return err
+	}
+	f.objects[path] = b
+	return nil
+}
+
+func (f *fakeFileStore) Download(_ context.Context, path string) (io.ReadCloser, error) {
+	b, ok := f.objects[path]
+	if !ok {
+		return nil, os.ErrNotExist
+	}
+	return io.NopCloser(bytes.NewReader(b)), nil
+}
+
+func (f *fakeFileStore) Delete(_ context.Context, path string) error {
+	delete(f.objects, path)
+	return nil
+}
+
+func (f *fakeFileStore) Exists(_ context.Context, path string) (bool, error) {
+	_, ok := f.objects[path]
+	return ok, nil
+}
+
+// pdfService — same pool/repos as the seeded service, but with a store.
+func pdfService(t *testing.T, svc *EvaluationService, store *fakeFileStore) *EvaluationService {
+	t.Helper()
+	return NewEvaluationService(svc.pool, svc.ivRepo, svc.appRepo, svc.candRepo, svc.jobRepo, store)
+}
+
+func assertNotFound(t *testing.T, err error) {
+	t.Helper()
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	var nf *sharederr.NotFoundError
+	if !stderrors.As(err, &nf) {
+		t.Fatalf("err = %v (%T), want NotFoundError", err, err)
+	}
+}
+
+// Cross-org PDF access must 404 on BOTH cold and warm cache. The warm-cache
+// fast path historically streamed interviews/{id}/report.pdf without any
+// ownership check — any recruiter knowing the UUID read foreign reports.
+func TestInterviewPDFCrossOrgForbiddenOnColdAndWarmCache(t *testing.T) {
+	svcB, _, ivB, _, _ := seedEvalScenario(t)
+	actorA := evalActor(uuid.NewString(), "recruiter") // org A: no relation to ivB
+
+	store := newFakeFileStore()
+	svc := pdfService(t, svcB, store)
+
+	// Cold cache: generation path goes through InterviewDetail authz.
+	if _, err := svc.InterviewPDF(context.Background(), actorA, ivB); err != nil {
+		assertNotFound(t, err)
+	} else {
+		t.Fatal("cold cache: cross-org interview readable")
+	}
+
+	// Warm cache: pre-populate the cached artifact for the FOREIGN interview,
+	// then request it again — must still be rejected, not streamed.
+	pdfPath := fmt.Sprintf("interviews/%s/report.pdf", ivB.String())
+	if err := store.Upload(context.Background(), pdfPath, bytes.NewReader([]byte("%PDF-1.4 foreign report")), 0, "application/pdf"); err != nil {
+		t.Fatal(err)
+	}
+	rc, err := svc.InterviewPDF(context.Background(), actorA, ivB)
+	if err == nil {
+		b, _ := io.ReadAll(rc)
+		t.Fatalf("warm cache: cross-org interview served (%d bytes leaked)", len(b))
+	}
+	assertNotFound(t, err)
+}
+
+// Regression guard: the authz-first fix must not break the owner's warm-cache hit.
+func TestInterviewPDFOwnOrgWarmCacheServed(t *testing.T) {
+	svcB, orgB, ivB, _, _ := seedEvalScenario(t)
+	actor := evalActor(orgB, "admin")
+
+	store := newFakeFileStore()
+	svc := pdfService(t, svcB, store)
+	want := []byte("%PDF-1.4 own org cached report")
+	pdfPath := fmt.Sprintf("interviews/%s/report.pdf", ivB.String())
+	if err := store.Upload(context.Background(), pdfPath, bytes.NewReader(want), int64(len(want)), "application/pdf"); err != nil {
+		t.Fatal(err)
+	}
+
+	rc, err := svc.InterviewPDF(context.Background(), actor, ivB)
+	if err != nil {
+		t.Fatalf("own-org warm cache: %v", err)
+	}
+	got, err := io.ReadAll(rc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, want) {
+		t.Fatalf("cached pdf = %q, want %q", got, want)
 	}
 }

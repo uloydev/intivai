@@ -18,6 +18,7 @@ import (
 	"github.com/intivai/backend/internal/shared/errors"
 	"github.com/intivai/backend/pkg/db"
 	"github.com/intivai/backend/pkg/storage"
+	"github.com/rs/zerolog/log"
 	"gorm.io/gorm"
 )
 
@@ -42,6 +43,8 @@ type AnswerDTO struct {
 	Idx        int       `json:"idx"`
 	Content    string    `json:"content"`
 	AnsweredAt time.Time `json:"answered_at"`
+	Action     string    `json:"action,omitempty"`
+	Turn       int       `json:"turn,omitempty"`
 }
 
 type QuestionDTO struct {
@@ -227,7 +230,7 @@ func (s *EvaluationService) InterviewDetail(ctx context.Context, actor applicati
 			d.Questions = append(d.Questions, QuestionDTO{Idx: q.Idx, Content: q.Content, Category: q.Category, Skill: q.Skill})
 		}
 		for _, a := range iv.Answers {
-			d.Answers = append(d.Answers, AnswerDTO{Idx: a.Idx, Content: a.Content, AnsweredAt: a.AnsweredAt})
+			d.Answers = append(d.Answers, AnswerDTO{Idx: a.Idx, Content: a.Content, AnsweredAt: a.AnsweredAt, Action: a.Action, Turn: a.Turn})
 		}
 		detail = d
 		return nil
@@ -283,6 +286,12 @@ func (s *EvaluationService) InterviewPDF(ctx context.Context, actor application.
 		return nil, err
 	}
 
+	// Ownership check BEFORE the object-store fast path — a cached artifact
+	// must never bypass org scoping (cross-org read on warm cache).
+	if err := s.authorizeInterviewAccess(ctx, actor, interviewID); err != nil {
+		return nil, err
+	}
+
 	pdfPath := fmt.Sprintf("interviews/%s/report.pdf", interviewID.String())
 
 	// Check cache (Stat — GetObject's error only surfaces on first Read)
@@ -309,7 +318,68 @@ func (s *EvaluationService) InterviewPDF(ctx context.Context, actor application.
 	}
 
 	// Cache upload (sync)
-	_ = s.store.Upload(ctx, pdfPath, bytes.NewReader(pdfBytes), int64(len(pdfBytes)), "application/pdf")
+	if err := s.store.Upload(ctx, pdfPath, bytes.NewReader(pdfBytes), int64(len(pdfBytes)), "application/pdf"); err != nil {
+		log.Error().Err(err).Str("interview_id", interviewID.String()).Msg("cache interview report failed")
+	}
 
 	return bytes.NewReader(pdfBytes), nil
+}
+
+// authorizeInterviewAccess mirrors InterviewDetail's ownership semantics:
+// RLS-scoped lookup + explicit org comparison, preserving not-found semantics
+// (a foreign interview is indistinguishable from a missing one).
+func (s *EvaluationService) authorizeInterviewAccess(ctx context.Context, actor application.AuthContext, interviewID uuid.UUID) error {
+	return db.RunInTx(ctx, s.pool, actor.OrgID.String(), func(tctx context.Context) error {
+		iv, err := s.ivRepo.GetByID(tctx, interviewID)
+		if err != nil {
+			if err == ivdomain.ErrNotFound {
+				return errors.NewNotFoundError("interview", interviewID.String())
+			}
+			return err
+		}
+		if iv.OrgID != actor.OrgID {
+			return errors.NewDomainError("FORBIDDEN", "interview belongs to another org")
+		}
+		return nil
+	})
+}
+
+// UpdateDecision persists the recruiter's override decision for an interview.
+func (s *EvaluationService) UpdateDecision(ctx context.Context, actor application.AuthContext, interviewID uuid.UUID, recommendation, reason string) error {
+	if err := application.Authorize(actor, iamdomain.RoleAdmin, iamdomain.RoleRecruiter); err != nil {
+		return err
+	}
+	// Verify interview exists and belongs to actor's org
+	iv, err := s.ivRepo.GetByID(ctx, interviewID)
+	if err != nil {
+		return err
+	}
+	if iv.OrgID != actor.OrgID {
+		return errors.NewDomainError("FORBIDDEN", "interview belongs to another org")
+	}
+	// Get the original recommendation from evaluation
+	var originalRec string
+	if iv.Evaluation != nil {
+		var eval struct {
+			Recommendation string `json:"recommendation"`
+		}
+		if json.Unmarshal(iv.Evaluation, &eval) == nil {
+			originalRec = eval.Recommendation
+		}
+	}
+	if originalRec == "" {
+		originalRec = "pending"
+	}
+	// Insert decision record
+	return db.RunInTx(ctx, s.pool, actor.OrgID.String(), func(tctx context.Context) error {
+		tx, ok := db.TxFrom(tctx)
+		if !ok {
+			return errors.NewDomainError("INTERNAL_ERROR", "no transaction")
+		}
+		return tx.WithContext(tctx).Exec(
+			`INSERT INTO recruiter_decisions (id, interview_id, org_id, original_recommendation, override_recommendation, reason, decided_by, decided_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, NOW())`,
+			uuid.New(), interviewID, actor.OrgID, originalRec, recommendation, reason, actor.UserID,
+		).Error
+	})
 }

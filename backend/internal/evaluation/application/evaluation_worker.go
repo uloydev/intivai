@@ -10,6 +10,7 @@ import (
 	"github.com/hibiken/asynq"
 	evaldomain "github.com/intivai/backend/internal/evaluation/domain"
 	evalllm "github.com/intivai/backend/internal/evaluation/infrastructure/llm"
+	intdomain "github.com/intivai/backend/internal/integration/domain"
 	ivdomain "github.com/intivai/backend/internal/interview/domain"
 	notifapp "github.com/intivai/backend/internal/notification/application"
 	"github.com/intivai/backend/pkg/db"
@@ -27,21 +28,33 @@ type EvaluatePayload struct {
 	InterviewID string `json:"interview_id"`
 }
 
+// Enqueuer — queue seam (queue.Client satisfies it implicitly); lets tests
+// capture enqueued notifications without Redis.
+type Enqueuer interface {
+	Enqueue(ctx context.Context, jobType string, payload any, opts ...asynq.Option) (*asynq.TaskInfo, error)
+}
+
 // EvaluationWorker — asynq handler for TaskEvaluateInterview. Idempotent:
 // skips when the interview already has an evaluation (inline path won).
 // The LLM call runs OUTSIDE the DB transaction — a held pool connection for
-// the full DeepSeek round-trip starves the pool under load.
+// the full LLM round-trip starves the pool under load.
 type EvaluationWorker struct {
 	pool      *gorm.DB
 	ivRepo    ivdomain.InterviewRepository
 	evaluator *evalllm.Evaluator
-	queue     *queue.Client
+	queue     Enqueuer
 	publicURL string
+	webhookFn func(ctx context.Context, orgID uuid.UUID, event intdomain.WebhookEvent, payload []byte) // optional webhook dispatch
 	log       zerolog.Logger
 }
 
-func NewEvaluationWorker(pool *gorm.DB, ivRepo ivdomain.InterviewRepository, evaluator *evalllm.Evaluator, q *queue.Client, publicURL string, log zerolog.Logger) *EvaluationWorker {
+func NewEvaluationWorker(pool *gorm.DB, ivRepo ivdomain.InterviewRepository, evaluator *evalllm.Evaluator, q Enqueuer, publicURL string, log zerolog.Logger) *EvaluationWorker {
 	return &EvaluationWorker{pool: pool, ivRepo: ivRepo, evaluator: evaluator, queue: q, publicURL: publicURL, log: log}
+}
+
+func (w *EvaluationWorker) WithWebhookDispatch(fn func(ctx context.Context, orgID uuid.UUID, event intdomain.WebhookEvent, payload []byte)) *EvaluationWorker {
+	w.webhookFn = fn
+	return w
 }
 
 func (w *EvaluationWorker) Register(mux *asynq.ServeMux) {
@@ -114,6 +127,24 @@ func (w *EvaluationWorker) handle(ctx context.Context, t *asynq.Task) error {
 	if orgUUID, perr := uuid.Parse(p.OrgID); perr == nil {
 		w.notifyScorecard(ctx, orgUUID, ivID, report)
 	}
+
+	// Phase 5: dispatch webhooks for interview.completed event.
+	if w.webhookFn != nil {
+		if orgUUID, perr := uuid.Parse(p.OrgID); perr == nil {
+			payload, err := json.Marshal(intdomain.InterviewCompletedPayload{
+				InterviewID:    p.InterviewID,
+				Score:          report.OverallScore,
+				Recommendation: report.Recommendation,
+				ReportURL:      fmt.Sprintf("%s/interviews/%s", strings.TrimSuffix(w.publicURL, "/"), ivID),
+			})
+			if err != nil {
+				w.log.Warn().Err(err).Str("interview_id", p.InterviewID).Msg("webhook dispatch: marshal payload failed")
+			} else {
+				w.webhookFn(ctx, orgUUID, intdomain.EventInterviewCompleted, payload)
+			}
+		}
+	}
+
 	return nil
 }
 
@@ -124,7 +155,11 @@ func (w *EvaluationWorker) notifyScorecard(ctx context.Context, orgID, ivID uuid
 		return
 	}
 	recruiters, err := w.recruiterEmails(ctx, orgID)
-	if err != nil || len(recruiters) == 0 {
+	if err != nil {
+		w.log.Warn().Err(err).Str("org_id", orgID.String()).Msg("resolve scorecard recipients failed")
+		return
+	}
+	if len(recruiters) == 0 {
 		return
 	}
 	reportURL := fmt.Sprintf("%s/interviews/%s", strings.TrimSuffix(w.publicURL, "/"), ivID)
@@ -145,20 +180,32 @@ func (w *EvaluationWorker) notifyScorecard(ctx context.Context, orgID, ivID uuid
 }
 
 // recruiterEmails — the org's admin/recruiter addresses (scorecard audience).
+// users is FORCED RLS: the query MUST run inside a tenant tx (app.org_id set),
+// otherwise the org predicate matches nothing and recipients silently vanish.
 func (w *EvaluationWorker) recruiterEmails(ctx context.Context, orgID uuid.UUID) ([]string, error) {
-	rows, err := w.pool.WithContext(ctx).Raw(
-		`SELECT email FROM users WHERE org_id = $1 AND role IN ('admin', 'recruiter') AND email <> ''`, orgID).Rows()
+	var out []string
+	err := db.RunInTx(ctx, w.pool, orgID.String(), func(tctx context.Context) error {
+		tx, ok := db.TxFrom(tctx)
+		if !ok {
+			return fmt.Errorf("recruiter emails: no transaction in context")
+		}
+		rows, err := tx.WithContext(tctx).Raw(
+			`SELECT email FROM users WHERE org_id = $1 AND role IN ('admin', 'recruiter') AND email <> ''`, orgID).Rows()
+		if err != nil {
+			return fmt.Errorf("query scorecard recipients: %w", err)
+		}
+		defer func() { _ = rows.Close() }()
+		for rows.Next() {
+			var e string
+			if err := rows.Scan(&e); err != nil {
+				return fmt.Errorf("scan scorecard recipient: %w", err)
+			}
+			out = append(out, e)
+		}
+		return rows.Err()
+	})
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = rows.Close() }()
-	var out []string
-	for rows.Next() {
-		var e string
-		if err := rows.Scan(&e); err != nil {
-			return nil, err
-		}
-		out = append(out, e)
-	}
-	return out, rows.Err()
+	return out, nil
 }
