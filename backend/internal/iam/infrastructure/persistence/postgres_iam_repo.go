@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 
 	"github.com/google/uuid"
 	iamdomain "github.com/intivai/backend/internal/iam/domain"
@@ -38,7 +39,11 @@ func (r *PostgresIAMRepo) CreateOrg(ctx context.Context, org *iamdomain.Org) err
 	}
 	var weights []byte
 	if org.ScoringWeights != nil {
-		weights, _ = json.Marshal(org.ScoringWeights)
+		var err error
+		weights, err = org.MarshalScoringWeights()
+		if err != nil {
+			return err
+		}
 	}
 	err = tx.WithContext(ctx).Exec(
 		`INSERT INTO orgs (id, name, slug, plan, scoring_weights, min_score_to_proceed, created_at)
@@ -86,7 +91,9 @@ func scanOrg(row orgScanner) (*iamdomain.Org, error) {
 	}
 	org.MinScoreToProceed = minScore
 	if len(weights) > 0 {
-		_ = json.Unmarshal(weights, &org.ScoringWeights)
+		if err := json.Unmarshal(weights, &org.ScoringWeights); err != nil {
+			return nil, fmt.Errorf("decode scoring weights: %w", err)
+		}
 	}
 	return &org, nil
 }

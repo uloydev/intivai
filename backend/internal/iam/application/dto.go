@@ -14,8 +14,14 @@ type PasswordHasher interface {
 
 // TokenProvider — driven port, implemented by infrastructure/auth (JWT).
 type TokenProvider interface {
-	Issue(subject uuid.UUID, orgID uuid.UUID, role, tokenType string, ttl time.Duration, extra map[string]any) (string, error)
+	Issue(subject uuid.UUID, orgID uuid.UUID, role, tokenType string, ttl time.Duration, extra TokenExtra) (string, error)
 	Parse(token string) (*Claims, error)
+}
+
+type TokenExtra struct {
+	Email       string `json:"email,omitempty"`
+	SessionID   string `json:"session_id,omitempty"`
+	InterviewID string `json:"interview_id,omitempty"`
 }
 
 type Claims struct {
@@ -23,7 +29,7 @@ type Claims struct {
 	OrgID   uuid.UUID
 	Role    string
 	Type    string // "auth" | "ws_ticket"
-	Extra   map[string]any
+	Extra   TokenExtra
 }
 
 // AuthContext carries the authenticated identity through handlers.

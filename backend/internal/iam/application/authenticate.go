@@ -38,7 +38,7 @@ func (uc *Authenticate) Execute(ctx context.Context, cmd AuthenticateCommand) (*
 		return nil, errors.NewDomainError("AUTH_FAILED", "invalid credentials")
 	}
 
-	token, err := uc.tokens.Issue(id.UserID, id.OrgID, string(id.Role), TokenTypeAuth, uc.ttl, nil)
+	token, err := uc.tokens.Issue(id.UserID, id.OrgID, string(id.Role), TokenTypeAuth, uc.ttl, TokenExtra{})
 	if err != nil {
 		return nil, err
 	}

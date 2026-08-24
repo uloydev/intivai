@@ -17,7 +17,7 @@ type stubTokens struct {
 	err    error
 }
 
-func (s stubTokens) Issue(_ uuid.UUID, _ uuid.UUID, _, _ string, _ time.Duration, _ map[string]any) (string, error) {
+func (s stubTokens) Issue(_ uuid.UUID, _ uuid.UUID, _, _ string, _ time.Duration, _ application.TokenExtra) (string, error) {
 	return "", nil
 }
 func (s stubTokens) Parse(_ string) (*application.Claims, error) {

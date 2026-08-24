@@ -20,14 +20,14 @@ func NewJWTProvider(secret string) *JWTProvider {
 }
 
 type claims struct {
-	OrgID string         `json:"org_id"`
-	Role  string         `json:"role"`
-	Type  string         `json:"type"`
-	Extra map[string]any `json:"extra,omitempty"`
+	OrgID string                 `json:"org_id"`
+	Role  string                 `json:"role"`
+	Type  string                 `json:"type"`
+	Extra application.TokenExtra `json:"extra,omitempty"`
 	jwt.RegisteredClaims
 }
 
-func (p *JWTProvider) Issue(subject, orgID uuid.UUID, role, tokenType string, ttl time.Duration, extra map[string]any) (string, error) {
+func (p *JWTProvider) Issue(subject, orgID uuid.UUID, role, tokenType string, ttl time.Duration, extra application.TokenExtra) (string, error) {
 	if tokenType == "" {
 		tokenType = application.TokenTypeAuth
 	}

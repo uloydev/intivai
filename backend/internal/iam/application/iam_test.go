@@ -97,7 +97,7 @@ func (fakeHasher) Verify(hash, plain string) bool    { return hash == "h:"+plain
 
 type fakeTokens struct{}
 
-func (fakeTokens) Issue(_ uuid.UUID, _ uuid.UUID, role, _ string, _ time.Duration, _ map[string]any) (string, error) {
+func (fakeTokens) Issue(_ uuid.UUID, _ uuid.UUID, role, _ string, _ time.Duration, _ TokenExtra) (string, error) {
 	return "token-" + role, nil
 }
 func (fakeTokens) Parse(_ string) (*Claims, error) { return &Claims{}, nil }

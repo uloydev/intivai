@@ -49,10 +49,9 @@ func validWeight(v float64) bool {
 	return v >= 0 && v <= 1
 }
 
-func (o *Org) MarshalScoringWeights() json.RawMessage {
+func (o *Org) MarshalScoringWeights() (json.RawMessage, error) {
 	if o.ScoringWeights == nil {
-		return nil
+		return nil, nil
 	}
-	b, _ := json.Marshal(o.ScoringWeights)
-	return b
+	return json.Marshal(o.ScoringWeights)
 }
