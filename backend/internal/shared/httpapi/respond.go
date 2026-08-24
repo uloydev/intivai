@@ -13,6 +13,12 @@ func Error(c *fiber.Ctx, err error) error {
 	if errors.As(err, &nf) {
 		return c.Status(http.StatusNotFound).JSON(fiber.Map{"error": nf.Error()})
 	}
+	var internal *sharederr.Internal
+	if errors.As(err, &internal) {
+		// Internal faults render generic — the cause stays in logs, never in
+		// the response body (finding D21).
+		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": "internal server error"})
+	}
 	var de *sharederr.DomainError
 	if errors.As(err, &de) {
 		status := http.StatusBadRequest
