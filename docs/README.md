@@ -13,6 +13,14 @@
 | `CONTEXT.md` | Ubiquitous language | current | 2026-08-10 |
 | `CHANGELOG.md` | Tag → notable changes | current | 2026-08-24 |
 
+## Subsystem readmes (outside docs/)
+
+| Path | What | Status | Last-reviewed |
+|---|---|---|---|
+| `frontend/README.md` | FE dev quickstart, scripts, structure | current | 2026-08-24 |
+| `design-system/intivai/MASTER.md` | Design system master spec | reference | 2026-08-24 |
+| `design-system/intivai/pages/*.md` | Per-page design specs | reference | 2026-08-24 |
+
 ## docs/
 
 | Path | What | Status | Last-reviewed |
@@ -51,16 +59,17 @@
 | `adr/0003-speech-stack.md` | Whisper STT + Edge/Piper TTS | accepted (design) |
 | `adr/0004-evaluation-proctoring-data-model.md` | Canonical reports schema; LLM never sets final score | accepted |
 | `adr/0005-advisory-only-proctoring.md` | Proctoring advisory-only posture | accepted |
-| `adr/0006-voice-scope-demo-only.md` | Voice = demo only, out of beta critical path | accepted |
+| `adr/0006-voice-scope-demo-only.md` | Voice = demo only, out of beta critical path | accepted (amended by 0008) |
 | `adr/0007-backup-offsite-deferral.md` | On-server backups until customer / 2026-09-30 | accepted |
+| `adr/0008-voice-demo-route-mounted.md` | Voice demo route stays mounted; docs corrected to match code | accepted |
 | `adr/template.md` | ADR template | — |
 
 ### plans/, reviews/, compliance/, runbooks/
 
 | Path | What | Status |
 |---|---|---|
-| `plans/active/docs-reorganization-plan.md` | The executed docs reorg plan | executed 2026-08-24 |
-| `plans/archive/*` | Closed plans (m3, p4, merged-action) — frozen | archived |
+| `plans/active/review-fix-plan-2026-08-24.md` | R24 deep-review remediation plan (decisions confirmed) | current |
+| `plans/archive/*` | Closed plans (m3, p4, merged-action, docs-reorganization) — frozen | archived |
 | `reviews/2026-08-19-four-lens.md` · `reviews/2026-08-22-code.md` · `reviews/2026-08-22-competitive.md` | Review snapshots — append-only | snapshots |
 | `compliance/access_control_policy.md` · `data_retention_policy.md` · `incident_response_plan.md` · `soc2_readiness.md` | Controls & policies — describe reality | corrected 2026-08-24 |
 | `runbooks/deploy.md` · `rollback.md` · `restore-drill.md` · `llm-outage.md` | Operational procedures | current |

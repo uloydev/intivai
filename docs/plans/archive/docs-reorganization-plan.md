@@ -1,5 +1,6 @@
 # Docs Reorganization & Governance Plan
 
+**Status:** archived — executed 2026-08-24 (see `docs/README.md` index)
 **Created:** 2026-08-24
 **Source:** Full documentation audit (28 files, ~8k lines) — findings summarized in the audit conversation of 2026-08-24.
 **Goal:** Make the documentation system production-grade: one truth per fact, no contradictions, a governed structure, and tooling that keeps it that way.
@@ -265,14 +266,19 @@ bash scripts/check-openapi-drift.sh          # exit 0
 
 ## 8. Definition of Done
 
-- [ ] Root contains exactly README / AGENTS / CONTEXT / CHANGELOG
-- [ ] One openapi.yaml, tracked, drift-guarded in CI
-- [ ] docs/README.md indexes every docs file with status + last-reviewed
-- [ ] docs/FINDINGS.md accounts for every open item from all five prior review/fix documents (deduped, statuses verified)
-- [ ] Zero unresolved rows in the W2 contradiction table (each marked resolved-with-decision-ID)
-- [ ] Compliance docs carry truthful Implemented/Partial/Target statuses matching code
-- [ ] ADRs 0001–0007 + template exist; PRD ADR references resolve
-- [ ] PRD rewritten: non-goals, measurable claims, single pricing link, no fake matrix references
-- [ ] Runbooks (deploy/rollback/restore-drill/llm-outage), threat-model, slos, schemas, changelog exist
-- [ ] markdownlint + lychee green in CI; AGENTS.md governance rules recorded
-- [ ] `make check` still green (doc changes must not break gates; scripts/check-openapi-drift.sh added to it)
+- [x] Root contains exactly README / AGENTS / CONTEXT / CHANGELOG
+- [x] One openapi.yaml, tracked, drift-guarded in CI
+- [x] docs/README.md indexes every docs file with status + last-reviewed
+- [x] docs/FINDINGS.md accounts for every open item from all five prior review/fix documents (deduped, statuses verified)
+- [x] Zero unresolved rows in the W2 contradiction table (each marked resolved-with-decision-ID)
+- [x] Compliance docs carry truthful Implemented/Partial/Target statuses matching code
+- [x] ADRs 0001–0007 + template exist; PRD ADR references resolve
+- [x] PRD rewritten: non-goals, measurable claims, single pricing link, no fake matrix references
+- [x] Runbooks (deploy/rollback/restore-drill/llm-outage), threat-model, slos, schemas, changelog exist
+- [x] markdownlint + lychee green in CI; AGENTS.md governance rules recorded
+- [x] `make check` still green (doc changes must not break gates; scripts/check-openapi-drift.sh added to it)
+
+> DoD ticked 2026-08-24 by the R24 deep review (H6): plan verified executed via
+> spot-checks — structure, spec consolidation, ledger seeding, ADR backfills,
+> compliance truth-pass all present in repo. Known residue: README index
+> omissions fixed same day; drift-guard helper-route blind spot tracked as E4.

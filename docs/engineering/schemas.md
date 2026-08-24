@@ -62,8 +62,8 @@ Auth: ws_ticket JWT (10-min, bound to interview + session) via `?ticket=` or Aut
 
 | Limit | Value | Source of truth |
 |---|---|---|
-| CV upload size | 10 MB (`CV_MAX_UPLOAD_MB`) | `pkg/config/config.go:148` |
-| Company context size | 64 KB | `internal/context/application/context_service.go:64` |
+| CV upload size | 10 MB (`CV_MAX_UPLOAD_MB`) | `pkg/config/config.go:153` |
+| Company context size | 64 KB (`ctxMaxBytes`) | `internal/context/application/context_service.go:29` |
 | Tenant prompt length | 4K chars max + integrity keyword rails | prompt validation (`context/domain`) |
 | Interview context budget | 8000 tokens (`DefaultTokenBudget`) | `interview/domain/service/context.go:24` |
 | Context window | last 10 Q&A pairs | same file |
