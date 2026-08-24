@@ -8,25 +8,22 @@
 # --env-file; `${VAR:?}` fails fast when a required secret is missing.
 # !override REPLACES the base port lists (compose v5 appends otherwise).
 #
-# ROLLBACK (keep last N image tags on the VPS):
-#   CI tags every deploy image with TAG=<git-sha> and also pushes :latest.
-#   To roll back, point compose at the previous tag and re-up:
-#     docker compose --env-file .env.prod -f docker-compose.yml \
-#       -f docker-compose.prod.yml up -d \
-#       -e IMAGE=<image> -e TAG=<previous-sha>
-#   (`up -d` recreates only the changed containers; `docker image prune -f`
-#   in CI only removes <none> layers, never tagged images.) Keep the last 5
-#   TAGs available locally; `docker images ghcr.io/<IMAGE> --format '{{.Tag}}'`
-#   lists what you can roll back to.
+# ROLLBACK (keep last N image tags on the VPS): executable procedure lives in
+# docs/runbooks/deploy-rollback.sh (A13); background policy in
+# docs/runbooks/rollback.md. In short: re-run compose up -d with TAG set to a
+# previous git-sha tag (`docker images ghcr.io/$IMAGE --format '{{.Tag}}'`
+# lists candidates). CI tags every deploy image TAG=<git-sha> and pushes
+# :latest; `up -d` recreates only changed containers; CI's `docker image
+# prune -f` removes <none> layers only, never tagged images.
 services:
   migrate:
-    image: ghcr.io/${IMAGE:-intivai/backend}:${TAG:-latest}
+    image: ghcr.io/${IMAGE:?set IMAGE in .env.prod}:${TAG:?set TAG in .env.prod}
     environment:
       INTIVAI_MIGRATE_URL: ${INTIVAI_MIGRATE_URL:?set in .env.prod}
     restart: "no"
 
   app:
-    image: ghcr.io/${IMAGE:-intivai/backend}:${TAG:-latest}
+    image: ghcr.io/${IMAGE:?set IMAGE in .env.prod}:${TAG:?set TAG in .env.prod}
     ports: !override []
     environment:
       INTIVAI_APP_PORT: ${INTIVAI_APP_PORT:-8080}
@@ -46,9 +43,9 @@ services:
       INTIVAI_SMTP_USER: ${INTIVAI_SMTP_USER:?set in .env.prod}
       INTIVAI_SMTP_PASS: ${INTIVAI_SMTP_PASS:?set in .env.prod}
       INTIVAI_SMTP_FROM: ${INTIVAI_SMTP_FROM:?set in .env.prod}
-      INTIVAI_DEEPSEEK_API_KEY: ${INTIVAI_DEEPSEEK_API_KEY:-}
-      INTIVAI_DEEPSEEK_BASE_URL: ${INTIVAI_DEEPSEEK_BASE_URL:-https://api.deepseek.com}
-      INTIVAI_DEEPSEEK_MODEL: ${INTIVAI_DEEPSEEK_MODEL:-deepseek-chat}
+      INTIVAI_LLM_API_KEY: ${INTIVAI_LLM_API_KEY:?set in .env.prod}
+      INTIVAI_LLM_BASE_URL: ${INTIVAI_LLM_BASE_URL:-https://ai.sumopod.com/v1}
+      INTIVAI_LLM_MODEL: ${INTIVAI_LLM_MODEL:-MiniMax-M2.7-highspeed}
       INTIVAI_LLM_MAX_RETRIES: ${INTIVAI_LLM_MAX_RETRIES:-3}
       INTIVAI_ALLOWED_ORIGINS: ${INTIVAI_ALLOWED_ORIGINS:?set in .env.prod}
       INTIVAI_APP_PUBLIC_URL: ${INTIVAI_APP_PUBLIC_URL:?set in .env.prod}
@@ -93,24 +90,50 @@ services:
         condition: service_healthy
 
   sandbox-sidecar:
-    image: ghcr.io/${IMAGE:-intivai/backend}:${TAG:-latest}
+    image: ghcr.io/${IMAGE:?set IMAGE in .env.prod}:${TAG:?set TAG in .env.prod}
     entrypoint: ["sandboxd"]
     environment:
       SANDBOXD_ADDR: :8443
       SANDBOXD_CA: /certs/ca.pem
       SANDBOXD_CERT: /certs/server.pem
       SANDBOXD_KEY: /certs/server-key.pem
+      # A12 containment: sandboxd shells out to the docker CLI (runner.go
+      # exec.Command("docker")), and the CLI honors DOCKER_HOST natively — so
+      # it talks to the least-privilege socket-proxy instead of holding the
+      # raw host socket. No /var/run/docker.sock mount here anymore.
+      DOCKER_HOST: tcp://socket-proxy:2375
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
       - ./backend/.sandbox-certs:/certs:ro
     restart: always
     mem_limit: 512m
+    read_only: true
+    tmpfs:
+      - /tmp:rw,size=32m,mode=1777
     healthcheck:
       test: ["CMD-SHELL", "nc -z localhost 8443"]
       interval: 30s
       timeout: 5s
       retries: 5
       start_period: 10s
+    depends_on:
+      socket-proxy:
+        condition: service_started
+
+  # A12: the docker socket is root-equivalent; only this least-privilege proxy
+  # mounts it. sandboxd reaches the daemon through it (CONTAINERS/IMAGES/POST
+  # only — no host port published, internal network only). Verify after first
+  # deploy that `docker kill` (timeout path) passes through POST=1; if a call
+  # is blocked, widen via explicit ALLOW_* vars, never by mounting the socket.
+  socket-proxy:
+    image: tecnativa/docker-socket-proxy:0.3.0@sha256:9e4b9e7517a6b660f2cc903a19b257b1852d5b3344794e3ea334ff00ae677ac2
+    environment:
+      CONTAINERS: "1"
+      IMAGES: "1"
+      POST: "1"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    restart: always
+    mem_limit: 64m
 
   postgres:
     ports: !override []
@@ -123,6 +146,17 @@ services:
     ports: !override []
     restart: always
     command: redis-server --appendonly yes
+    # A15: requirepass is DELIBERATELY NOT enabled yet. Verdict 2026-08-24:
+    # the app has no Redis auth support — backend/pkg/config/config.go defines
+    # Redis{Addr string} only, and pkg/queue/asynq.go builds
+    # redis.NewClient(&redis.Options{Addr}) with no Password / ParseURL.
+    # Enabling --requirepass ${REDIS_PASSWORD:?} today would brick the queue
+    # and WS session registry (auth errors on every command). Follow-up
+    # (needs a Go change): accept INTIVAI_REDIS_ADDR in redis://user:pass@host
+    # form via go-redis ParseURL, then uncomment the line below and set
+    # REDIS_PASSWORD in .env.prod. The compose network is not host-exposed
+    # (ports !override []), which is the current compensating control.
+    # command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-}
     volumes:
       - redisdata:/data
     mem_limit: 512m
@@ -136,7 +170,7 @@ services:
     mem_limit: 1g
 
   caddy:
-    image: caddy:2-alpine
+    image: caddy@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648
     restart: always
     ports: !override ["80:80", "443:443"]
     mem_limit: 256m

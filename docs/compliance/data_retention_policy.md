@@ -20,6 +20,7 @@
 | OTP tokens | 7 days | `PurgeExpired` repository call on portal access | Implemented |
 | Invitation tokens | 7 days validity; revoked rows purgeable | `PurgeExpired` job | Implemented (validity); Target (purge job) |
 | Data request logs | 1 year | Annual purge | **Target** |
+| Erased candidate data (in backups) | Until backup expiry (≤14 days after erasure) | Backup rotation ages erased rows/files out of archives | Accepted interim (legal OK'd; erasure is not immediate inside the 14-day backup window) — **Target**: crypto-erase / key-rotation on backups |
 
 ## GDPR Compliance
 

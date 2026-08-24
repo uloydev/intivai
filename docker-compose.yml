@@ -1,6 +1,6 @@
 services:
   postgres:
-    image: pgvector/pgvector:pg16
+    image: pgvector/pgvector@sha256:ccc6e83d6e35e931dc7c5def2022729d5a6c370318d099181995567ff1fb4d6b
     environment:
       POSTGRES_USER: intivai
       POSTGRES_PASSWORD: intivai
@@ -16,7 +16,7 @@ services:
       retries: 10
 
   redis:
-    image: redis:7-alpine
+    image: redis@sha256:ff02b58f971e7d7d156a1267e283fcbbeee91773b6aa36c49dac28ecfe28eadf
     ports:
       - "6379:6379"
     healthcheck:
@@ -26,7 +26,7 @@ services:
       retries: 10
 
   minio:
-    image: minio/minio:latest
+    image: minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: intivai
@@ -80,7 +80,10 @@ services:
       INTIVAI_DATABASE_URL: postgres://intivai_app:intivai_app@postgres:5432/intivai?sslmode=disable
       INTIVAI_REDIS_ADDR: redis:6379
       # Local key lives in .env (gitignored); empty in CI/prod until set.
-      INTIVAI_DEEPSEEK_API_KEY: ${INTIVAI_DEEPSEEK_API_KEY:-}
+      INTIVAI_LLM_API_KEY: ${INTIVAI_LLM_API_KEY:-}
+      INTIVAI_LLM_BASE_URL: ${INTIVAI_LLM_BASE_URL:-https://ai.sumopod.com/v1}
+      INTIVAI_LLM_MODEL: ${INTIVAI_LLM_MODEL:-MiniMax-M2.7-highspeed}
+      INTIVAI_LLM_PROVIDER_NAME: ${INTIVAI_LLM_PROVIDER_NAME:-sumopod}
       INTIVAI_MINIO_ENDPOINT: minio:9000
       INTIVAI_MINIO_ACCESS_KEY: intivai
       INTIVAI_MINIO_SECRET_KEY: intivai123
@@ -118,9 +121,14 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./backend/.sandbox-certs:/certs:ro
     restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:rw,size=32m,mode=1777
+    security_opt:
+      - no-new-privileges:true
 
   mailpit:
-    image: axllent/mailpit:latest
+    image: axllent/mailpit@sha256:c96991d9bef73594c246d89ca81411d4e916f03e76a7d2d72fa2ab5dd3c9ce24
     ports:
       - "1025:1025"
       - "8025:8025"

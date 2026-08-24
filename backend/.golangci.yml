@@ -11,9 +11,24 @@ linters:
     - staticcheck
     - unused
     - ineffassign
+    # A18: security linter (G-codes: hardcoded creds, weak crypto, file perms…)
+    # TODO(gosec-triage): enabled 2026-08-24. Local run (v2.10.1): 0 findings
+    # across all packages EXCEPT pkg/observability, which had unrelated
+    # in-flight typecheck errors at the time and was not analyzed — re-check
+    # its G-codes on the first green CI run before declaring full coverage.
+    - gosec
   settings:
     errcheck:
       exclude-functions:
         - (io.Closer).Close
+    gosec:
+      excludes:
+        # Triage 2026-08-24 (A18): reviewed classes, all by-design — re-audit on change.
+        - G117 # auth/webhook DTOs must expose Password/Secret fields (bound + rotated server-side)
+        - G115 # bounded conversions: sample-width math in stt/whisper.go, test rune helpers
+        - G204 # subprocess with variable: tesseract/poppler binary paths from config, docker CLI in sandboxd
+        - G304 # file inclusion via variable: same config-driven paths (cert loading, OCR input)
+        - G703 # path-traversal taint: sandboxd TLS material paths come from operator CLI flags, not user input
+        - G704 # SSRF taint: URLs come from operator config (loadcheck base, LLM provider base), not user input
   exclusions:
     generated: strict
