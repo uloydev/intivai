@@ -314,3 +314,21 @@ export interface InterviewListItem {
   created_at: string
   completed_at?: string
 }
+
+export interface WebhookConfig {
+  id: string
+  url: string
+  events: string[]
+  active: boolean
+  created_at: string
+}
+
+export interface WebhookDelivery {
+  id: string
+  event: string
+  status_code: number
+  response_body: string
+  attempts: number
+  final_status: string
+  created_at: string
+}

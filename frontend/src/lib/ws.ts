@@ -21,12 +21,22 @@ export type ChatFrame =
       type: "question"
       content: string
       idx: number
+      total_questions?: number
+      is_probe?: boolean
       archetype?: "conversational" | "system_design" | "coding"
       time_limit_sec?: number
       session_remaining_sec?: number
+      topic_turn?: number
+      max_topic_turns?: number
     }
   | { type: "token"; content: string }
-  | { type: "response"; content: string }
+  | {
+      type: "response"
+      content: string
+      is_topic_complete?: boolean
+      topic_turn?: number
+      max_topic_turns?: number
+    }
   | {
       type: "evaluation"
       scores: Record<string, number>
@@ -34,7 +44,12 @@ export type ChatFrame =
       recommendation?: string
       status: "complete" | "pending"
     }
-  | { type: "error"; code?: string; message: string }
+  | {
+      type: "error"
+      /** Known machine-readable codes narrow here; unknown codes stay valid. */
+      code?: "turn_in_progress" | (string & {})
+      message: string
+    }
   | { type: "pong" }
 
 export interface ChatClientOptions {
@@ -107,6 +122,12 @@ export class ChatClient {
     return this.ws?.readyState === WebSocket.OPEN
   }
 
+  // G2: swap the credential between connection attempts (re-minted
+  // ws_ticket) without rebuilding the client or losing frame handlers.
+  setTicket(ticket: string): void {
+    this.opts.ticket = ticket
+  }
+
   send(frame: Record<string, unknown>): boolean {
     if (this.ws?.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify(frame))
@@ -115,10 +136,11 @@ export class ChatClient {
     return false
   }
 
-  answer(content: string, pacing?: PacingTelemetry): boolean {
+  answer(content: string, action: "reply" | "advance" = "reply", pacing?: PacingTelemetry): boolean {
     return this.send({
       type: "answer",
       content,
+      action,
       ...(pacing ? { pacing_telemetry: pacing } : {}),
     })
   }

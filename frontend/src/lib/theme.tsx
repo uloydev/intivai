@@ -1,6 +1,5 @@
-import { createContext, useContext, useEffect, useState } from "react"
-
-type Theme = "light" | "dark"
+import { useEffect, useState } from "react"
+import { ThemeContext, type Theme } from "@/lib/theme-context"
 
 const THEME_KEY = "intivai_theme"
 
@@ -18,11 +17,6 @@ function initialTheme(): Theme {
 function applyThemeClass(theme: Theme) {
   document.documentElement.classList.toggle("dark", theme === "dark")
 }
-
-const ThemeContext = createContext<{ theme: Theme; toggle: () => void }>({
-  theme: "light",
-  toggle: () => undefined,
-})
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [theme, setTheme] = useState<Theme>(() => {
@@ -43,8 +37,4 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
       {children}
     </ThemeContext.Provider>
   )
-}
-
-export function useTheme() {
-  return useContext(ThemeContext)
 }

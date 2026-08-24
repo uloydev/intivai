@@ -59,10 +59,12 @@ describe("ChatClient", () => {
     client.connect("iv-1")
     const ws = FakeWebSocket.instances[0]
     client.answer("my answer")
+    client.answer("advance answer", "advance")
     client.interrupt()
     client.resume("s1")
     expect(ws.sent).toEqual([
-      JSON.stringify({ type: "answer", content: "my answer" }),
+      JSON.stringify({ type: "answer", content: "my answer", action: "reply" }),
+      JSON.stringify({ type: "answer", content: "advance answer", action: "advance" }),
       JSON.stringify({ type: "interrupt" }),
       JSON.stringify({ type: "resume", session_id: "s1" }),
     ])

@@ -52,4 +52,70 @@ describe("api", () => {
     expect(new Headers(init.headers).has("Content-Type")).toBe(false)
     vi.unstubAllGlobals()
   })
+
+  it("resolves undefined on 204 no content instead of throwing", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }))
+    vi.stubGlobal("fetch", fetchMock)
+    await expect(api.delete("/cvs/cv-1")).resolves.toBeUndefined()
+    vi.unstubAllGlobals()
+  })
+
+  it("still unwraps the data envelope on 200", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ data: { id: "cv-1" } }), { status: 200 }),
+    )
+    vi.stubGlobal("fetch", fetchMock)
+    await expect(api.get<{ id: string }>("/cvs/cv-1")).resolves.toEqual({ id: "cv-1" })
+    vi.unstubAllGlobals()
+  })
+
+  it("getBlob sends recruiter bearer token and a timeout signal", async () => {
+    localStorage.setItem("intivai_token", "tok-blob")
+    const fetchMock = vi.fn().mockResolvedValue(new Response("pdf-bytes", { status: 200 }))
+    vi.stubGlobal("fetch", fetchMock)
+    await api.getBlob("/interviews/iv-1/report/pdf")
+    const [path, init] = fetchMock.mock.calls[0]
+    expect(path).toContain("/interviews/iv-1/report/pdf")
+    expect(new Headers(init.headers).get("Authorization")).toBe("Bearer tok-blob")
+    expect(init.signal).toBeInstanceOf(AbortSignal)
+    vi.unstubAllGlobals()
+  })
+
+  it("getBlob throws ApiError with backend code on failure", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ code: "NOT_FOUND", error: "no report" }), { status: 404 }),
+    )
+    vi.stubGlobal("fetch", fetchMock)
+    try {
+      await api.getBlob("/interviews/iv-1/report/pdf")
+      throw new Error("should have thrown")
+    } catch (err) {
+      expect(err).toBeInstanceOf(ApiError)
+      const apiErr = err as ApiError
+      expect(apiErr.status).toBe(404)
+      expect(apiErr.code).toBe("NOT_FOUND")
+      expect(apiErr.message).toBe("no report")
+    }
+    vi.unstubAllGlobals()
+  })
+
+  it("getBlob uses the candidate token partition for candidate paths and clears it on 401", async () => {
+    localStorage.setItem("intivai_token", "recruiter-tok")
+    localStorage.setItem("intivai_candidate_token", "candidate-tok")
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ code: "UNAUTHORIZED", error: "expired" }), { status: 401 }),
+    )
+    vi.stubGlobal("fetch", fetchMock)
+    try {
+      await api.getBlob("/candidate/portal/export/file")
+      throw new Error("should have thrown")
+    } catch (err) {
+      expect(err).toBeInstanceOf(ApiError)
+      const [, init] = fetchMock.mock.calls[0]
+      expect(new Headers(init.headers).get("Authorization")).toBe("Bearer candidate-tok")
+      expect(localStorage.getItem("intivai_candidate_token")).toBeNull()
+      expect(localStorage.getItem("intivai_token")).toBe("recruiter-tok")
+    }
+    vi.unstubAllGlobals()
+  })
 })
