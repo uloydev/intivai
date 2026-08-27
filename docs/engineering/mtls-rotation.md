@@ -45,9 +45,11 @@ CA lifetime is 10 years. Rotate by generating a NEW CA + leaves, deploying both 
 1. **Declare**: suspected key theft of any `.sandbox-certs/*.pem` on any host.
 2. **Contain**: stop sandbox execution (`docker compose ... stop sandbox-sidecar app`) — sandbox features fail closed by design.
 3. **Rotate everything** (compromise of a leaf implies CA distrust):
+
    ```bash
    rm -rf backend/.sandbox-certs && bash scripts/gen-sandbox-certs.sh
    ```
+
 4. **Redeploy** app + sidecar on every affected host with the new material.
 5. **Review access**: audit who/what read the host cert directory (SSH logs, container mounts); rotate the host credentials used.
 6. **Postmortem**: record in `docs/FINDINGS.md`; if the compromise path was via the docker socket or socket-proxy, revisit ADR-0002 amendment controls.

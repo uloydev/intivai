@@ -1,6 +1,6 @@
 # Documentation Index
 
-> Status: current · Last-reviewed: 2026-08-24 · Owner: EM
+> Status: current · Last-reviewed: 2026-08-27 · Owner: EM
 > Every doc in the repo tree, its role, and freshness. Rule: **one fact, one
 > home** — if two docs state the same fact, one must link to the other.
 
@@ -9,7 +9,7 @@
 | Path | What | Status | Last-reviewed |
 |---|---|---|---|
 | `README.md` | What + quickstart + deploy summary | current | 2026-08-24 |
-| `AGENTS.md` | Engineering workflow, commands, conventions | current | 2026-08-19 |
+| `AGENTS.md` | Engineering workflow, commands, conventions | current | 2026-08-24 |
 | `CONTEXT.md` | Ubiquitous language | current | 2026-08-10 |
 | `CHANGELOG.md` | Tag → notable changes | current | 2026-08-24 |
 
@@ -68,11 +68,18 @@
 
 | Path | What | Status |
 |---|---|---|
-| `plans/active/review-fix-plan-2026-08-24.md` | R24 deep-review remediation plan (decisions confirmed) | current |
-| `plans/archive/*` | Closed plans (m3, p4, merged-action, docs-reorganization) — frozen | archived |
+| `plans/archive/intivai-remediation-plan-2026-08-26.md` | Consolidated remediation plan R24–R28 — EXECUTED 2026-08-27; residual dated follow-ups tracked in `docs/FINDINGS.md` (in-progress rows) + `docs/engineering/beta-gate.md` | executed/archived |
+| `plans/archive/review-fix-plan-2026-08-24.md` | Superseded R24 deep-review remediation plan; retained historical batches and decisions | superseded |
+| `plans/archive/feature-plan-2026-08-24-weights-questions-qa.md` | Superseded B1–B5 feature plan; retained decisions and acceptance criteria | superseded |
+| `plans/archive/otel-tracing-plan-2026-08-26.md` | Superseded OTel plan; retained execution record and evidence | superseded |
+| `plans/archive/*` | Closed and superseded plans — frozen historical context | archived |
 | `reviews/2026-08-19-four-lens.md` · `reviews/2026-08-22-code.md` · `reviews/2026-08-22-competitive.md` | Review snapshots — append-only | snapshots |
 | `compliance/access_control_policy.md` · `data_retention_policy.md` · `incident_response_plan.md` · `soc2_readiness.md` | Controls & policies — describe reality | corrected 2026-08-24 |
 | `runbooks/deploy.md` · `rollback.md` · `restore-drill.md` · `llm-outage.md` | Operational procedures | current |
+
+> **Active execution mode:** no active plan file since 2026-08-27 — remediation is
+> ledger-driven (`docs/FINDINGS.md` is the single backlog; dates + owners on every
+> non-closed row). A new plan file is only created for a new multi-batch scope.
 
 ## Governance rules
 

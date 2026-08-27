@@ -128,6 +128,29 @@ rationale lives in [`design-decisions.md`](design-decisions.md).
 └── .github/workflows/ci.yml            # backend, frontend, integration, smoke, deploy
 ```
 
+## Observability
+
+- **Metrics:** Prometheus (`pkg/metrics`, `/metrics`), LLM token ledger, active WS gauge
+- **Errors:** Sentry (`pkg/observability`), fiber + worker panic capture
+- **Tracing:** OpenTelemetry → Jaeger v2 all-in-one
+  (`docs/plans/archive/intivai-remediation-plan-2026-08-26.md`)
+  - Bootstrap: `pkg/telemetry.Init` in `cmd/server` + `cmd/sandboxd`;
+    `INTIVAI_OTEL_ENABLE=false` is a hard noop and the runtime kill switch
+  - Spans: HTTP server (`httpmw.Tracing`, route-template names), `tenant.tx` +
+    gorm SQL (`db.RunInTx` / otelgorm via `db.WithPlugin`),
+    `queue.process <task>` linked to the producing trace via task headers
+    (`queue.TracingMiddleware`, wire FIRST on the worker mux),
+    `llm.chat|chat_stream|structured_output` with per-attempt children,
+    `interview.answer.process` / `interview.turn.stream`
+  - Logs: `trace_id` sits next to `request_id` in every audit line — paste it into
+    the Jaeger UI search to open the waterfall; UI at `localhost:16686` (dev overlay only)
+  - PII rule: candidate names/emails/CV text/prompts/tokens never enter span attributes
+  - **Tracing gate** (`scripts/check-tracing.sh`, part of `make check`): new backend code
+    inherits tracing only through the instrumented seams, so the gate fails on any bypass —
+    `c.Context()` in handlers, raw asynq enqueues outside `pkg/queue`, direct OpenAI usage
+    outside `internal/llm`, package-level `otel.Tracer` vars, and missing bootstrap wiring
+    in the two binaries
+
 ## Layer rules (enforced by review, not tooling)
 
 - **Ports in `domain/`, adapters in `infrastructure/`** — e.g. `MemoryBank`,

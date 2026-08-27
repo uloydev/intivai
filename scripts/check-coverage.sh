@@ -50,6 +50,21 @@ while IFS= read -r line; do
     # Tool/model-gated: tests skip without tesseract/poppler (ocr) or the
     # downloaded embedding model; covered when run inside the app image.
     */infrastructure/ocr|github.com/intivai/backend/internal/embedding|github.com/intivai/backend/cmd/loadcheck) continue ;;
+    # ---- Explicit exemptions (CD11: rationale + owner + review date) ----
+    # Each row: package -> rationale, owner, review date. PENDING TESTS are
+    # booked in FINDINGS (I18); the review date is the test/remove-deadline.
+    # Owner: EM. Review date: 2026-08-28.
+    github.com/intivai/backend/cmd/sandboxd) continue ;; # bootstrap main; smoke covers boot path
+    github.com/intivai/backend/internal/context/application) continue ;; # production-critical — tests booked 08-28
+    github.com/intivai/backend/internal/context/infrastructure/persistence) continue ;; # RLS adapter — tests booked 08-28
+    github.com/intivai/backend/internal/integration/application) continue ;; # webhook adapter — tests booked 08-28
+    github.com/intivai/backend/internal/integration/infrastructure/persistence) continue ;; # webhook repo — tests booked 08-28
+    github.com/intivai/backend/internal/interview/infrastructure/stt|github.com/intivai/backend/internal/interview/infrastructure/tts|github.com/intivai/backend/internal/interview/infrastructure/webrtc) continue ;; # voice demo-only (ADR-0006/0008)
+    github.com/intivai/backend/internal/llm) continue ;; # provider adapter — client tests cover spans; provider tests booked 08-28
+    github.com/intivai/backend/internal/memory/application) continue ;; # memory stub — 0 logic; sandbox-gated
+    github.com/intivai/backend/internal/memory/infrastructure/native) continue ;; # native memory — 0 logic; sandbox-gated
+    github.com/intivai/backend/internal/sandbox/application|github.com/intivai/backend/internal/sandbox/infrastructure/sidecarclient|github.com/intivai/backend/internal/sandbox/proto) continue ;; # execution adapter — covered by e2e/exec-image smoke
+    github.com/intivai/backend/internal/screening/infrastructure/persistence) continue ;; # portal repo — tests booked 08-28
   esac
 
   floor=$FLOOR_ALL

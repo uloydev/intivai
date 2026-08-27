@@ -18,6 +18,7 @@
     "frontend/test-results/**",
     ".kilo/**",
     ".kilocode/**",
+    ".opencode/**",
     "docs/plans/archive/**",
     "docs/reviews/**"
   ]

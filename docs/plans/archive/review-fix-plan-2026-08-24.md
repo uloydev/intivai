@@ -1,6 +1,6 @@
 # Review Fix Plan — Deep Audit 2026-08-24
 
-> Status: draft — awaiting decision-register confirmation · Owner: EM
+> Status: superseded by `docs/plans/archive/intivai-remediation-plan-2026-08-26.md` · Owner: EM
 > Source: four-agent deep review executed 2026-08-24 (docs-sync, ops/CI/security,
 > Go backend, React frontend). Every claim below was verified against code by
 > the auditing agents; file:line references preserved from their reports.

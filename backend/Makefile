@@ -46,6 +46,7 @@ help:
 check:
 	@test -z "$$(gofmt -l .)" || { echo "gofmt violations:"; gofmt -l .; exit 1; }
 	@../scripts/check-openapi-drift.sh
+	@../scripts/check-tracing.sh
 	$(MAKE) lint vet build test
 
 # Regenerate the sandbox gRPC stubs from proto/sandbox.proto

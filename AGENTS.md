@@ -108,6 +108,25 @@ criteria — mark executed, not just coded). Beta-gate status is tracked in
 5. Self-review the diff (`/review uncommitted`) before committing
 6. Commit with Conventional Commits, imperative subject, body for migrations/security/why
 
+## Batch workflows (large or parallel work)
+
+Slash commands encode the full sequences; the gates below are always-on for ANY batch/parallel execution:
+
+- `/deep-review` — full-project audit: 4-agent review (docs-sync, ops/CI/security, Go, FE) → FINDINGS ledger → decision register → fix plan → parallel exec → commit series
+- `/feature-batches` — new requirements: code-grounded multi-perspective analysis → decision grill → batch plan (ownership maps + staging lists) → TDD exec → commit series
+
+Hard gates — no exceptions:
+1. **Clean tree before a series starts** (`git status --porcelain` empty) — land or stash drift first
+2. **Decision register frozen before implementation** — zero open choices entering exec; grill with options-first questions
+3. **File-ownership map per agent** — one file, one owner; shared harnesses built as task 0 of their first consuming batch
+4. Red→green proof: regression tests fail for the expected reason, never a compile error
+5. `-race` mandatory on interview/chat packages; WS protocol tests BEFORE handler wiring on any protocol change
+6. FE api-lib contract tests cover status classes including empty-body success responses
+7. Composer-path changes re-assert safety-rails-last ordering in tests
+8. Migration + repo + domain in ONE commit; fresh-DB boot verified (`make dev` from clean volume)
+9. Per-package targeted tests inside each agent; full `make check && make coverage && make test-integration-dev` at the merge point only
+10. Commits from prepared staging lists (paths written in the plan); one concern each; baseline drift lands as separate honest commits
+
 ## TDD layers (M3-specific)
 
 | Layer | Test-first artifact | Cycle |

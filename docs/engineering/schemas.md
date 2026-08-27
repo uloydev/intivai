@@ -54,6 +54,9 @@ Authoritative definition: `api/openapi.yaml` → `GET /api/v1/candidate/intervie
 | S→C | `error` | `{code, message}` |
 | S→C | `pong`, `code.result` | keepalive; sandbox execution result |
 | C→S | `answer` | `{idx, content, pacing_telemetry:{time_to_first_keystroke_ms, duration_ms, typed_chars, pasted_chars, pasted_ratio}}` |
+| C→S | `candidate_question` | `{content}` — free-form question about the role/company (B4), max 1000 characters (`MaxCandidateQuestionRunes`; overlength frames rejected at parse). Routed to grounded-answer generation ONLY from the pinned per-job + org contexts captured at connect; NEVER advances the interview question, pollutes the scored answer transcript, or touches turn state. Refused (no LLM spend) when the interview is expired/completed, the org cap is exhausted, or another QA answer is already in flight. |
+| S→C | `qa_answer` | `{question, answer, refused?}` — grounded answer, or polite refusal when the per-interview cap is exhausted, the interview is no longer active, another answer is in flight, recording failed, or the answer is not contained in context (no invented salary/benefits/company facts). The pair is recorded BEFORE the answer frame is sent, so every delivered answer is in the recruiter-visible log. |
+| C→S | any frame > 512 KiB | Rejected server-side with an `error` frame before parsing (`maxWSFrameBytes`); client payloads must never become unbounded allocations/storage. |
 | C→S | `interrupt` · `ping` · `resume {session_id}` · `telemetry` · `code.change` · `code.run` | control / telemetry / sandbox |
 
 Auth: ws_ticket JWT (10-min, bound to interview + session) via `?ticket=` or Authorization header. Origin allowlist enforced. One active connection per interview.
@@ -73,3 +76,6 @@ Auth: ws_ticket JWT (10-min, bound to interview + session) via `?ticket=` or Aut
 | Proctoring raw events | capped at 500/interview | proctoring domain |
 | Invitation token validity | 7 days, single start, reusable for resume | interview token repo |
 | WS ticket TTL | 10 minutes | iam auth provider |
+| Candidate Q&A cap | 10 per interview (`DefaultQALimit`); org-configurable via `candidate_qa_limit` (`OrgQALimitReader`). Enforced atomically at the SQL layer (`AppendQAPairWithinLimit`) — pre-check and record share the same boundary | `interview/application/interview_service.go` + `interview/infrastructure/persistence/postgres_interview_repo.go` + `iam/domain/org.go` |
+| Candidate QA text length | question ≤ 1000 runes (parse-time reject), stored answer ≤ 4000 runes (clamp) | `interview/domain/protocol.go` + `interview/application/interview_service.go` |
+| WS client frame size | ≤ 512 KiB (`maxWSFrameBytes`), larger frames get an `error` frame and are dropped | `interview/api/chat_handler.go` |

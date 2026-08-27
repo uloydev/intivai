@@ -23,8 +23,9 @@ while IFS= read -r -d '' f; do
 done < <(find . -name '*.md' \
   -not -path './.kilo/*' \
   -not -path './.kilocode/*' \
+  -not -path './.opencode/*' \
   -not -path './node_modules/*' \
-  -not -path './frontend/node_modules/*' \
+  -not -path '*/node_modules/*' \
   -not -path './docs/plans/archive/*' \
   -not -path './docs/reviews/*' \
   -print0)

@@ -36,8 +36,10 @@ JOB_ID=$(echo "$JOB" | jq_get "['data']['id']")
 say "job PATCH partial (status only)"
 curl -sf -X PATCH "$BASE/jobs/$JOB_ID" -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
   -d '{"status":"archived"}' >/dev/null
+# Public apply (017) requires is_published — status alone leaves the job
+# invisible to public_job_detail_lookup.
 curl -sf -X PATCH "$BASE/jobs/$JOB_ID" -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
-  -d '{"status":"active"}' >/dev/null
+  -d '{"status":"active","is_published":true}' >/dev/null
 echo "patch ok"
 
 say "public apply leak check (C9)"
