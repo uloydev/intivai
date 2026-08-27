@@ -60,6 +60,7 @@ COMPOSE_PROD := docker compose --env-file .env.prod -f docker-compose.yml -f doc
 	@printf "gate self-tests:\n"
 	@bash scripts/test-check-openapi-drift.sh && echo "  openapi-drift self-test OK (5/5)"
 	@bash scripts/test-check-docs-code-sync.sh && echo "  docs-code-sync self-test OK (6/6)"
+	@bash scripts/test-check-env-sync.sh && echo "  env-sync self-test OK (2/2)"
 	@echo "gate self-tests passed"
 
 check: .gate-selfcheck
@@ -86,8 +87,13 @@ lint-docs:
 	fi
 
 # --- Docker compose (dev) ---
-up:
+# Stack boot hygiene: env-sync gate before every up/dev — a dead or missing
+# var in .env would silently boot a wrong-configured stack.
+up: .env-check
 	$(COMPOSE) up -d
+
+.env-check:
+	@bash scripts/check-env-sync.sh
 
 down:
 	$(COMPOSE) down

@@ -84,6 +84,10 @@ services:
       INTIVAI_LLM_BASE_URL: ${INTIVAI_LLM_BASE_URL:-https://ai.sumopod.com/v1}
       INTIVAI_LLM_MODEL: ${INTIVAI_LLM_MODEL:-MiniMax-M2.7-highspeed}
       INTIVAI_LLM_PROVIDER_NAME: ${INTIVAI_LLM_PROVIDER_NAME:-sumopod}
+      # HTTP client timeout for reasoning models (LLM_TIMEOUT_SECONDS in
+      # config:147) — relayed from .env; without this line the app silently
+      # runs the 60s default while .env says 180.
+      INTIVAI_LLM_TIMEOUT_SECONDS: ${INTIVAI_LLM_TIMEOUT_SECONDS:-60}
       INTIVAI_MINIO_ENDPOINT: minio:9000
       INTIVAI_MINIO_ACCESS_KEY: intivai
       INTIVAI_MINIO_SECRET_KEY: intivai123
