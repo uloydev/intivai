@@ -154,3 +154,91 @@ func TestCandidateApplicationsLookup_StripsInvitationToken(t *testing.T) {
 	require.Error(t, err, "invitation_token must not be selectable from candidate_applications_lookup")
 	require.True(t, strings.Contains(err.Error(), "does not exist"), "expected missing-column error, got: %v", err)
 }
+
+// insertDemoOTP — inserts a reusable "demo-" magic-token row for a demo user.
+func insertDemoOTP(t *testing.T, pool *gorm.DB, email, token string) {
+	t.Helper()
+	err := pool.Exec(
+		`INSERT INTO candidate_otps (id, email, code_hash, token, attempts, expires_at, created_at)
+		 VALUES (?, ?, ?, ?, 0, NOW() + INTERVAL '24 hours', NOW())`,
+		uuid.New(), email, uuid.NewString(), token,
+	).Error
+	require.NoError(t, err)
+}
+
+// TestDemoMagicTokenRejectedWithoutDemoEnv — D22 regression: with
+// INTIVAI_DEMO_TOKENS unset (production config), a "demo-" token must behave
+// like a normal single-use token: FindValidByToken rejects a consumed demo
+// token and Consume marks it used once (second consume returns false).
+func TestDemoMagicTokenRejectedWithoutDemoEnv(t *testing.T) {
+	t.Setenv("INTIVAI_DEMO_TOKENS", "")
+	pool := newPortalTestPool(t)
+	ctx := context.Background()
+
+	email := "demo-prod-" + uuid.NewString()[:8] + "@demo.io"
+	token := "demo-prod-token-" + uuid.NewString()[:8]
+	insertDemoOTP(t, pool, email, token)
+
+	repo := scrrepo.NewPostgresCandidatePortalRepo(pool)
+
+	// Not-yet-used demo token: must resolve.
+	otp, err := repo.FindValidByToken(ctx, token)
+	require.NoError(t, err)
+	require.NotNil(t, otp, "unused demo token must resolve without demo env (single-use semantics)")
+
+	// First consume: marks used and returns true.
+	consumed, err := repo.Consume(ctx, otp.ID)
+	require.NoError(t, err)
+	require.True(t, consumed, "first consume must succeed even without demo env")
+
+	// Second consume: the row is used_at-marked, so it must NOT pass again
+	// (demo tokens must not be replayable in prod config).
+	consumed, err = repo.Consume(ctx, otp.ID)
+	require.NoError(t, err)
+	require.False(t, consumed, "replay of a demo token must be rejected without demo env")
+
+	// A consumed demo token must no longer resolve via FindValidByToken.
+	otp, err = repo.FindValidByToken(ctx, token)
+	require.NoError(t, err)
+	require.Nil(t, otp, "consumed demo token must not resolve without demo env")
+}
+
+// TestDemoMagicTokenReusedWhenDemoEnvOn — D22: with INTIVAI_DEMO_TOKENS=1 the
+// curated demo tokens stay reusable (skip used_at in lookup, no-op consume),
+// so the seeded demo link keeps working during local demos.
+func TestDemoMagicTokenReusedWhenDemoEnvOn(t *testing.T) {
+	t.Setenv("INTIVAI_DEMO_TOKENS", "1")
+	pool := newPortalTestPool(t)
+	ctx := context.Background()
+
+	email := "demo-on-" + uuid.NewString()[:8] + "@demo.io"
+	token := "demo-on-token-" + uuid.NewString()[:8]
+	insertDemoOTP(t, pool, email, token)
+
+	repo := scrrepo.NewPostgresCandidatePortalRepo(pool)
+
+	// Resolves; consume returns true; still resolves afterwards (reusable).
+	otp, err := repo.FindValidByToken(ctx, token)
+	require.NoError(t, err)
+	require.NotNil(t, otp)
+	consumed, err := repo.Consume(ctx, otp.ID)
+	require.NoError(t, err)
+	require.True(t, consumed)
+	otp2, err := repo.FindValidByToken(ctx, token)
+	require.NoError(t, err)
+	require.NotNil(t, otp2, "demo token must remain reusable with demo env on")
+
+	// A non-demo token still follows single-use semantics with demo env on.
+	normalToken := "normal-" + uuid.NewString()[:8]
+	normalEmail := "demo-on-" + uuid.NewString()[:8] + "@demo.io"
+	insertDemoOTP(t, pool, normalEmail, normalToken)
+	normalOTP, err := repo.FindValidByToken(ctx, normalToken)
+	require.NoError(t, err)
+	require.NotNil(t, normalOTP)
+	consumed, err = repo.Consume(ctx, normalOTP.ID)
+	require.NoError(t, err)
+	require.True(t, consumed)
+	replay, err := repo.FindValidByToken(ctx, normalToken)
+	require.NoError(t, err)
+	require.Nil(t, replay, "non-demo tokens must stay single-use even with demo env on")
+}

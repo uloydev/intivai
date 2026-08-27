@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
@@ -42,6 +43,47 @@ func (s *Storage) EnsureBucket(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+// ValidateOrgObjectPath — C5 defense-in-depth: an object path is acceptable
+// for orgID only when every dot-separated leading segment belongs to the org
+// prefix (paths like `contexts/{orgID}/...` and `cvs/{orgID}/...`). Rejects:
+//   - foreign/empty leading segment (other tenant's object),
+//   - traversal (`..`) or absolute (`/`) components,
+//   - empty path.
+//
+// Pure function, no I/O — unit-testable without MinIO.
+func ValidateOrgObjectPath(path, orgID string) bool {
+	if path == "" || orgID == "" {
+		return false
+	}
+	if strings.HasPrefix(path, "/") || strings.HasPrefix(path, "../") {
+		return false
+	}
+	segments := strings.Split(path, "/")
+	for i := 0; i < len(segments); i++ {
+		s := segments[i]
+		if s == "" || s == "." || s == ".." {
+			return false
+		}
+	}
+	// First two segments must be `{namespace}/{orgID}`.
+	if len(segments) < 2 {
+		return false
+	}
+	return segments[1] == orgID
+}
+
+// DownloadOrgScoped — Download plus org-scope enforcement: the object path
+// must live under the tenant's prefix (`{namespace}/{orgID}/...`) before any
+// storage I/O. Defense-in-depth for callers that already hold RLS-scoped
+// paths (workers, interview connect, evaluation); a cross-tenant path can
+// never reach MinIO.
+func (s *Storage) DownloadOrgScoped(ctx context.Context, path, orgID string) (io.ReadCloser, error) {
+	if !ValidateOrgObjectPath(path, orgID) {
+		return nil, fmt.Errorf("storage: object path %q is not org %s scoped", path, orgID)
+	}
+	return s.Download(ctx, path)
 }
 
 // Upload writes an object, creating the bucket on first use (fresh volumes

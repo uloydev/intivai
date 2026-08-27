@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"errors"
+	"os"
 	"strings"
 	"time"
 
@@ -80,8 +81,19 @@ func scanOTP(row *sql.Row) (*scrdomain.CandidateOTP, error) {
 	return &o, nil
 }
 
+// demoTokenMode — D22: curated "demo-" tokens bypass single-use semantics
+// ONLY when INTIVAI_DEMO_TOKENS=1 (local/demo stacks). Production config
+// (unset) keeps demo-prefixed tokens on the normal single-use path, so a
+// leaked demo token cannot be replayed forever.
+//
+// Package-level env sampler, consistent with the rest of this package
+// (infrastructure reads its own knobs; the repo has no config plumbing).
+func demoTokenMode() bool {
+	return os.Getenv("INTIVAI_DEMO_TOKENS") == "1"
+}
+
 func (r *PostgresCandidatePortalRepo) FindValidByToken(ctx context.Context, token string) (*scrdomain.CandidateOTP, error) {
-	if strings.HasPrefix(token, "demo-") {
+	if demoTokenMode() && strings.HasPrefix(token, "demo-") {
 		row := r.pool.WithContext(ctx).Raw(
 			`SELECT id, email, code_hash, token, attempts, expires_at FROM candidate_otps
 			 WHERE token = ? AND expires_at > NOW()
@@ -114,7 +126,7 @@ func (r *PostgresCandidatePortalRepo) Consume(ctx context.Context, id uuid.UUID)
 	if err := r.pool.WithContext(ctx).Raw(`SELECT token FROM candidate_otps WHERE id = ?`, id).Scan(&token).Error; err != nil {
 		return false, err
 	}
-	if strings.HasPrefix(token, "demo-") {
+	if demoTokenMode() && strings.HasPrefix(token, "demo-") {
 		return true, nil
 	}
 	res := r.pool.WithContext(ctx).Exec(

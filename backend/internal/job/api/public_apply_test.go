@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -18,7 +19,6 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
-	cvapp "github.com/intivai/backend/internal/cv/application"
 	cvrepo "github.com/intivai/backend/internal/cv/infrastructure/persistence"
 	iamauth "github.com/intivai/backend/internal/iam/infrastructure/auth"
 	jobapi "github.com/intivai/backend/internal/job/api"
@@ -64,8 +64,9 @@ func (f *fakeEnqueuer) ofType(jobType string) []capturedTask {
 }
 
 // newApplyTestStore — MinIO-backed object store for apply tests (skips when
-// TEST_MINIO_* is unset).
-func newApplyTestStore(t *testing.T) cvapp.ObjectStore {
+// TEST_MINIO_* is unset). Returns the concrete *storage.Storage so tests can
+// also probe Exists (D4 CV-object assertions).
+func newApplyTestStore(t *testing.T) *storage.Storage {
 	t.Helper()
 	store, err := storage.New(os.Getenv("TEST_MINIO_ENDPOINT"), os.Getenv("TEST_MINIO_ACCESS"), os.Getenv("TEST_MINIO_SECRET"), "intivai", false)
 	if err != nil || store == nil {
@@ -357,4 +358,170 @@ func TestPublicApplyPerEmailDailyCap429(t *testing.T) {
 	require.NoError(t, err)
 	_, _ = io.Copy(io.Discard, fresh.Body)
 	require.Equal(t, 201, fresh.StatusCode)
+}
+
+// fakeFailEnqueuer — first Enqueue fails (recorded), all later succeed.
+type fakeFailEnqueuer struct {
+	fakeEnqueuer
+	failed bool
+}
+
+func (f *fakeFailEnqueuer) Enqueue(ctx context.Context, jobType string, payload any, opts ...asynq.Option) (*asynq.TaskInfo, error) {
+	if !f.failed {
+		f.failed = true
+		return nil, errors.New("queue down")
+	}
+	return f.fakeEnqueuer.Enqueue(ctx, jobType, payload, opts...)
+}
+
+// TestPublicApplyEnqueueFailureKeepsReapplyExistingCVObject — D4 regression:
+// when the CV parse enqueue fails for a RE-APPLYING candidate, the stored CV
+// object (which is the EXISTING candidate's cv_path) must NOT be deleted —
+// that destroys the original resume. Only the DB row stays; the re-apply is
+// idempotent and keeps the prior CV object.
+func TestPublicApplyEnqueueFailureKeepsReapplyExistingCVObject(t *testing.T) {
+	url := os.Getenv("TEST_DATABASE_URL")
+	if url == "" {
+		t.Skip("skipping integration test; TEST_DATABASE_URL not set")
+	}
+	minioStore := newApplyTestStore(t)
+
+	pool, err := db.NewPool(context.Background(), url)
+	require.NoError(t, err)
+	ctx := context.Background()
+
+	orgID := uuid.New()
+	jobA := uuid.New()
+	jobB := uuid.New()
+	email := "d4-reapply-" + uuid.NewString()[:8] + "@candidate.io"
+	publicURL := "http://localhost:5173"
+
+	seedActiveJob(t, pool, orgID, jobA, "D4 Reapply A")
+	seedActiveJob(t, pool, orgID, jobB, "D4 Reapply B")
+
+	// First apply (jobA): creates candidate + CV object.
+	fakeA := &fakeEnqueuer{}
+	portalRepo := scrrepo.NewPostgresCandidatePortalRepo(pool)
+	handlerA := jobapi.NewPublicJobHandler(
+		pool, jobrepo.NewPostgresJobRepo(pool), cvrepo.NewPostgresCandidateRepo(pool),
+		scrrepo.NewPostgresApplicationRepo(pool), minioStore, fakeA, portalRepo, publicURL,
+	)
+	appA := fiber.New()
+	appA.Post("/api/v1/public/jobs/:id/apply", handlerA.Apply)
+
+	resp, err := appA.Test(applyMultipart(t, jobA, "D4 Candidate", email), -1)
+	require.NoError(t, err)
+	require.Equal(t, 201, resp.StatusCode)
+
+	var candID uuid.UUID
+	err = db.RunInTx(ctx, pool, orgID.String(), func(tctx context.Context) error {
+		tx, ok := db.TxFrom(tctx)
+		if !ok {
+			return errors.New("no tenant tx")
+		}
+		return tx.Raw(
+			`SELECT id FROM candidates WHERE org_id = ? AND LOWER(email) = ?`, orgID, email,
+		).Row().Scan(&candID)
+	})
+	require.NoError(t, err)
+
+	// First apply must store the CV object under the candidate's key.
+	cvPath := fmt.Sprintf("cvs/%s/%s.pdf", orgID, candID)
+	exists, err := minioStore.Exists(ctx, cvPath)
+	require.NoError(t, err)
+	require.True(t, exists, "first apply must have stored the CV object")
+
+	// Second apply (jobB) with a failing enqueue: re-applying candidate —
+	// the pre-existing CV object must survive.
+	fakeB := &fakeFailEnqueuer{}
+	handlerB := jobapi.NewPublicJobHandler(
+		pool, jobrepo.NewPostgresJobRepo(pool), cvrepo.NewPostgresCandidateRepo(pool),
+		scrrepo.NewPostgresApplicationRepo(pool), minioStore, fakeB, portalRepo, publicURL,
+	)
+	appB := fiber.New()
+	appB.Post("/api/v1/public/jobs/:id/apply", handlerB.Apply)
+
+	resp2, err := appB.Test(applyMultipart(t, jobB, "D4 Candidate", email), -1)
+	require.NoError(t, err)
+	require.NotEqual(t, 201, resp2.StatusCode,
+		"enqueue failure must not report success: body=%s", resp2.Body)
+
+	exists, err = minioStore.Exists(ctx, cvPath)
+	require.NoError(t, err)
+	require.True(t, exists, "D4: re-apply enqueue failure must NOT delete the existing CV object")
+
+	// The candidate row AND its first application survive the failed re-apply.
+	var rowCount int
+	err = db.RunInTx(ctx, pool, orgID.String(), func(tctx context.Context) error {
+		tx, ok := db.TxFrom(tctx)
+		if !ok {
+			return errors.New("no tenant tx")
+		}
+		return tx.Raw(
+			`SELECT COUNT(*) FROM candidates WHERE id = ?`, candID,
+		).Row().Scan(&rowCount)
+	})
+	require.NoError(t, err)
+	require.Equal(t, 1, rowCount, "candidate row must survive failed re-apply")
+
+	var appCount int
+	err = db.RunInTx(ctx, pool, orgID.String(), func(tctx context.Context) error {
+		tx, ok := db.TxFrom(tctx)
+		if !ok {
+			return errors.New("no tenant tx")
+		}
+		return tx.Raw(
+			`SELECT COUNT(*) FROM applications WHERE candidate_id = ?`, candID,
+		).Row().Scan(&appCount)
+	})
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, appCount, 1, "original application must survive failed re-apply")
+}
+
+// TestPublicApplyEnqueueFailureNewCandidateRollsBack — D4 counterpart: for a
+// NEW candidate, enqueue failure must roll back the DB row AND delete the
+// freshly uploaded CV object (no orphan state).
+func TestPublicApplyEnqueueFailureNewCandidateRollsBack(t *testing.T) {
+	url := os.Getenv("TEST_DATABASE_URL")
+	if url == "" {
+		t.Skip("skipping integration test; TEST_DATABASE_URL not set")
+	}
+	minioStore := newApplyTestStore(t)
+
+	pool, err := db.NewPool(context.Background(), url)
+	require.NoError(t, err)
+	ctx := context.Background()
+
+	orgID := uuid.New()
+	jobID := uuid.New()
+	email := "d4-new-" + uuid.NewString()[:8] + "@candidate.io"
+	publicURL := "http://localhost:5173"
+
+	seedActiveJob(t, pool, orgID, jobID, "D4 New Candidate")
+
+	fake := &fakeFailEnqueuer{}
+	portalRepo := scrrepo.NewPostgresCandidatePortalRepo(pool)
+	handler := jobapi.NewPublicJobHandler(
+		pool, jobrepo.NewPostgresJobRepo(pool), cvrepo.NewPostgresCandidateRepo(pool),
+		scrrepo.NewPostgresApplicationRepo(pool), minioStore, fake, portalRepo, publicURL,
+	)
+
+	app := fiber.New()
+	app.Post("/api/v1/public/jobs/:id/apply", handler.Apply)
+
+	resp, err := app.Test(applyMultipart(t, jobID, "D4 New Candidate", email), -1)
+	require.NoError(t, err)
+	require.NotEqual(t, 201, resp.StatusCode, "enqueue failure must not report success")
+
+	var candID uuid.UUID
+	err = pool.WithContext(ctx).Raw(
+		`SELECT id FROM candidates WHERE org_id = ? AND LOWER(email) = ?`, orgID, email,
+	).Row().Scan(&candID)
+	require.Error(t, err, "new candidate row must be rolled back on enqueue failure")
+	if err == nil {
+		// If the row somehow survives, the object must not.
+		exists, err := minioStore.Exists(ctx, fmt.Sprintf("cvs/%s/%s.pdf", orgID, candID))
+		require.NoError(t, err)
+		require.False(t, exists, "new candidate CV object must not survive failed enqueue")
+	}
 }

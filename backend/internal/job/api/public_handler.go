@@ -208,8 +208,12 @@ func (h *PublicJobHandler) Apply(c *fiber.Ctx) error {
 	if _, err := h.queue.Enqueue(c.UserContext(), cvapp.TaskParseCV, cvapp.ParseCVPayload{
 		OrgID: job.OrgID.String(), CandidateID: candidateID.String(),
 	}, asynq.MaxRetry(5)); err != nil {
-		_ = h.store.Delete(c.UserContext(), candidatePath)
+		// D4: only delete the object for a NEW candidate. A re-applying
+		// candidate's candidatePath IS the existing CV object — deleting it
+		// destroys the stored resume. Re-apply keeps CV + row; the failure
+		// only surfaces without mutating prior data.
 		if isNewCandidate {
+			_ = h.store.Delete(c.UserContext(), candidatePath)
 			_ = h.rollbackApply(c, job.OrgID, candidateID, jobID)
 		}
 		return httpapi.Error(c, sharederr.NewDomainError("INTERNAL_ERROR", "failed to enqueue cv processing"))
