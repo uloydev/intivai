@@ -16,7 +16,7 @@
 1. **Confirm scope**: provider 429/5xx vs auth failure vs network. Check Sentry + provider status.
 2. **Stop the spend**: if retries are amplifying cost or the outage is long, scale workers to zero —
    `docker compose --env-file .env.prod -f docker-compose.yml -f docker-compose.prod.yml up -d --scale app=0 app`
-   is too broad (kills HTTP); prefer pausing the queue consumer env (`INTIVAI_QUEUE_CONCURRENCY=0` if configured) or revoking the LLM key so calls fail fast instead of burning retries.
+   is too broad (kills HTTP); prefer revoking the LLM key so calls fail fast instead of burning retries (worker concurrency is fixed at 10, main.go:526 — no runtime pause switch today).
 3. **Communicate**: interviews already started degrade gracefully; new extractions show honest `failed_extract` states. Post a status note; no fabricated data is ever shown.
 4. **Recover**: after the provider recovers, re-enable, then replay failed tasks:
    - `POST /cvs/{id}/extract` for stuck extractions;

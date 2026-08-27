@@ -36,7 +36,7 @@ rationale lives in [`design-decisions.md`](design-decisions.md).
 │   ├── pkg/
 │   │   ├── config/                     # Viper env config (+ validation)
 │   │   ├── db/                         # GORM pool (pgx stdlib), tenant/tx ctx,
-│   │   │   └── migrations/             #   golang-migrate embedded (001–025 as of 2026-08-24)
+│   │   │   └── migrations/             #   golang-migrate embedded (001–032 as of 2026-08-27)
 │   │   ├── logger/                     # zerolog
 │   │   ├── metrics/                    # Prometheus custom metrics (LLM tokens, active WS)
 │   │   ├── queue/                      # asynq client/server, task-name consts

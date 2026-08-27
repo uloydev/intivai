@@ -19,9 +19,9 @@ becomes a P3 deliverable. Beta = Phase 0 cohort (5 pilots).
 | 5 | Invite flow: shareable interview URL from invitation token | [x] |
 | 6 | Consent capture: `consent_given` recorded at interview start | [x] |
 | 7 | Live LLM streaming verified with real key (smoke + Playwright E2E) | [x] |
-| 8 | Fresh-volume boot 001–025 (`make dev` from clean volume) | [x] |
+| 8 | Fresh-volume boot 001–032 (`make dev` from clean volume) | [x] verified on live dev stack (migrate-only chain 001→032 applied clean, 2026-08-27). Note: full clean-volume `make dev` re-run pending on a fresh host — part of gate 9 VPS deploy |
 | 9 | Deploy: compose on VPS, domain + TLS, env management, push pipeline | [~] pipeline + overlay ready; needs VPS/domain/secrets |
-| 10 | Backup & DR: postgres dump + MinIO mirror → backup bucket; restore test executed | [~] scripts ready; needs host cron + first restore test (see ADR-0007 offsite deadline). R24 note: restore.sh recreates DR roles with repo-published passwords (ledger A11) — fix before first real drill |
+| 10 | Backup & DR: postgres dump + MinIO mirror → backup bucket; restore test executed | [~] scripts ready; needs host cron + first restore test (see ADR-0007 offsite deadline). A11 closed 2026-08-27: restore role bootstrap now env-required (`POSTGRES_APP_PASSWORD` etc., restore.sh:23-24) — no repo-published secrets |
 | 11 | Error alerting lite (Sentry Go, DSN-gated) | [~] wired (no prod DSN yet) — `pkg/observability` init + fibersentry middleware + worker panic capture; enable by setting `INTIVAI_SENTRY_DSN`. DC decision 2026-08-24 executed (fix plan 5.6) |
 | 12 | 5 pilot companies onboarded; feedback channel + retention criteria set | [ ] business |
 | 13 | `make check` + `make coverage` + `make test-integration-dev` green | [x] |

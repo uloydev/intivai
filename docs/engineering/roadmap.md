@@ -190,7 +190,7 @@ rules are specified once in [`design-decisions.md`](design-decisions.md)
 | **Context management** | Sliding window, token counting via tiktoken-go | `internal/interview/domain/service/` |
 | **API endpoints** | `POST /interviews` (recruiter), `POST /candidate/interviews/:id/ticket` (invitation → WS ticket), `WS /candidate/interviews/:id/chat` (ticket auth) | `internal/interview/api/` |
 | **Reconnection** | Store last answered question, allow resume | `internal/interview/application/` |
-| **Candidate chat UI (FE)** | Browser WS client: ticket connect, answer/stream, interrupt, resume, consent checkbox at start | `frontend/chat.tsx` |
+| **Candidate chat UI (FE)** | Browser WS client: ticket connect, answer/stream, interrupt, resume, consent checkbox at start | `frontend/src/pages/Chat.tsx` |
 
 ### Chat Flow
 
@@ -248,11 +248,11 @@ empty scores). P4b stays post-MVP.
 |------|------|-------|
 | **Evaluation domain** | Report entity, criteria, scoring | `internal/evaluation/domain/` |
 | **LLM evaluation** | Per-question scoring → structured report (fills the P3 `evaluation` frame + persisted) | `internal/evaluation/infrastructure/llm/` |
-| **Report generation** | Aggregate per-question scores → report JSON | `internal/evaluation/application/generate_report.go` |
+| **Report generation** | Aggregate per-question scores → report JSON | `internal/evaluation/application/service.go` |
 | **API endpoints** | `GET /interviews/:id` (answers, status, scores), `GET /candidates/:id/report` (JSON) | `internal/evaluation/api/` |
-| **Recruiter dashboard-lite (FE)** | Job + CV upload, interview list, per-candidate result view | `frontend/pages/` |
-| **Invite flow (FE+BE)** | Shareable interview invite URL from the invitation token | `frontend/pages/` + `internal/interview/api/` |
-| **Consent capture (FE+BE)** | `consent_given` recorded at interview start | `frontend/chat.tsx` + interview api |
+| **Recruiter dashboard-lite (FE)** | Job + CV upload, interview list, per-candidate result view | `frontend/src/pages/` |
+| **Invite flow (FE+BE)** | Shareable interview invite URL from the invitation token | `frontend/src/pages/` + `internal/interview/api/` |
+| **Consent capture (FE+BE)** | `consent_given` recorded at interview start | `frontend/src/pages/Chat.tsx` + interview api |
 
 ### P4b — Post-MVP
 
@@ -260,7 +260,7 @@ empty scores). P4b stays post-MVP.
 |------|------|-------|
 | **PDF report generation** | Downloadable PDF (skip in MVP — JSON first) | `internal/evaluation/application/pdf.go` |
 | **Semantic index (interview)** | Sync interview_summary + reflection into the tenant's Mnemosyne bank | `internal/memory/application/` |
-| **Cross-interview reflect** | Cross-interview recall/reflect: skill patterns, failing questions, skill gaps | `internal/evaluation/application/reflect.go` |
+| **Cross-interview reflect** | Cross-interview recall/reflect: skill patterns, failing questions, skill gaps | `internal/memory/` (Mnemosyne bank + reflect API) |
 | **Dashboard polish** | Full candidate list, filters, comparisons | `frontend/pages/` |
 
 ### Evaluation Schema
@@ -325,10 +325,10 @@ similar, _ := mn.Recall(ctx,
 | **STT adapter** | Whisper via whisper.cpp CLI (tiny=dev, small/large-v3=production) | `internal/interview/infrastructure/stt/whisper.go` |
 | **TTS adapter** | Edge TTS API integration | `internal/interview/infrastructure/tts/edge_tts.go` |
 | **Voice session** | Audio pipeline: mic → STT → LLM → TTS → speaker | `internal/interview/application/voice_session.go` |
-| **TURN server** | Coturn setup for NAT traversal | `infra/turn/` |
+| **TURN server** | Coturn setup for NAT traversal | not provisioned (voice = gated demo, ADR-0008) |
 | **Recording** | Save audio to MinIO, transcription to DB | `internal/interview/infrastructure/recording/` |
 | **API endpoints** | `WS /interviews/:id/voice` | `internal/interview/api/voice_handler.go` |
-| **Frontend** | WebRTC client (getUserMedia, peer connection) | `frontend/pages/interview/voice.tsx` |
+| **Frontend** | WebRTC client (getUserMedia, peer connection) | `frontend/src/pages/InterviewVoice.tsx` (gated demo, ADR-0008) |
 
 ### Voice Pipeline
 
