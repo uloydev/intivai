@@ -80,7 +80,8 @@ func TestRequestHuman_Endpoint(t *testing.T) {
 	svc := ivapp.NewInterviewService(pool,
 		ivrepo.NewPostgresInterviewRepo(pool), ivrepo.NewPostgresTokenRepo(pool), ivrepo.NewPostgresQuestionBank(pool),
 		scrrepo.NewPostgresApplicationRepo(pool), cvrepo.NewPostgresCandidateRepo(pool), jobrepo.NewPostgresJobRepo(pool),
-		ctxrepo.NewPostgresContextRepo(pool), nil, jwtProvider, ivdomain.SystemClock(), nil, zerolog.Nop())
+		jobrepo.NewPostgresCandidateContextRepo(pool),
+		ctxrepo.NewPostgresContextRepo(pool), nil, jwtProvider, ivdomain.SystemClock(), nil, nil, zerolog.Nop())
 
 	handler := NewChatHandler(svc, mockLLM{}, jwtProvider, zerolog.Nop())
 	app := fiber.New()

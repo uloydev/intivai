@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	ivdomain "github.com/intivai/backend/internal/interview/domain"
@@ -17,7 +18,7 @@ import (
 // interviewColumns is the column list for the interviews table. GetByID and
 // ByApplication use it unqualified; ListByOrg qualifies it with the iv. alias
 // for the applications join.
-const interviewColumns = `id, application_id, status, transcript, last_question_idx, context_version, evaluation, consent_given, human_requested, proctoring_events, proctoring_summary, coding_sessions, started_at, completed_at, expires_at, created_at`
+const interviewColumns = `id, application_id, status, transcript, last_question_idx, context_version, evaluation, consent_given, human_requested, proctoring_events, proctoring_summary, coding_sessions, qa_pairs, started_at, completed_at, expires_at, created_at`
 
 type PostgresInterviewRepo struct {
 	pool *gorm.DB
@@ -40,17 +41,17 @@ func (r *PostgresInterviewRepo) Create(ctx context.Context, iv *ivdomain.Intervi
 	if err != nil {
 		return err
 	}
-	raw, rawEvents, rawSummary, rawSessions, err := marshalInterview(iv)
+	raw, rawEvents, rawSummary, rawSessions, rawQAPairs, err := marshalInterview(iv)
 	if err != nil {
 		return err
 	}
 	return db.WrapError(tx.WithContext(ctx).Exec(
 		`INSERT INTO interviews (id, application_id, type, status, transcript, last_question_idx,
-		 context_version, proctoring_events, proctoring_summary, coding_sessions,
+		 context_version, proctoring_events, proctoring_summary, coding_sessions, qa_pairs,
 		 started_at, completed_at, expires_at, created_at)
-		 VALUES ($1, $2, 'chat', $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+		 VALUES ($1, $2, 'chat', $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
 		iv.ID, iv.ApplicationID, string(iv.Status), raw, iv.LastQuestionIdx,
-		iv.ContextVersion, rawEvents, rawSummary, rawSessions,
+		iv.ContextVersion, rawEvents, rawSummary, rawSessions, rawQAPairs,
 		iv.StartedAt, iv.CompletedAt, iv.ExpiresAt, iv.CreatedAt).Error)
 }
 
@@ -76,15 +77,15 @@ func (r *PostgresInterviewRepo) Update(ctx context.Context, iv *ivdomain.Intervi
 	if err != nil {
 		return err
 	}
-	raw, rawEvents, rawSummary, rawSessions, err := marshalInterview(iv)
+	raw, rawEvents, rawSummary, rawSessions, rawQAPairs, err := marshalInterview(iv)
 	if err != nil {
 		return err
 	}
 	return db.WrapError(tx.WithContext(ctx).Exec(
 		`UPDATE interviews SET status = $1, transcript = $2, last_question_idx = $3,
-		 proctoring_events = $4, proctoring_summary = $5, coding_sessions = $6,
-		 started_at = $7, completed_at = $8, expires_at = $9, updated_at = NOW() WHERE id = $10`,
-		string(iv.Status), raw, iv.LastQuestionIdx, rawEvents, rawSummary, rawSessions,
+		 proctoring_events = $4, proctoring_summary = $5, coding_sessions = $6, qa_pairs = $7,
+		 started_at = $8, completed_at = $9, expires_at = $10, updated_at = NOW() WHERE id = $11`,
+		string(iv.Status), raw, iv.LastQuestionIdx, rawEvents, rawSummary, rawSessions, rawQAPairs,
 		iv.StartedAt, iv.CompletedAt, iv.ExpiresAt, iv.ID).Error)
 }
 
@@ -92,6 +93,10 @@ func (r *PostgresInterviewRepo) Update(ctx context.Context, iv *ivdomain.Intervi
 // summary — column-scoped (reads/writes only proctoring_*), so it never
 // races the transcript the way a full read-modify-write Update() would
 // (keystroke Touch() and answer commits run concurrently).
+// D17: the SELECT is FOR UPDATE, so two concurrent telemetry frames cannot
+// both read the same array and lose one event (last-writer-wins drop). The
+// row lock is held until the tenant tx commits, serializing summary
+// recomputation against concurrent appends.
 func (r *PostgresInterviewRepo) RecordProctoringEvent(ctx context.Context, id uuid.UUID, event ivdomain.ProctoringEvent) error {
 	tx, err := r.tx(ctx)
 	if err != nil {
@@ -99,7 +104,7 @@ func (r *PostgresInterviewRepo) RecordProctoringEvent(ctx context.Context, id uu
 	}
 	var rawEvents []byte
 	row := tx.Raw(
-		`SELECT COALESCE(proctoring_events, '[]'::jsonb) FROM interviews WHERE id = $1`, id).Row()
+		`SELECT COALESCE(proctoring_events, '[]'::jsonb) FROM interviews WHERE id = $1 FOR UPDATE`, id).Row()
 	if err := row.Scan(&rawEvents); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return ivdomain.ErrNotFound
@@ -158,10 +163,80 @@ func (r *PostgresInterviewRepo) RecordCodingSession(ctx context.Context, id uuid
 	}
 	return tx.WithContext(ctx).Exec(
 		`UPDATE interviews SET
-		   coding_sessions = COALESCE(coding_sessions, '[]'::jsonb) || $1::jsonb,
+		   coding_sessions = COALESCE(NULLIF(coding_sessions, 'null'::jsonb), '[]'::jsonb) || $1::jsonb,
 		   updated_at = NOW()
 		 WHERE id = $2`,
 		string(raw), id).Error
+}
+
+// AppendQAPairWithinLimit appends one candidate Q&A pair to qa_pairs JSONB
+// (B4). Column-scoped like RecordCodingSession, so it never rewrites the
+// scored transcript or races concurrent answer commits. The cap guard and the
+// ACTIVE/EXPIRY predicate run in the SAME statement as the append (J6) —
+// read-check-write across round trips would let concurrent frames both pass
+// the check, and a completed/expired interview must never accept a new pair.
+// NULLIF also normalizes legacy rows that stored the jsonb scalar 'null'
+// (pre-marshalJSONSlice). RowsAffected=0 no longer implies cap-exhausted: the
+// outcome is classified inside the same transaction.
+func (r *PostgresInterviewRepo) AppendQAPairWithinLimit(ctx context.Context, id uuid.UUID, pair ivdomain.QAPair, limit int) (bool, error) {
+	tx, err := r.tx(ctx)
+	if err != nil {
+		return false, err
+	}
+	raw, err := json.Marshal(pair)
+	if err != nil {
+		return false, fmt.Errorf("encode qa pair: %w", err)
+	}
+	res := tx.WithContext(ctx).Exec(
+		`UPDATE interviews SET
+		   qa_pairs = COALESCE(NULLIF(qa_pairs, 'null'::jsonb), '[]'::jsonb) || $1::jsonb,
+		   updated_at = NOW()
+		 WHERE id = $2
+		   AND status = 'in_progress'
+		   AND expires_at IS NOT NULL AND expires_at > NOW()
+		   AND jsonb_array_length(COALESCE(NULLIF(qa_pairs, 'null'::jsonb), '[]'::jsonb)) < $3`,
+		string(raw), id, limit)
+	if res.Error != nil {
+		return false, db.WrapError(res.Error)
+	}
+	if res.RowsAffected > 0 {
+		return true, nil
+	}
+	// No rows updated: it was either missing, inactive/expired, or cap-hit.
+	// Classify inside the SAME transaction so the outcome reflects the row
+	// state the UPDATE just raced against (J6 distinct outcomes).
+	var status string
+	var expiresAt *time.Time
+	row := tx.WithContext(ctx).Raw(
+		`SELECT status, expires_at FROM interviews WHERE id = $1`, id).Row()
+	if err := scanNullableStatus(row, &status, &expiresAt); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, ivdomain.ErrNotFound
+		}
+		return false, db.WrapError(err)
+	}
+	if status != "in_progress" {
+		return false, ivdomain.ErrQAActive
+	}
+	if expiresAt == nil || !expiresAt.After(time.Now().UTC()) {
+		return false, ivdomain.ErrQAActive
+	}
+	return false, nil // cap-exhausted: pair NOT written
+}
+
+// ExpireIfDue persists clock-driven expiry for an overdue in_progress
+// interview. Column-scoped: the QA path must record honest expiry state
+// without the lost-update risk of a full-row Update.
+func (r *PostgresInterviewRepo) ExpireIfDue(ctx context.Context, id uuid.UUID) error {
+	tx, err := r.tx(ctx)
+	if err != nil {
+		return err
+	}
+	return db.WrapError(tx.WithContext(ctx).Exec(
+		`UPDATE interviews SET status = 'expired', updated_at = NOW()
+		 WHERE id = $1 AND status = 'in_progress'
+		   AND expires_at IS NOT NULL AND expires_at <= NOW()`,
+		id).Error)
 }
 
 // SaveEvaluation persists the report, but NEVER overwrites an existing one —
@@ -260,26 +335,42 @@ type transcript struct {
 	Answers   []ivdomain.Answer   `json:"answers"`
 }
 
+// marshalJSONSlice encodes a JSONB array column. A nil slice must encode as
+// `[]`, never `null`: json.Marshal(nil) emits the jsonb scalar null, which
+// breaks the SQL-side `COALESCE(col, '[]') || pair` appends (jsonb null is
+// not SQL NULL, so COALESCE keeps it and Postgres concatenates it as an
+// element: 'null'::jsonb || pair => [null, pair]).
+func marshalJSONSlice[T any](v []T) ([]byte, error) {
+	if len(v) == 0 {
+		return []byte("[]"), nil
+	}
+	return json.Marshal(v)
+}
+
 // marshalInterview encodes the JSONB columns shared by Create and Update
 // (transcript, proctoring events/summary, coding sessions).
-func marshalInterview(iv *ivdomain.Interview) (rawTranscript, rawEvents, rawSummary, rawSessions []byte, err error) {
+func marshalInterview(iv *ivdomain.Interview) (rawTranscript, rawEvents, rawSummary, rawSessions, rawQAPairs []byte, err error) {
 	rawTranscript, err = json.Marshal(transcript{Questions: iv.Questions, Answers: iv.Answers})
 	if err != nil {
-		return nil, nil, nil, nil, fmt.Errorf("encode transcript: %w", err)
+		return nil, nil, nil, nil, nil, fmt.Errorf("encode transcript: %w", err)
 	}
-	rawEvents, err = json.Marshal(iv.ProctoringEvents)
+	rawEvents, err = marshalJSONSlice(iv.ProctoringEvents)
 	if err != nil {
-		return nil, nil, nil, nil, fmt.Errorf("encode proctoring events: %w", err)
+		return nil, nil, nil, nil, nil, fmt.Errorf("encode proctoring events: %w", err)
 	}
 	rawSummary, err = json.Marshal(iv.ProctoringSummary)
 	if err != nil {
-		return nil, nil, nil, nil, fmt.Errorf("encode proctoring summary: %w", err)
+		return nil, nil, nil, nil, nil, fmt.Errorf("encode proctoring summary: %w", err)
 	}
-	rawSessions, err = json.Marshal(iv.CodingSessions)
+	rawSessions, err = marshalJSONSlice(iv.CodingSessions)
 	if err != nil {
-		return nil, nil, nil, nil, fmt.Errorf("encode coding sessions: %w", err)
+		return nil, nil, nil, nil, nil, fmt.Errorf("encode coding sessions: %w", err)
 	}
-	return rawTranscript, rawEvents, rawSummary, rawSessions, nil
+	rawQAPairs, err = marshalJSONSlice(iv.QAPairs)
+	if err != nil {
+		return nil, nil, nil, nil, nil, fmt.Errorf("encode qa pairs: %w", err)
+	}
+	return rawTranscript, rawEvents, rawSummary, rawSessions, rawQAPairs, nil
 }
 
 func decodeJSONB[T any](raw []byte, dst *T) error {
@@ -293,6 +384,12 @@ type rowScanner interface {
 	Scan(dest ...any) error
 }
 
+// scanNullableStatus scans an interview's status/expiry row. Used by the QA
+// append classification path (J6): status is NOT NULL, expires_at is nullable.
+func scanNullableStatus(row rowScanner, status *string, expiresAt **time.Time) error {
+	return row.Scan(status, expiresAt)
+}
+
 func scanInterview(row rowScanner) (*ivdomain.Interview, error) {
 	var (
 		iv            ivdomain.Interview
@@ -300,9 +397,10 @@ func scanInterview(row rowScanner) (*ivdomain.Interview, error) {
 		rawEvents     []byte
 		rawSummary    []byte
 		rawSessions   []byte
+		rawQAPairs    []byte
 	)
 	err := row.Scan(&iv.ID, &iv.ApplicationID, &iv.Status, &rawTranscript, &iv.LastQuestionIdx,
-		&iv.ContextVersion, &iv.Evaluation, &iv.ConsentGiven, &iv.HumanRequested, &rawEvents, &rawSummary, &rawSessions,
+		&iv.ContextVersion, &iv.Evaluation, &iv.ConsentGiven, &iv.HumanRequested, &rawEvents, &rawSummary, &rawSessions, &rawQAPairs,
 		&iv.StartedAt, &iv.CompletedAt, &iv.ExpiresAt, &iv.CreatedAt, &iv.OrgID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ivdomain.ErrNotFound
@@ -322,6 +420,9 @@ func scanInterview(row rowScanner) (*ivdomain.Interview, error) {
 	}
 	if err := decodeJSONB(rawSessions, &iv.CodingSessions); err != nil {
 		return nil, fmt.Errorf("decode coding sessions: %w", err)
+	}
+	if err := decodeJSONB(rawQAPairs, &iv.QAPairs); err != nil {
+		return nil, fmt.Errorf("decode qa pairs: %w", err)
 	}
 	iv.Questions = t.Questions
 	iv.Answers = t.Answers

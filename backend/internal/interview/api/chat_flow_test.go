@@ -122,7 +122,8 @@ func TestChatFlowEndToEnd(t *testing.T) {
 	svc := ivapp.NewInterviewService(pool,
 		ivrepo.NewPostgresInterviewRepo(pool), ivrepo.NewPostgresTokenRepo(pool), ivrepo.NewPostgresQuestionBank(pool),
 		scrrepo.NewPostgresApplicationRepo(pool), cvrepo.NewPostgresCandidateRepo(pool), jobrepo.NewPostgresJobRepo(pool),
-		ctxrepo.NewPostgresContextRepo(pool), minio, jwt, ivdomain.SystemClock(), nil, zerolog.Nop())
+		jobrepo.NewPostgresCandidateContextRepo(pool),
+		ctxrepo.NewPostgresContextRepo(pool), minio, jwt, ivdomain.SystemClock(), nil, nil, zerolog.Nop())
 
 	// 1. Create interview (recruiter role).
 	created, err := svc.CreateInterview(ctx, actorWith(orgUUID, "admin"), ivapp.CreateInterviewCommand{ApplicationID: appID, QuestionCount: 3})

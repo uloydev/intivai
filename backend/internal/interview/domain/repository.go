@@ -26,6 +26,20 @@ type InterviewRepository interface {
 	// RecordCodingSession appends a coding snapshot without rewriting the
 	// transcript (same lost-update concern as Touch).
 	RecordCodingSession(ctx context.Context, id uuid.UUID, session CodingSession) error
+	// AppendQAPairWithinLimit appends a candidate Q&A pair (B4) without
+	// rewriting the transcript — candidate questions must never touch the
+	// scored answers. The per-interview cap (limit) AND the active/expiry
+	// predicate are enforced AT THE SQL LAYER (single UPDATE) so concurrent
+	// frames cannot race past them (J6). Outcomes:
+	//   - (true, nil): pair appended.
+	//   - (false, nil): cap reached, nothing written.
+	//   - (false, ErrQAActive): interview not in_progress or expired.
+	//   - (false, domain.ErrNotFound): interview row missing.
+	AppendQAPairWithinLimit(ctx context.Context, id uuid.UUID, pair QAPair, limit int) (bool, error)
+	// ExpireIfDue flips an overdue in_progress interview to expired —
+	// column-scoped so the QA path can persist honest expiry state without a
+	// full-row rewrite.
+	ExpireIfDue(ctx context.Context, id uuid.UUID) error
 	// SetHumanRequested marks the interview as having a candidate-requested
 	// human interviewer (idempotent).
 	SetHumanRequested(ctx context.Context, id uuid.UUID, requested bool) error

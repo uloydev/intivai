@@ -18,6 +18,7 @@ import (
 	iamdomain "github.com/intivai/backend/internal/iam/domain"
 	ivdomain "github.com/intivai/backend/internal/interview/domain"
 	gensvc "github.com/intivai/backend/internal/interview/domain/service"
+	jobapp "github.com/intivai/backend/internal/job/application"
 	jobdomain "github.com/intivai/backend/internal/job/domain"
 	scrdomain "github.com/intivai/backend/internal/screening/domain"
 	"github.com/intivai/backend/internal/shared/errors"
@@ -39,6 +40,17 @@ type TaskEnqueuer interface {
 
 // InterviewService — create interviews (recruiter), issue WS tickets
 // (candidate, invitation token → short-lived JWT bound to session+interview).
+// OrgQALimitReader — driven port for the org-configurable candidate Q&A cap
+// (D3/B4). Implemented in cmd/server over the IAM org repo; defaults to
+// DefaultQALimit when unset or unreadable so the feature always has a bound.
+type OrgQALimitReader interface {
+	CandidateQALimit(ctx context.Context, orgID uuid.UUID) (int, error)
+}
+
+// DefaultQALimit — per-interview candidate questions answered when the org has
+// not configured an explicit cap (D3).
+const DefaultQALimit = 10
+
 type InterviewService struct {
 	pool        *gorm.DB
 	ivRepo      ivdomain.InterviewRepository
@@ -47,11 +59,13 @@ type InterviewService struct {
 	appRepo     scrdomain.ApplicationRepository
 	candRepo    cvdomain.CandidateRepository
 	jobRepo     jobdomain.JobRepository
+	jobCandRepo jobdomain.CandidateContextRepository // per-job Q&A context (D2), pinned at connect
 	contextRepo ctxdomain.ContextRepository
 	store       *storage.Storage
 	tokens      application.TokenProvider
 	clock       ivdomain.Clock
 	enqueuer    TaskEnqueuer
+	orgQALimit  OrgQALimitReader
 	log         zerolog.Logger
 	// completeFn applies the terminal in_progress → completed transition.
 	// Seam for tests (D25): inject a failure to prove the error is logged and
@@ -61,11 +75,12 @@ type InterviewService struct {
 
 func NewInterviewService(pool *gorm.DB, ivRepo ivdomain.InterviewRepository, tokenRepo ivdomain.TokenRepository,
 	bank ivdomain.QuestionBank, appRepo scrdomain.ApplicationRepository, candRepo cvdomain.CandidateRepository,
-	jobRepo jobdomain.JobRepository, contextRepo ctxdomain.ContextRepository, store *storage.Storage,
-	tokens application.TokenProvider, clock ivdomain.Clock, enqueuer TaskEnqueuer, log zerolog.Logger) *InterviewService {
+	jobRepo jobdomain.JobRepository, jobCandRepo jobdomain.CandidateContextRepository, contextRepo ctxdomain.ContextRepository,
+	store *storage.Storage, tokens application.TokenProvider, clock ivdomain.Clock, enqueuer TaskEnqueuer,
+	orgQALimit OrgQALimitReader, log zerolog.Logger) *InterviewService {
 	return &InterviewService{pool: pool, ivRepo: ivRepo, tokenRepo: tokenRepo, bank: bank,
-		appRepo: appRepo, candRepo: candRepo, jobRepo: jobRepo, contextRepo: contextRepo,
-		store: store, tokens: tokens, clock: clock, enqueuer: enqueuer, log: log,
+		appRepo: appRepo, candRepo: candRepo, jobRepo: jobRepo, jobCandRepo: jobCandRepo, contextRepo: contextRepo,
+		store: store, tokens: tokens, clock: clock, enqueuer: enqueuer, orgQALimit: orgQALimit, log: log,
 		completeFn: (*ivdomain.Interview).Complete}
 }
 
@@ -79,6 +94,12 @@ type CreateInterviewResult struct {
 	Token          string    `json:"invitation_token"`
 	ExpiresAt      time.Time `json:"expires_at"`
 	ContextVersion int       `json:"context_version"`
+	// EmailEnqueued — false + EmailError set when the invitation email could
+	// NOT be enqueued (D9): the interview + token still exist and the email
+	// can be retried, but the recruiter MUST be told instead of it failing
+	// silently.
+	EmailEnqueued bool   `json:"email_enqueued"`
+	EmailError    string `json:"email_error,omitempty"`
 }
 
 // CreateInterview: load application → CV-gap questions → persist interview +
@@ -120,13 +141,26 @@ func (s *InterviewService) CreateInterview(ctx context.Context, actor applicatio
 		candName = candidate.Name
 		jobTitle = job.Title
 
-		questions, err := s.generateQuestions(candidate, job, cmd.QuestionCount)
+		// B4: load the job's stored QuestionSet (generated at publish, D5) so
+		// the interview carries the SAME questions AND their descriptive
+		// context/expectation framing for every candidate. Falls back to the
+		// deterministic templates when no usable set exists.
+		rawSet, err := jobapp.LoadQuestionSet(tctx, job.ID)
+		if err != nil {
+			return err
+		}
+		set, _ := jobdomain.SelectQuestionSet(rawSet)
+		questions, err := s.generateQuestions(candidate, job, cmd.QuestionCount, set)
 		if err != nil {
 			return err
 		}
 		domainQuestions := make([]ivdomain.Question, 0, len(questions))
 		for i, q := range questions {
-			domainQuestions = append(domainQuestions, ivdomain.Question{Idx: i + 1, Content: q.Prompt, Category: q.Category, Skill: q.Skill})
+			// Fix B4 gap: persist the stored-set framing so it isn't dropped.
+			domainQuestions = append(domainQuestions, ivdomain.Question{
+				Idx: i + 1, Content: q.Prompt, Category: q.Category, Skill: q.Skill,
+				Context: q.Context, Expectation: q.Expectation,
+			})
 			if err := s.bank.Create(tctx, actor.OrgID, domainQuestions[i]); err != nil {
 				return err
 			}
@@ -169,7 +203,14 @@ func (s *InterviewService) CreateInterview(ctx context.Context, actor applicatio
 	}
 	if s.enqueuer != nil && candEmail != "" && result != nil {
 		if err := s.enqueuer.EnqueueInterviewInvitation(ctx, candEmail, candName, jobTitle, result.InterviewID.String(), result.Token); err != nil {
+			// D9: the email is the ONLY delivery path for the invite token —
+			// a silent drop ghosts the candidate. Surface it on the response
+			// (the interview itself succeeded; email is retryable).
 			s.log.Warn().Err(err).Str("interview_id", result.InterviewID.String()).Msg("failed to enqueue interview invitation email")
+			result.EmailEnqueued = false
+			result.EmailError = "interview created but invitation email could not be queued; retry an invite"
+		} else {
+			result.EmailEnqueued = true
 		}
 	}
 	return result, nil
@@ -291,11 +332,30 @@ func (s *InterviewService) RequestHuman(ctx context.Context, interviewID uuid.UU
 	return nil
 }
 
-// ComposePrompt builds the interview system prompt: default + tenant prompt +
-// company context (latest versions) + safety rails. Repo reads run inside a
-// tenant tx (RLS).
-func (s *InterviewService) ComposePrompt(ctx context.Context, orgID uuid.UUID) (string, error) {
+// ConnectContexts — everything a WS connection pins at connect time.
+type ConnectContexts struct {
+	// Prompt is the composed interviewer system prompt (default + tenant +
+	// company + job context + safety rails last).
+	Prompt string
+	// QAContext is the ONLY material the grounded candidate-question answer
+	// path may use — no safety rails, no live DB.
+	QAContext string
+	// GroundingUnavailable is true when the QA grounding could not be
+	// composed reliably (J11): the candidate-question answer path must fail
+	// CLOSED — refuse rather than run the LLM against partial/no context.
+	GroundingUnavailable bool
+}
+
+// ComposeConnectContexts builds the interviewer prompt AND the Q&A grounding
+// from ONE tenant transaction plus ONE company-context download. Separate
+// loads (I12) doubled connect-time reads/storage egress and let a recruiter
+// save between them pin different context versions into the prompt vs the QA
+// grounding. Job-context lookup failures degrade gracefully: the prompt still
+// composes, grounding just carries less material.
+func (s *InterviewService) ComposeConnectContexts(ctx context.Context, orgID uuid.UUID, interviewID uuid.UUID) (ConnectContexts, error) {
+	var out ConnectContexts
 	in := gensvc.ComposerInput{DefaultPrompt: gensvc.DefaultInterviewerPrompt}
+	var qa strings.Builder
 	var contextPath string
 	err := db.RunInTx(ctx, s.pool, orgID.String(), func(tctx context.Context) error {
 		p, err := s.contextRepo.GetLatestPrompt(tctx, orgID)
@@ -311,27 +371,70 @@ func (s *InterviewService) ComposePrompt(ctx context.Context, orgID uuid.UUID) (
 		if len(contexts) > 0 {
 			contextPath = contexts[0].StoragePath
 		}
+		// D2: pin the per-job candidate context captured at connect so
+		// mid-interview recruiter edits cannot change what the candidate hears.
+		if s.jobCandRepo != nil {
+			iv, err := s.ivRepo.GetByID(tctx, interviewID)
+			if err != nil {
+				// Interview row absent (test fixtures / pre-interview):
+				// there is no job-context grounding to pin, but the interview
+				// prompt still composes — this is NOT a grounding LOAD error.
+				if !stderrors.Is(err, ivdomain.ErrNotFound) {
+					return fmt.Errorf("load interview for grounding: %w", err)
+				}
+			} else {
+				app, err := s.appRepo.GetByID(tctx, iv.ApplicationID)
+				if err != nil {
+					return fmt.Errorf("load application for grounding: %w", err)
+				}
+				cc, err := s.jobCandRepo.GetByJobID(tctx, app.JobID)
+				if err != nil && !stderrors.Is(err, jobdomain.ErrNotFound) {
+					// J11 identical policy: transport/DB failure in the
+					// grounding backend is NOT "no context" — answering with
+					// an empty grounding block would fail OPEN.
+					return fmt.Errorf("load job candidate context for grounding: %w", err)
+				}
+				if err == nil && cc.Content != "" {
+					in.JobContext = cc.Content
+					qa.WriteString("Job candidate context:\n")
+					qa.WriteString(cc.Content)
+					qa.WriteString("\n\n")
+				}
+			}
+		}
 		return nil
 	})
 	if err != nil {
-		return "", err
+		return out, err
 	}
+	company := ""
 	if contextPath != "" {
 		reader, err := s.store.Download(ctx, contextPath)
 		if err != nil {
-			return "", fmt.Errorf("download company context: %w", err)
+			return out, fmt.Errorf("download company context: %w", err)
 		}
 		buf := new(strings.Builder)
 		if _, err := io.Copy(buf, reader); err != nil {
 			_ = reader.Close()
-			return "", fmt.Errorf("read company context: %w", err)
+			return out, fmt.Errorf("read company context: %w", err)
 		}
 		if err := reader.Close(); err != nil {
-			return "", fmt.Errorf("close company context: %w", err)
+			return out, fmt.Errorf("close company context: %w", err)
 		}
-		in.CompanyContext = buf.String()
+		company = buf.String()
+		in.CompanyContext = company
 	}
-	return gensvc.ComposeSystemPrompt(in), nil
+	if company != "" {
+		qa.WriteString("Company context:\n")
+		qa.WriteString(company)
+	}
+	out.Prompt = gensvc.ComposeSystemPrompt(in)
+	out.QAContext = qa.String()
+	// J11 fail-closed: the flag is set ONLY when a grounding load FAILED (the
+	// caller returns error in those cases). A job/company that legitimately
+	// has no context yet still answers (the prompt instructs the model to say
+	// "not in context" instead of inventing) — that is the existing design.
+	return out, nil
 }
 
 // VerifyInterviewOrg — nil when the interview belongs to orgID (used to gate
@@ -662,14 +765,159 @@ func (s *InterviewService) EnqueueEvaluation(ctx context.Context, orgID string, 
 	return s.enqueuer.EnqueueEvaluation(ctx, orgID, interviewID.String())
 }
 
-func (s *InterviewService) generateQuestions(candidate *cvdomain.Candidate, job *jobdomain.Job, count int) ([]gensvc.Question, error) {
+// ErrQALimitExceeded — the per-interview candidate Q&A cap (D3) was reached.
+// The handler turns this into a polite refusal qa_answer frame, not an error.
+var ErrQALimitExceeded = errors.NewDomainError("QA_LIMIT_EXCEEDED", "the candidate question limit for this interview has been reached")
+
+// ErrInterviewNotActive — candidate input arrived on an expired or completed
+// interview. Also surfaced as a refusal qa_answer frame.
+var ErrInterviewNotActive = errors.NewDomainError("INTERVIEW_NOT_ACTIVE", "this interview is no longer active")
+
+const maxStoredQAAnswerRunes = 4000
+
+// clampRunes bounds persisted text length; the parse layer rejects overlength
+// candidate frames, this defends the service against direct callers and caps
+// LLM-authored answers (I13).
+func clampRunes(s string, max int) string {
+	r := []rune(s)
+	if len(r) <= max {
+		return s
+	}
+	return string(r[:max])
+}
+
+// persistExpireIfDue commits clock-driven expiry INDEPENDENTLY of any later
+// refusal: a gate that returns an error from inside RunInTx rolls the whole
+// transaction back, which would silently erase the honest 'expired' state.
+func (s *InterviewService) persistExpireIfDue(ctx context.Context, orgID string, interviewID uuid.UUID) error {
+	return db.RunInTx(ctx, s.pool, orgID, func(tctx context.Context) error {
+		iv, err := s.ivRepo.GetByID(tctx, interviewID)
+		if err != nil {
+			return err
+		}
+		iv.SetClock(s.clock)
+		iv.ExpireIfNeeded()
+		if iv.Status != ivdomain.StatusExpired {
+			return nil
+		}
+		return s.ivRepo.ExpireIfDue(tctx, interviewID)
+	})
+}
+
+// activeOrError refuses inactive interviews (I7) after committing any due
+// expiry so storage reflects reality even when the caller is refused.
+func (s *InterviewService) activeOrError(ctx context.Context, orgID string, interviewID uuid.UUID) error {
+	if err := s.persistExpireIfDue(ctx, orgID, interviewID); err != nil {
+		return err
+	}
+	return db.RunInTx(ctx, s.pool, orgID, func(tctx context.Context) error {
+		iv, err := s.ivRepo.GetByID(tctx, interviewID)
+		if err != nil {
+			return err
+		}
+		if iv.Status != ivdomain.StatusInProgress {
+			return ErrInterviewNotActive
+		}
+		return nil
+	})
+}
+
+// CandidateQARemaining returns how many more candidate questions may be answered
+// this interview (cap minus recorded pairs). The limit resolves INSIDE the
+// tenant tx (I4) — the org reader needs it, and resolving outside silently
+// degraded every pre-check to the default cap. Expired interviews refuse here
+// so the handler never reaches the LLM (I7).
+func (s *InterviewService) CandidateQARemaining(ctx context.Context, orgID string, interviewID uuid.UUID) (int, error) {
+	orgUUID, err := uuid.Parse(orgID)
+	if err != nil {
+		return 0, errors.NewDomainError("INVALID_ORG_ID", "invalid organization id")
+	}
+	if err := s.activeOrError(ctx, orgID, interviewID); err != nil {
+		return 0, err
+	}
+	var remaining int
+	err = db.RunInTx(ctx, s.pool, orgID, func(tctx context.Context) error {
+		limit := s.ResolveQALimit(tctx, orgUUID)
+		iv, err := s.ivRepo.GetByID(tctx, interviewID)
+		if err != nil {
+			return err
+		}
+		remaining = limit - iv.CandidateQACount()
+		return nil
+	})
+	if err != nil {
+		return 0, err
+	}
+	return remaining, nil
+}
+
+// RecordCandidateQA persists one candidate Q&A pair (B4). Enforces the cap
+// server-side — the SQL guard in AppendQAPairWithinLimit is authoritative, so
+// concurrent frames cannot race past it — never touches the scored transcript
+// or turn state, and refuses inactive interviews before any spend (I7).
+// Text is clamped before persistence (I13).
+func (s *InterviewService) RecordCandidateQA(ctx context.Context, orgID string, interviewID uuid.UUID, question, answer string) error {
+	orgUUID, err := uuid.Parse(orgID)
+	if err != nil {
+		return errors.NewDomainError("INVALID_ORG_ID", "invalid organization id")
+	}
+	if err := s.activeOrError(ctx, orgID, interviewID); err != nil {
+		return err
+	}
+	return db.RunInTx(ctx, s.pool, orgID, func(tctx context.Context) error {
+		limit := s.ResolveQALimit(tctx, orgUUID)
+		pair := ivdomain.QAPair{
+			Question:  clampRunes(question, ivdomain.MaxCandidateQuestionRunes),
+			Answer:    clampRunes(answer, maxStoredQAAnswerRunes),
+			CreatedAt: s.clock.Now(),
+		}
+		appended, err := s.ivRepo.AppendQAPairWithinLimit(tctx, interviewID, pair, limit)
+		if err != nil {
+			if stderrors.Is(err, ivdomain.ErrQAActive) {
+				return ErrInterviewNotActive
+			}
+			return err
+		}
+		if !appended {
+			return ErrQALimitExceeded
+		}
+		return nil
+	})
+}
+
+// ResolveQALimit returns the org-configured candidate Q&A cap, or DefaultQALimit
+// when unset/unreadable (D3).
+func (s *InterviewService) ResolveQALimit(ctx context.Context, orgID uuid.UUID) int {
+	if s.orgQALimit != nil {
+		if n, err := s.orgQALimit.CandidateQALimit(ctx, orgID); err == nil && n > 0 {
+			return n
+		}
+	}
+	return DefaultQALimit
+}
+
+// GetCandidateQA returns the recorded candidate Q&A pairs (recruiter-visible log).
+func (s *InterviewService) GetCandidateQA(ctx context.Context, orgID string, interviewID uuid.UUID) ([]ivdomain.QAPair, error) {
+	var pairs []ivdomain.QAPair
+	err := db.RunInTx(ctx, s.pool, orgID, func(tctx context.Context) error {
+		iv, err := s.ivRepo.GetByID(tctx, interviewID)
+		if err != nil {
+			return err
+		}
+		pairs = iv.QAPairs
+		return nil
+	})
+	return pairs, err
+}
+
+func (s *InterviewService) generateQuestions(candidate *cvdomain.Candidate, job *jobdomain.Job, count int, set *jobdomain.QuestionSet) ([]gensvc.Question, error) {
 	skills, summary, err := candidateProfile(candidate)
 	if err != nil {
 		return nil, err
 	}
 	profile := gensvc.CandidateProfile{Skills: skills, Summary: summary}
 	reqs := gensvc.JobRequirements{Title: job.Title, Description: job.Description, RequiredSkills: job.RequiredSkills}
-	return gensvc.GenerateQuestions(profile, reqs, count), nil
+	return gensvc.GenerateQuestions(profile, reqs, count, set), nil
 }
 
 func candidateProfile(c *cvdomain.Candidate) ([]string, string, error) {

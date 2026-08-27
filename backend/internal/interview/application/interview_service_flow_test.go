@@ -79,7 +79,8 @@ func seedInterviewApp(t *testing.T, jobStatus string) *seededInterview {
 	svc := NewInterviewService(pool,
 		ivrepo.NewPostgresInterviewRepo(pool), ivrepo.NewPostgresTokenRepo(pool), ivrepo.NewPostgresQuestionBank(pool),
 		scrrepo.NewPostgresApplicationRepo(pool), cvrepo.NewPostgresCandidateRepo(pool), jobrepo.NewPostgresJobRepo(pool),
-		ctxrepo.NewPostgresContextRepo(pool), minio, auth.NewJWTProvider("test-secret"), ivdomain.SystemClock(), nil, zerolog.Nop())
+		jobrepo.NewPostgresCandidateContextRepo(pool),
+		ctxrepo.NewPostgresContextRepo(pool), minio, auth.NewJWTProvider("test-secret"), ivdomain.SystemClock(), nil, nil, zerolog.Nop())
 	return &seededInterview{pool: pool, svc: svc, orgID: orgID, appID: appID}
 }
 
@@ -192,7 +193,7 @@ func TestAnswerAndAdvanceFlow(t *testing.T) {
 	}
 }
 
-func TestComposePromptIncludesTenantAndRails(t *testing.T) {
+func TestComposeConnectContextsIncludesTenantAndRails(t *testing.T) {
 	s := seedInterviewApp(t, "active")
 	ctx := context.Background()
 	err := db.RunInTx(ctx, s.pool, s.orgID.String(), func(tctx context.Context) error {
@@ -201,14 +202,14 @@ func TestComposePromptIncludesTenantAndRails(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	prompt, err := s.svc.ComposePrompt(ctx, s.orgID)
+	cc, err := s.svc.ComposeConnectContexts(ctx, s.orgID, s.ivID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(prompt, "Interview for fintech Go roles") {
+	if !strings.Contains(cc.Prompt, "Interview for fintech Go roles") {
 		t.Fatal("tenant prompt missing")
 	}
-	if !strings.Contains(prompt, "Safety rails") || !strings.HasSuffix(prompt, "return to the interview.") {
+	if !strings.Contains(cc.Prompt, "Safety rails") || !strings.HasSuffix(cc.Prompt, "return to the interview.") {
 		t.Fatal("rails not pinned last")
 	}
 }

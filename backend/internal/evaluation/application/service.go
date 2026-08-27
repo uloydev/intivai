@@ -79,6 +79,7 @@ type InterviewDetail struct {
 	ProctoringEvents  []ivdomain.ProctoringEvent `json:"proctoring_events"`
 	ProctoringSummary ivdomain.ProctoringSummary `json:"proctoring_summary"`
 	CodingSessions    []ivdomain.CodingSession   `json:"coding_sessions,omitempty"`
+	QAPairs           []ivdomain.QAPair          `json:"qa_pairs"`
 	CreatedAt         time.Time                  `json:"created_at"`
 	CompletedAt       *time.Time                 `json:"completed_at"`
 }
@@ -223,6 +224,7 @@ func (s *EvaluationService) InterviewDetail(ctx context.Context, actor applicati
 			ProctoringEvents:  iv.ProctoringEvents,
 			ProctoringSummary: iv.ProctoringSummary,
 			CodingSessions:    iv.CodingSessions,
+			QAPairs:           iv.QAPairs,
 			CreatedAt:         iv.CreatedAt,
 			CompletedAt:       iv.CompletedAt,
 		}

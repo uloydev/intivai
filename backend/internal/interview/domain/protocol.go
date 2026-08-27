@@ -3,6 +3,7 @@ package domain
 import (
 	"encoding/json"
 	"fmt"
+	"unicode/utf8"
 )
 
 // WebSocket message types — contract from AI_Interviewer_Phases.md §WebSocket
@@ -24,6 +25,13 @@ const (
 	MsgCodeChange = "code.change"
 	MsgCodeRun    = "code.run"
 	MsgCodeResult = "code.result"
+
+	// Candidate Q&A (B4): the candidate asks a free-form question about the
+	// role/company. It NEVER advances the interview question, pollutes the
+	// answer score, or touches turn state — it is answered from the pinned
+	// contexts only and logged as a Q&A pair for recruiters.
+	MsgCandidateQuestion = "candidate_question"
+	MsgQaAnswer          = "qa_answer"
 )
 
 // ErrCodeTurnInProgress — machine-readable error code for a rejected
@@ -194,6 +202,24 @@ type CodeResultMessage struct {
 	Error       string       `json:"error,omitempty"`
 }
 
+// CandidateQuestionMessage — client→server: a free-form question about the
+// company/role. Routed to grounded-answer generation; never to the interview
+// turn state machine.
+type CandidateQuestionMessage struct {
+	Type    string `json:"type"`
+	Content string `json:"content"`
+}
+
+// QAAnswerMessage — server→client: the grounded answer to a candidate_question.
+// Refused is true when the per-interview cap was exhausted (or the question
+// could not be answered from the pinned contexts and was declined).
+type QAAnswerMessage struct {
+	Type     string `json:"type"`
+	Question string `json:"question"`
+	Answer   string `json:"answer"`
+	Refused  bool   `json:"refused,omitempty"`
+}
+
 type CodingSession struct {
 	QuestionIdx  int              `json:"question_idx"`
 	Language     string           `json:"language"`
@@ -225,6 +251,12 @@ func ParseClientMessage(raw []byte) (any, error) {
 		}
 		if m.Content == "" {
 			return nil, fmt.Errorf("answer without content")
+		}
+		// Client-controlled text feeds the LLM and the transcript (G11) —
+		// reject overlength frames at parse time, aligned with the service
+		// clamp (4000).
+		if utf8.RuneCountInString(m.Content) > MaxAnswerRunes {
+			return nil, fmt.Errorf("answer exceeds %d characters", MaxAnswerRunes)
 		}
 		return m, nil
 	case MsgInterrupt:
@@ -264,6 +296,20 @@ func ParseClientMessage(raw []byte) (any, error) {
 		var m CodeRunMessage
 		if err := json.Unmarshal(raw, &m); err != nil {
 			return nil, err
+		}
+		return m, nil
+	case MsgCandidateQuestion:
+		var m CandidateQuestionMessage
+		if err := json.Unmarshal(raw, &m); err != nil {
+			return nil, err
+		}
+		if m.Content == "" {
+			return nil, fmt.Errorf("candidate question without content")
+		}
+		// Client-controlled text persisted to the recruiter-visible qa_pairs
+		// log (I13) — reject overlength frames at parse time.
+		if utf8.RuneCountInString(m.Content) > MaxCandidateQuestionRunes {
+			return nil, fmt.Errorf("candidate question exceeds %d characters", MaxCandidateQuestionRunes)
 		}
 		return m, nil
 	default:

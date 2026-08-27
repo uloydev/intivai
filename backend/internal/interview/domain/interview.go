@@ -27,6 +27,13 @@ const (
 	PerQuestionTimeout = 3 * time.Minute
 	// MaxTurnsPerTopic — max conversational dialogue exchanges on a single question topic.
 	MaxTurnsPerTopic = 3
+	// MaxCandidateQuestionRunes caps client-authored candidate_question text
+	// (I13): the pair is persisted verbatim to the recruiter-visible qa_pairs
+	// log, so an unbounded frame would be an unbounded row-growth vector.
+	MaxCandidateQuestionRunes = 1000
+	// MaxAnswerRunes caps client-authored answer text (G11): answers feed the
+	// LLM and the transcript; aligned with the service-side clamp (4000).
+	MaxAnswerRunes = 4000
 )
 
 // Question Archetypes & Stage Timer Gates.
@@ -61,6 +68,19 @@ type Question struct {
 	Category string `json:"category"`
 	Skill    string `json:"skill,omitempty"`
 	IsProbe  bool   `json:"is_probe,omitempty"`
+	// Context/Expectation carry the stored-set framing (D5/B4). They are
+	// descriptive only and never affect turn state or scoring.
+	Context     string `json:"context,omitempty"`
+	Expectation string `json:"expectation,omitempty"`
+}
+
+// QAPair — a candidate free-form question + its grounded answer (B4). Logged to
+// the interview so recruiters see it beside the chat transcript. Recording one
+// NEVER advances the question index, marks an answer, or touches turn state.
+type QAPair struct {
+	Question  string    `json:"question"`
+	Answer    string    `json:"answer"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 // Answer VO — candidate response, stored for evaluation.
@@ -82,6 +102,7 @@ type Interview struct {
 	Status            Status
 	Questions         []Question
 	Answers           []Answer
+	QAPairs           []QAPair
 	LastQuestionIdx   int
 	ContextVersion    int    // company-context version pinned at creation (audit)
 	Evaluation        []byte // post-interview report (evaluation JSONB), hydrated by GetByID
@@ -316,6 +337,14 @@ func (iv *Interview) RecordCodingSession(session CodingSession) {
 	}
 	iv.CodingSessions = append(iv.CodingSessions, session)
 	iv.Touch()
+}
+
+// CandidateQACount returns the number of candidate Q&A pairs recorded so far
+// (used to enforce the per-interview cap server-side). Pairs are appended by
+// the repository's column-scoped AppendQAPairWithinLimit — never through a
+// domain mutation, so candidate questions cannot touch the turn state.
+func (iv *Interview) CandidateQACount() int {
+	return len(iv.QAPairs)
 }
 
 // SessionRemaining reports the remaining seconds before the 30-minute global duration cap.

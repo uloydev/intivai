@@ -94,7 +94,8 @@ func newTransitionService(pool *gorm.DB, bank ivdomain.QuestionBank, logBuf *byt
 	return NewInterviewService(pool,
 		ivrepo.NewPostgresInterviewRepo(pool), ivrepo.NewPostgresTokenRepo(pool), bank,
 		scrrepo.NewPostgresApplicationRepo(pool), cvrepo.NewPostgresCandidateRepo(pool), jobrepo.NewPostgresJobRepo(pool),
-		ctxrepo.NewPostgresContextRepo(pool), minio, auth.NewJWTProvider("test-secret"), ivdomain.SystemClock(), nil, logger)
+		jobrepo.NewPostgresCandidateContextRepo(pool),
+		ctxrepo.NewPostgresContextRepo(pool), minio, auth.NewJWTProvider("test-secret"), ivdomain.SystemClock(), nil, nil, logger)
 }
 
 // createStartedInterview — interview with consent recorded and started, so

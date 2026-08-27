@@ -368,3 +368,54 @@ func TestProcessTopicDialogue_MultiTurnClarificationAndAdvance(t *testing.T) {
 		t.Fatalf("pairs[1] = %+v", pairs[1])
 	}
 }
+
+// TestCandidateQuestionDoesNotAdvanceTurnState — regression proof for B4: a
+// candidate_question must be fully isolated from the turn state machine. After
+// recording a Q&A pair, the current question index, the scored answers, the
+// questions themselves, and the current topic cursor must be UNCHANGED.
+func TestCandidateQuestionDoesNotAdvanceTurnState(t *testing.T) {
+	at := time.Date(2026, 8, 10, 10, 0, 0, 0, time.UTC)
+	iv := mustInterview(t, at)
+	if err := iv.Start(); err != nil {
+		t.Fatal(err)
+	}
+	// Advance one topic so the question cursor is mid-interview.
+	if _, _, _, _, err := iv.ProcessTopicDialogue("answer to Q1", "advance", nil); err != nil {
+		t.Fatal(err)
+	}
+
+	beforeIdx := iv.LastQuestionIdx
+	beforeAnswers := len(iv.Answers)
+	beforeQuestions := len(iv.Questions)
+	beforeTopic := iv.CurrentTopicIdx()
+
+	// Recording now happens via the repo's column-scoped append (the service
+	// never mutates the aggregate); seed pairs directly to verify counting
+	// and transcript isolation.
+	iv.QAPairs = append(iv.QAPairs,
+		QAPair{Question: "Is relocation required?", Answer: "This role is fully remote."},
+		QAPair{Question: "What is the stack?", Answer: "Go and Postgres."},
+	)
+
+	if iv.LastQuestionIdx != beforeIdx {
+		t.Fatalf("LastQuestionIdx changed %d -> %d (candidate question advanced the interview)", beforeIdx, iv.LastQuestionIdx)
+	}
+	if len(iv.Answers) != beforeAnswers {
+		t.Fatalf("Answers count changed %d -> %d (candidate question polluted the scored transcript)", beforeAnswers, len(iv.Answers))
+	}
+	if len(iv.Questions) != beforeQuestions {
+		t.Fatalf("Questions count changed (candidate question mutated question set)")
+	}
+	if iv.CurrentTopicIdx() != beforeTopic {
+		t.Fatalf("CurrentTopicIdx changed %d -> %d", beforeTopic, iv.CurrentTopicIdx())
+	}
+	if iv.CandidateQACount() != 2 {
+		t.Fatalf("CandidateQACount = %d, want 2", iv.CandidateQACount())
+	}
+	// The scored transcript must NOT contain the candidate question.
+	for _, a := range iv.Answers {
+		if a.Content == "Is relocation required?" {
+			t.Fatal("candidate question leaked into the scored answers")
+		}
+	}
+}
