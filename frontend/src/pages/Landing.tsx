@@ -55,7 +55,7 @@ export function LandingPage() {
         </h1>
 
         <p className="mx-auto max-w-2xl text-base sm:text-lg text-muted-foreground leading-relaxed">
-          Intivai conducts adaptive voice and chat technical interviews, detects cheating in real-time, matches resumes using vector semantics, and generates boardroom-ready executive scorecards.
+          Intivai conducts adaptive chat technical interviews with a live code editor, detects candidate-environment signals in real-time, matches resumes using vector semantics, and generates boardroom-ready executive scorecards.
         </p>
 
         {/* Dual Call-to-Action */}
@@ -84,7 +84,7 @@ export function LandingPage() {
           </div>
           <div className="space-y-1">
             <p className="font-display text-3xl font-extrabold text-success">&lt; 3.0s</p>
-            <p className="text-xs text-muted-foreground">Voice Latency with STT/TTS</p>
+            <p className="text-xs text-muted-foreground">Voice Latency (demo)</p>
           </div>
           <div className="space-y-1">
             <p className="font-display text-3xl font-extrabold text-info">384-Dim</p>
@@ -138,7 +138,7 @@ export function LandingPage() {
             </div>
             <h3 className="font-display font-bold text-base">Voice, Chat & Sandbox</h3>
             <p className="text-xs leading-relaxed text-muted-foreground">
-              Candidates complete adaptive voice or chat interviews with live pair-programming in Monaco editor and anti-cheat guardrails.
+              Candidates complete adaptive chat interviews with live pair-programming in Monaco editor and anti-cheat guardrails. Voice rounds are in a gated early-access demo.
             </p>
           </Card>
 
@@ -196,7 +196,7 @@ export function LandingPage() {
             </div>
             <h3 className="font-display font-bold text-lg">Voice Stream Audio Anomaly</h3>
             <p className="text-xs leading-relaxed text-muted-foreground">
-              Analyzes incoming WebRTC speech frequencies to detect secondary background speakers, whisper prompting, or synthetic proxy voices during live voice rounds.
+              Planned capability for voice rounds (early-access demo): frequency analysis to detect secondary background speakers, whisper prompting, or synthetic proxy voices. Not yet available in chat-only interviews.
             </p>
           </Card>
         </div>
@@ -234,7 +234,7 @@ export function LandingPage() {
             </div>
             <h3 className="font-display font-bold text-lg">WebRTC Voice Interviewing</h3>
             <p className="text-xs leading-relaxed text-muted-foreground">
-              Full duplex audio calling powered by Whisper.cpp Speech-to-Text and Edge TTS neural synthesis, allowing seamless natural spoken technical discussions.
+              Early-access demo: full duplex audio calling powered by Whisper.cpp Speech-to-Text and Edge TTS neural synthesis for natural spoken technical discussions.
             </p>
           </Card>
 
@@ -310,7 +310,7 @@ export function LandingPage() {
             },
             {
               q: "How does anti-cheating detection work?",
-              a: "During both chat and voice rounds, our client and backend monitor window focus state, clipboard paste sizes vs elapsed time, and audio stream frequency anomalies to flag potential external assistance.",
+              a: "During chat interviews, our client and backend monitor window focus state and clipboard paste sizes vs elapsed time to flag potential external assistance. Audio frequency anomaly detection is planned for voice rounds.",
             },
             {
               q: "Can recruiters customize the grading rubric?",

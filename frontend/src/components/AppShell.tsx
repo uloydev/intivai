@@ -7,6 +7,7 @@ import {
   UsersThree,
   ChatCircleText,
   Brain,
+  GearSix,
   SignOut,
   Sun,
   Moon,
@@ -26,6 +27,7 @@ const nav = [
   { to: "/candidates", label: "Candidates", icon: UsersThree },
   { to: "/interviews", label: "Interviews", icon: ChatCircleText },
   { to: "/company-context", label: "AI Rails", icon: Brain },
+  { to: "/settings", label: "Settings", icon: GearSix },
 ]
 
 const primaryNav = nav.slice(0, 4)

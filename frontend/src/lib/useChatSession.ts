@@ -7,11 +7,20 @@ import type { SandboxLanguage } from "@/types/api"
 
 export interface ChatBubble {
   id: string
-  kind: "question" | "answer" | "assistant" | "system"
+  kind: "question" | "answer" | "assistant" | "system" | "candidate_qa"
   content: string
   idx?: number
   isProbe?: boolean
   streaming?: boolean
+  questionText?: string
+  refused?: boolean
+}
+
+export interface CandidateQA {
+  question: string
+  answer: string
+  refused: boolean
+  answeredAt: string
 }
 
 const MAX_RECONNECTS = 5
@@ -49,6 +58,12 @@ export function useChatSession({ id, ticket, onQuestion }: UseChatSessionOptions
   // G2: one re-mint per disconnect episode; re-armed on every successful open.
   const remintUsedRef = useRef(false)
   const mintingRef = useRef(false)
+  // G11-StrictMode: refs survive the dev double-invoke (mount→cleanup→mount),
+  // so these guards keep one ChatClient + one connection per hook instance —
+  // exactly the Invite.tsx autoStartDoneRef pattern, applied to connectivity.
+  const connectedRef = useRef(false)
+  const clientKeyRef = useRef("")
+  const effectTokenRef = useRef<symbol | null>(null)
 
   const [bubbles, setBubbles] = useState<ChatBubble[]>([])
   const [streaming, setStreaming] = useState(false)
@@ -68,6 +83,18 @@ export function useChatSession({ id, ticket, onQuestion }: UseChatSessionOptions
   const [maxTopicTurns, setMaxTopicTurns] = useState(3)
   const [isTopicComplete, setIsTopicComplete] = useState(false)
 
+  // J10 (B4): candidate Q&A — a sent candidate_question immediately gets a
+  // streaming candidate_qa bubble (holds the question); the server answers
+  // with qa_answer (refused=true on cap exhaustion).
+  const [qaPending, setQaPending] = useState(false)
+  // Ref mirror so the same-tick double-click guard never depends on a stale
+  // state closure (Invite.tsx autoStartDoneRef pattern).
+  const qaPendingRef = useRef(false)
+  const qaPendingRefSetter = (v: boolean) => {
+    qaPendingRef.current = v
+    setQaPending(v)
+  }
+
   useEffect(() => {
     disconnectedRef.current = disconnected
   }, [disconnected])
@@ -78,48 +105,69 @@ export function useChatSession({ id, ticket, onQuestion }: UseChatSessionOptions
       return
     }
 
-    const scheduleReconnect = () => {
-      if (reconnectCountRef.current < MAX_RECONNECTS) {
-        setReconnecting(true)
-        const delay = Math.min(1000 * 2 ** reconnectCountRef.current, 10000)
-        reconnectCountRef.current += 1
-        reconnectTimerRef.current = setTimeout(() => {
-          beginConnection()
-        }, delay)
-      } else {
-        // Reconnect budget exhausted — enter a persistent disconnected state.
-        // Answers are not being recorded; the UI must disable input and
-        // offer a manual refresh (window.location.reload()) to resume.
-        setReconnecting(false)
-        setDisconnected(true)
-      }
+    const key = `${id}::${ticket}`
+    // Token per effect run: the deferred close compares against the CURRENT
+    // token, so a StrictMode re-mount (setup→cleanup→setup, all synchronous)
+    // cancels run 1's close, while a REAL unmount (last token stays) closes.
+    const token = Symbol(key)
+    effectTokenRef.current = token
+
+    // Credential/interview changed — the previous client is stale and must be
+    // closed NOW (a reconnect on another ticket must not outlive its effect).
+    const prev = clientRef.current
+    if (prev && clientKeyRef.current !== key) {
+      connectedRef.current = false
+      clientKeyRef.current = ""
+      clientRef.current = null
+      prev.close()
     }
 
-    // Every connection attempt starts with a clean per-attempt open flag so
-    // the close handler can classify "handshake rejected" reliably.
-    const beginConnection = () => {
-      openedRef.current = false
-      if (!clientRef.current || !id) return
-      clientRef.current.connect(id)
-    }
-
-    const client = new ChatClient({
-      ticket,
-      onOpen: () => {
-        openedRef.current = true
-        // G2: a successful handshake re-arms the single re-mint allowance —
-        // the next disconnect is a new episode.
-        remintUsedRef.current = false
-        setReconnecting(false)
-        // Replay the resume frame once the socket is actually OPEN —
-        // session pinning never happened when sent during CONNECTING.
-        if (sessionIdRef.current) {
-          clientRef.current?.resume(sessionIdRef.current)
+    // StrictMode double-invoke of the SAME logical session: reuse the live
+    // client + connection instead of opening a second socket.
+    const reuse = clientRef.current != null && clientKeyRef.current === key && connectedRef.current
+    if (!reuse) {
+      const scheduleReconnect = () => {
+        if (reconnectCountRef.current < MAX_RECONNECTS) {
+          setReconnecting(true)
+          const delay = Math.min(1000 * 2 ** reconnectCountRef.current, 10000)
+          reconnectCountRef.current += 1
+          reconnectTimerRef.current = setTimeout(() => {
+            beginConnection()
+          }, delay)
+        } else {
+          // Reconnect budget exhausted — enter a persistent disconnected state.
+          // Answers are not being recorded; the UI must disable input and
+          // offer a manual refresh (window.location.reload()) to resume.
+          setReconnecting(false)
+          setDisconnected(true)
         }
-      },
-      onClose: () => {
-        submittingRef.current = false
-        if (evaluatedRef.current) return
+      }
+
+      // Every connection attempt starts with a clean per-attempt open flag so
+      // the close handler can classify "handshake rejected" reliably.
+      const beginConnection = () => {
+        openedRef.current = false
+        if (!clientRef.current || !id) return
+        clientRef.current.connect(id)
+      }
+
+      const client = new ChatClient({
+        ticket,
+        onOpen: () => {
+          openedRef.current = true
+          // G2: a successful handshake re-arms the single re-mint allowance —
+          // the next disconnect is a new episode.
+          remintUsedRef.current = false
+          setReconnecting(false)
+          // Replay the resume frame once the socket is actually OPEN —
+          // session pinning never happened when sent during CONNECTING.
+          if (sessionIdRef.current) {
+            clientRef.current?.resume(sessionIdRef.current)
+          }
+        },
+        onClose: () => {
+          submittingRef.current = false
+          if (evaluatedRef.current) return
 
         // G2: an unopened socket means the pre-upgrade ticket gate rejected
         // us — the original ws_ticket has most likely expired (10 min TTL vs
@@ -237,6 +285,34 @@ export function useChatSession({ id, ticket, onQuestion }: UseChatSessionOptions
           submittingRef.current = false
           streamBufferRef.current = ""
           setEvaluation(frame)
+        } else if (frame.type === "qa_answer") {
+          // J10: the grounded answer for the pending candidate question. The
+          // pair is persisted server-side regardless of refuse state; a
+          // refused=true answer is the cap/expiry refusal copy.
+          qaPendingRefSetter(false)
+          setBubbles((prev) => {
+            const last = prev[prev.length - 1]
+            // The send callback already wrote the candidate_qa bubble, so the
+            // answer just completes it (streaming=false → content lands).
+            if (last && last.kind === "candidate_qa" && last.streaming) {
+              return [
+                ...prev.slice(0, -1),
+                { ...last, content: frame.answer, streaming: false, refused: frame.refused === true },
+              ]
+            }
+            // Fallback: complete the most recent candidate_qa bubble.
+            for (let i = prev.length - 1; i >= 0; i -= 1) {
+              const b = prev[i]
+              if (b.kind === "candidate_qa") {
+                return [
+                  ...prev.slice(0, i),
+                  { ...b, content: frame.answer, streaming: false, refused: frame.refused === true },
+                  ...prev.slice(i + 1),
+                ]
+              }
+            }
+            return [...prev, { id: crypto.randomUUID(), kind: "candidate_qa", content: frame.answer, streaming: false, refused: frame.refused === true }]
+          })
         } else if (frame.type === "error") {
           setStreaming(false)
           setPendingAnswer(false)
@@ -256,12 +332,26 @@ export function useChatSession({ id, ticket, onQuestion }: UseChatSessionOptions
       },
     })
 
-    clientRef.current = client
-    beginConnection()
+      clientRef.current = client
+      clientKeyRef.current = key
+      connectedRef.current = true
+      beginConnection()
+    }
 
     return () => {
-      if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current)
-      client.close()
+      // StrictMode (dev): React runs setup→cleanup→setup synchronously, so
+      // run 1's cleanup cannot yet see run 2's token — a synchronous compare
+      // would close the socket run 2 is about to reuse. Defer one microtask:
+      // if a re-setup replaced the token by then, the client is now owned by
+      // run 2 and stays open (exactly one connection). A REAL unmount leaves
+      // the last token in place, so the deferred close proceeds.
+      queueMicrotask(() => {
+        if (effectTokenRef.current !== token) return
+        connectedRef.current = false
+        clientKeyRef.current = ""
+        if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current)
+        clientRef.current?.close()
+      })
     }
   }, [id, ticket])
 
@@ -283,6 +373,39 @@ export function useChatSession({ id, ticket, onQuestion }: UseChatSessionOptions
 
   const interrupt = useCallback(() => {
     clientRef.current?.interrupt()
+  }, [])
+
+  // J10 (B4): submit a free-form candidate question. The question bubble is
+  // rendered immediately (streaming) and completed by the qa_answer frame —
+  // refused=true leaves the refusal copy in the transcript. Returns whether
+  // the frame was transmitted so the UI can surface a lost connection.
+  const askCandidateQuestion = useCallback((question: string): boolean => {
+    if (disconnectedRef.current || qaPendingRef.current) return false
+    const trimmed = question.trim()
+    if (!trimmed) return false
+    qaPendingRefSetter(true)
+    setBubbles((prev) => [
+      ...prev,
+      {
+        id: crypto.randomUUID(),
+        kind: "candidate_qa",
+        content: trimmed,
+        questionText: trimmed,
+        streaming: true,
+      },
+    ])
+    const sent = clientRef.current?.sendCandidateQuestion(trimmed) ?? false
+    if (!sent) {
+      qaPendingRefSetter(false)
+      setBubbles((prev) => {
+        const last = prev[prev.length - 1]
+        if (last && last.kind === "candidate_qa" && last.streaming) {
+          return [...prev.slice(0, -1), { ...last, streaming: false, content: "Could not send your question — connection lost." }]
+        }
+        return prev
+      })
+    }
+    return sent
   }, [])
 
   const sendCodeChange = useCallback(
@@ -309,7 +432,9 @@ export function useChatSession({ id, ticket, onQuestion }: UseChatSessionOptions
     disconnected,
     expired,
     pendingAnswer,
+    qaPending,
     submitAnswer,
+    askCandidateQuestion,
     interrupt,
     sendCodeChange,
   }

@@ -1,8 +1,18 @@
 import { act, renderHook } from "@testing-library/react"
+import { StrictMode } from "react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { ChatFrame } from "./ws"
 import { storeInvitationToken } from "./interview-ticket"
 import { useChatSession } from "./useChatSession"
+
+
+function renderStrictChatSession(opts: { id: string; ticket: string }) {
+  const wrapper = ({ children }: { children?: React.ReactNode }) => (
+    <StrictMode>{children}</StrictMode>
+  )
+  return renderHook(() => useChatSession(opts), { wrapper })
+}
+
 
 vi.mock("sonner", () => ({
   toast: {
@@ -18,6 +28,7 @@ import { toast } from "sonner"
 type Behavior = "open" | "reject"
 
 class FakeWebSocket {
+  static OPEN = 1
   static instances: FakeWebSocket[] = []
   static behaviors: Behavior[] = []
   readyState = 0
@@ -280,5 +291,150 @@ describe("useChatSession", () => {
       expect(toast.error).toHaveBeenCalledWith("consent missing")
       expect(toast.info).not.toHaveBeenCalled()
     })
+  })
+
+  describe("J10 — candidate question Q&A", () => {
+    it("appends a candidate_qa bubble and sends candidate_question over the socket", async () => {
+      FakeWebSocket.behaviors = ["open"]
+      const { result } = renderHook(() =>
+        useChatSession({ id: "iv-1", ticket: "tkt" }),
+      )
+      await act(async () => {
+        lastInstance().start()
+      })
+
+      let sent = false
+      act(() => {
+        sent = result.current.askCandidateQuestion("What tech stack do you use?")
+      })
+      expect(sent).toBe(true)
+      const ws = lastInstance()
+      const parsed = JSON.parse(ws.sent[ws.sent.length - 1])
+      expect(parsed).toEqual({ type: "candidate_question", content: "What tech stack do you use?" })
+
+      const bubble = result.current.bubbles[result.current.bubbles.length - 1]
+      expect(bubble.kind).toBe("candidate_qa")
+      expect(bubble.content).toBe("What tech stack do you use?")
+      expect(bubble.streaming).toBe(true)
+      expect(result.current.qaPending).toBe(true)
+    })
+
+    it("completes the pending bubble with the qa_answer frame", async () => {
+      FakeWebSocket.behaviors = ["open"]
+      const { result } = renderHook(() =>
+        useChatSession({ id: "iv-1", ticket: "tkt" }),
+      )
+      await act(async () => {
+        lastInstance().start()
+      })
+      act(() => {
+        result.current.askCandidateQuestion("What tech stack?")
+      })
+
+      await act(async () => {
+        lastInstance().emit({
+          type: "qa_answer",
+          question: "What tech stack?",
+          answer: "Go and TypeScript.",
+          refused: false,
+        })
+      })
+
+      const bubble = result.current.bubbles[result.current.bubbles.length - 1]
+      expect(bubble.kind).toBe("candidate_qa")
+      expect(bubble.content).toBe("Go and TypeScript.")
+      expect(bubble.streaming).toBe(false)
+      expect(result.current.qaPending).toBe(false)
+    })
+
+    it("renders a refused qa_answer as the refusal copy without an error toast", async () => {
+      FakeWebSocket.behaviors = ["open"]
+      const { result } = renderHook(() =>
+        useChatSession({ id: "iv-1", ticket: "tkt" }),
+      )
+      await act(async () => {
+        lastInstance().start()
+      })
+      act(() => {
+        result.current.askCandidateQuestion("Another question?")
+      })
+
+      await act(async () => {
+        lastInstance().emit({
+          type: "qa_answer",
+          question: "Another question?",
+          answer: "You've reached the limit of questions.",
+          refused: true,
+        })
+      })
+
+      const bubble = result.current.bubbles[result.current.bubbles.length - 1]
+      expect(bubble.refused).toBe(true)
+      expect(bubble.content).toBe("You've reached the limit of questions.")
+      expect(result.current.qaPending).toBe(false)
+      expect(toast.error).not.toHaveBeenCalled()
+    })
+
+    it("rejects a second question while the first is pending (same-tick guard)", async () => {
+      FakeWebSocket.behaviors = ["open"]
+      const { result } = renderHook(() =>
+        useChatSession({ id: "iv-1", ticket: "tkt" }),
+      )
+      await act(async () => {
+        lastInstance().start()
+      })
+
+      let first = false
+      let second = false
+      act(() => {
+        first = result.current.askCandidateQuestion("One?")
+        second = result.current.askCandidateQuestion("Two?")
+      })
+      // Guard is a ref — no state-flush race, the second call must be refused.
+      expect(first).toBe(true)
+      expect(second).toBe(false)
+      const sent = lastInstance().sent.map((s) => JSON.parse(s))
+      expect(sent.filter((s) => s.type === "candidate_question")).toHaveLength(1)
+    })
+
+    it("does not send an empty question and returns false", async () => {
+      FakeWebSocket.behaviors = ["open"]
+      const { result } = renderHook(() =>
+        useChatSession({ id: "iv-1", ticket: "tkt" }),
+      )
+      await act(async () => {
+        lastInstance().start()
+      })
+
+      let sent = true
+      act(() => {
+        sent = result.current.askCandidateQuestion("   ")
+      })
+      expect(sent).toBe(false)
+      // Resume replay is already on the socket — the empty question must not
+      // have produced a candidate_question frame.
+      expect(
+        lastInstance().sent.map((s) => JSON.parse(s)).filter((s) => s.type === "candidate_question"),
+      ).toHaveLength(0)
+    })
+  })
+})
+
+describe("G11 StrictMode — single WebSocket connection", () => {
+  it("opens exactly ONE socket across a StrictMode double-mount and never reopens", async () => {
+    FakeWebSocket.behaviors = ["open"]
+    renderStrictChatSession({ id: "iv-1", ticket: "tkt" })
+
+    // StrictMode setup→cleanup→setup: run 2 reuses run 1's live client.
+    expect(FakeWebSocket.instances).toHaveLength(1)
+
+    // The deferred close from run 1's cleanup (queueMicrotask) must see run 2's
+    // token and skip closing the reused client.
+    await flushAsync()
+    expect(FakeWebSocket.instances).toHaveLength(1)
+
+    // Handle is still open and functional.
+    lastInstance().start()
+    expect(FakeWebSocket.instances).toHaveLength(1)
   })
 })

@@ -25,6 +25,7 @@ const LoginPage = React.lazy(() => import("@/pages/Login").then(m => ({ default:
 const InterviewVoicePage = React.lazy(() => import("@/pages/InterviewVoice").then(m => ({ default: m.InterviewVoicePage })))
 const RegisterPage = React.lazy(() => import("@/pages/Register").then(m => ({ default: m.RegisterPage })))
 const CompanyContextPage = React.lazy(() => import("@/pages/CompanyContext").then(m => ({ default: m.CompanyContextPage })))
+const SettingsPage = React.lazy(() => import("@/pages/Settings").then(m => ({ default: m.SettingsPage })))
 const IntegrationsPage = React.lazy(() => import("@/pages/settings/Integrations").then(m => ({ default: m.IntegrationsPage })))
 const PrivacyPolicyPage = React.lazy(() => import("@/pages/legal/LegalPages").then(m => ({ default: m.PrivacyPolicyPage })))
 const TermsOfServicePage = React.lazy(() => import("@/pages/legal/LegalPages").then(m => ({ default: m.TermsOfServicePage })))
@@ -97,6 +98,7 @@ export default function App() {
                   <Route path="/interviews/:id" element={<InterviewResultPage />} />
                   <Route path="/interviews/:id/result" element={<InterviewResultPage />} />
                   <Route path="/company-context" element={<CompanyContextPage />} />
+                  <Route path="/settings" element={<SettingsPage />} />
                   <Route path="/integrations" element={<IntegrationsPage />} />
                 </Route>
               </Route>
