@@ -14,7 +14,7 @@ import (
 	"gorm.io/gorm"
 )
 
-const jobColumns = `id, org_id, title, description, location, employment_type, salary_min, salary_max, currency, required_skills, min_experience, responsibilities, requirements, nice_to_haves, benefits, scoring_weights, min_score_to_proceed, status, proctoring_mode, is_published, rubric, created_at`
+const jobColumns = `id, org_id, title, description, location, employment_type, salary_min, salary_max, currency, required_skills, min_experience, responsibilities, requirements, nice_to_haves, benefits, scoring_weights, min_score_to_proceed, status, proctoring_mode, is_published, rubric, question_set_error, created_at, updated_at`
 
 // publicJobColumns is the column list returned by the public job lookup
 // functions (public_active_jobs_lookup / public_job_detail_lookup).
@@ -71,11 +71,11 @@ func (r *PostgresJobRepo) Create(ctx context.Context, job *jobdomain.Job) error 
 	return tx.WithContext(ctx).Exec(
 		`INSERT INTO jobs (id, org_id, title, description, location, employment_type, salary_min, salary_max, currency,
 		                   required_skills, min_experience, responsibilities, requirements, nice_to_haves, benefits,
-		                   scoring_weights, min_score_to_proceed, status, proctoring_mode, is_published, rubric, created_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)`,
+		                   scoring_weights, min_score_to_proceed, status, proctoring_mode, is_published, rubric, created_at, updated_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)`,
 		job.ID, job.OrgID, job.Title, job.Description, job.Location, job.EmploymentType, job.SalaryMin, job.SalaryMax, job.Currency,
 		reqSkills, job.MinExperience, resp, reqs, nice, ben,
-		weights, job.MinScoreToProceed, job.Status, job.ProctoringMode, job.IsPublished, job.Rubric, job.CreatedAt).Error
+		weights, job.MinScoreToProceed, job.Status, job.ProctoringMode, job.IsPublished, job.Rubric, job.CreatedAt, job.CreatedAt).Error
 }
 
 func (r *PostgresJobRepo) GetByID(ctx context.Context, id uuid.UUID) (*jobdomain.Job, error) {
@@ -85,6 +85,19 @@ func (r *PostgresJobRepo) GetByID(ctx context.Context, id uuid.UUID) (*jobdomain
 	}
 	row := tx.Raw(
 		`SELECT `+jobColumns+` FROM jobs WHERE id = $1`, id).Row()
+	return scanJob(row)
+}
+
+// GetByIDForUpdate — locked read (D8): FOR UPDATE holds the row lock until
+// the surrounding tenant transaction ends, serializing concurrent
+// publish-sensitive updates against the same job row.
+func (r *PostgresJobRepo) GetByIDForUpdate(ctx context.Context, id uuid.UUID) (*jobdomain.Job, error) {
+	tx, err := r.tx(ctx)
+	if err != nil {
+		return nil, err
+	}
+	row := tx.Raw(
+		`SELECT `+jobColumns+` FROM jobs WHERE id = $1 FOR UPDATE`, id).Row()
 	return scanJob(row)
 }
 
@@ -148,15 +161,21 @@ func (r *PostgresJobRepo) Update(ctx context.Context, job *jobdomain.Job) error 
 		return fmt.Errorf("encode scoring weights: %w", err)
 	}
 
-	return tx.WithContext(ctx).Exec(
+	// RETURNING updated_at keeps the in-memory aggregate in sync with the row
+	// version the DB just stamped (D7): callers derive deterministic task IDs
+	// from it, so a stale zero value would mint colliding IDs.
+	return tx.WithContext(ctx).Raw(
 		`UPDATE jobs SET title = $1, description = $2, location = $3, employment_type = $4,
 		 salary_min = $5, salary_max = $6, currency = $7, required_skills = $8, min_experience = $9,
 		 responsibilities = $10, requirements = $11, nice_to_haves = $12, benefits = $13,
-		 scoring_weights = $14, min_score_to_proceed = $15, status = $16, proctoring_mode = $17, is_published = $18, rubric = $19, updated_at = NOW() WHERE id = $20`,
+		 scoring_weights = $14, min_score_to_proceed = $15, status = $16, proctoring_mode = $17, is_published = $18, rubric = $19, updated_at = NOW()
+		 WHERE id = $20
+		 RETURNING updated_at`,
 		job.Title, job.Description, job.Location, job.EmploymentType,
 		job.SalaryMin, job.SalaryMax, job.Currency, reqSkills, job.MinExperience,
 		resp, reqs, nice, ben,
-		weights, job.MinScoreToProceed, job.Status, job.ProctoringMode, job.IsPublished, job.Rubric, job.ID).Error
+		weights, job.MinScoreToProceed, job.Status, job.ProctoringMode, job.IsPublished, job.Rubric, job.ID,
+	).Row().Scan(&job.UpdatedAt)
 }
 
 type rowScanner interface {
@@ -171,18 +190,22 @@ func scanJob(row rowScanner) (*jobdomain.Job, error) {
 		minScore                      *float64
 		minExperience                 *int
 		salMin, salMax                *int
+		questionSetError              *string
 	)
 	err := row.Scan(
 		&j.ID, &j.OrgID, &j.Title, &j.Description, &j.Location, &j.EmploymentType,
 		&salMin, &salMax, &j.Currency,
 		&skills, &minExperience, &resp, &reqs, &nice, &ben,
-		&weights, &minScore, &j.Status, &j.ProctoringMode, &j.IsPublished, &rubric, &j.CreatedAt,
+		&weights, &minScore, &j.Status, &j.ProctoringMode, &j.IsPublished, &rubric, &questionSetError, &j.CreatedAt, &j.UpdatedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, jobdomain.ErrNotFound
 	}
 	if err != nil {
 		return nil, err
+	}
+	if questionSetError != nil {
+		j.QuestionSetError = *questionSetError
 	}
 	j.SalaryMin = salMin
 	j.SalaryMax = salMax

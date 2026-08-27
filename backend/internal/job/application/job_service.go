@@ -12,7 +12,8 @@ import (
 	iamdomain "github.com/intivai/backend/internal/iam/domain"
 	jobdomain "github.com/intivai/backend/internal/job/domain"
 	sharederr "github.com/intivai/backend/internal/shared/errors"
-	"github.com/intivai/backend/pkg/queue"
+	"github.com/intivai/backend/pkg/db"
+	"github.com/rs/zerolog"
 )
 
 type CreateJobCommand struct {
@@ -77,16 +78,32 @@ type JobResult struct {
 	ProctoringMode    string             `json:"proctoring_mode"`
 	IsPublished       bool               `json:"is_published"`
 	Rubric            string             `json:"rubric,omitempty"`
-	CreatedAt         time.Time          `json:"created_at"`
+	// QuestionSetError — terminal question-generation failure, operator-visible
+	// per D9 (finding I14). Empty/omitted when the set generated cleanly.
+	QuestionSetError string    `json:"question_set_error,omitempty"`
+	CreatedAt        time.Time `json:"created_at"`
+}
+
+// taskQueue — the enqueue surface JobService needs (satisfied by
+// *queue.Client; faked in tests to capture deterministic TaskIDs).
+type taskQueue interface {
+	Enqueue(ctx context.Context, jobType string, payload any, opts ...asynq.Option) (*asynq.TaskInfo, error)
 }
 
 type JobService struct {
 	repo jobdomain.JobRepository
-	q    *queue.Client
+	q    taskQueue
+	log  zerolog.Logger
 }
 
-func NewJobService(repo jobdomain.JobRepository, queueClient *queue.Client) *JobService {
-	return &JobService{repo: repo, q: queueClient}
+func NewJobService(repo jobdomain.JobRepository, queueClient taskQueue) *JobService {
+	return &JobService{repo: repo, q: queueClient, log: zerolog.Nop()}
+}
+
+// WithLogger injects the server logger for post-commit hook failures (J8).
+func (s *JobService) WithLogger(log zerolog.Logger) *JobService {
+	s.log = log
+	return s
 }
 
 func (s *JobService) Create(ctx context.Context, actor application.AuthContext, cmd CreateJobCommand) (*JobResult, error) {
@@ -128,9 +145,19 @@ func (s *JobService) Create(ctx context.Context, actor application.AuthContext, 
 		return nil, err
 	}
 
-	if err := s.enqueueRubric(ctx, job.OrgID, job.ID); err != nil {
-		return nil, err
-	}
+	// J8: publish-side effects must not enqueue before the insert commits. A
+	// worker could read the row before commit, and an enqueue failure would
+	// roll the business update back while the task is already queued. Hook
+	// registration is deferred; failures are logged, never failing the request
+	// (rubric/question sets are regenerable — the TaskIDs are versioned).
+	db.AfterCommit(ctx, func(actx context.Context) {
+		if err := s.enqueueRubric(actx, job.OrgID, job.ID); err != nil {
+			s.log.Error().Err(err).Str("job_id", job.ID.String()).Msg("post-commit rubric enqueue failed")
+		}
+		if err := s.enqueueQuestionSet(actx, job.OrgID, job.ID, job.UpdatedAt, job.IsPublished); err != nil {
+			s.log.Error().Err(err).Str("job_id", job.ID.String()).Msg("post-commit question-set enqueue failed")
+		}
+	})
 
 	return toResult(job), nil
 }
@@ -139,7 +166,7 @@ func (s *JobService) Update(ctx context.Context, actor application.AuthContext, 
 	if err := application.Authorize(actor, iamdomain.RoleAdmin, iamdomain.RoleRecruiter); err != nil {
 		return nil, err
 	}
-	job, err := s.repo.GetByID(ctx, cmd.JobID)
+	job, err := s.repo.GetByIDForUpdate(ctx, cmd.JobID)
 	if errors.Is(err, jobdomain.ErrNotFound) {
 		return nil, sharederr.NewNotFoundError("job", cmd.JobID.String())
 	}
@@ -198,6 +225,11 @@ func (s *JobService) Update(ctx context.Context, actor application.AuthContext, 
 		job.IsPublished = *cmd.IsPublished
 	}
 	if cmd.ScoringWeights != nil {
+		// D1: weights freeze at publish — protects existing evaluations from
+		// silent re-ranking. Editable only while the job is a draft.
+		if job.IsPublished {
+			return nil, sharederr.NewDomainError("JOB_WEIGHTS_LOCKED", "scoring weights are frozen once the job is published")
+		}
 		if err := job.SetScoringWeights(cmd.ScoringWeights); err != nil {
 			return nil, err
 		}
@@ -209,9 +241,19 @@ func (s *JobService) Update(ctx context.Context, actor application.AuthContext, 
 		return nil, err
 	}
 
-	if err := s.enqueueRubric(ctx, job.OrgID, job.ID); err != nil {
-		return nil, err
-	}
+	// J8: same post-commit discipline as Create — enqueues fire after the
+	// tenant transaction commits (and only when it did). Publish is the
+	// question-set trigger (D5): the task id is versioned by updated_at (D7),
+	// so a republish after an edit mints a fresh enqueue. Enqueue failures
+	// never fail the request; the set/rubric regenerate on the next edit.
+	db.AfterCommit(ctx, func(actx context.Context) {
+		if err := s.enqueueRubric(actx, job.OrgID, job.ID); err != nil {
+			s.log.Error().Err(err).Str("job_id", job.ID.String()).Msg("post-commit rubric enqueue failed")
+		}
+		if err := s.enqueueQuestionSet(actx, job.OrgID, job.ID, job.UpdatedAt, job.IsPublished); err != nil {
+			s.log.Error().Err(err).Str("job_id", job.ID.String()).Msg("post-commit question-set enqueue failed")
+		}
+	})
 
 	return toResult(job), nil
 }
@@ -264,6 +306,7 @@ func toResult(j *jobdomain.Job) *JobResult {
 		ProctoringMode:    j.ProctoringMode,
 		IsPublished:       j.IsPublished,
 		Rubric:            string(j.Rubric),
+		QuestionSetError:  j.QuestionSetError,
 		CreatedAt:         j.CreatedAt,
 	}
 }

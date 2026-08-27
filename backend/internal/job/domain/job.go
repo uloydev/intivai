@@ -2,6 +2,8 @@ package domain
 
 import (
 	"encoding/json"
+	"math"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -38,6 +40,10 @@ type Job struct {
 	ProctoringMode    string
 	IsPublished       bool
 	Rubric            json.RawMessage
+	// QuestionSetError carries the terminal generation failure (D9) so the
+	// API can surface it; "" = no recorded failure. Written only by the
+	// question worker's column-scoped error store.
+	QuestionSetError string
 }
 
 func NewJob(orgID uuid.UUID, title, description string, requiredSkills []string, minExperience int) (*Job, error) {
@@ -80,14 +86,42 @@ func ValidateJobFields(title, description string, minExperience int, status stri
 	return nil
 }
 
+// weightDimensions — the fixed scoring taxonomy. A scoring_weights payload
+// must be COMPLETE (every dimension present) when provided: partial maps
+// silently merge with org/global defaults and hide the effective math from
+// HR users.
+var weightDimensions = []string{"skills_match", "experience_years", "semantic_match", "education", "certifications"}
+
 func (j *Job) SetScoringWeights(raw map[string]float64) error {
-	if raw == nil {
-		return nil
+	if len(raw) == 0 {
+		return nil // field omitted upstream — keep job > org > default resolution untouched
 	}
-	for k, v := range raw {
-		if !validWeightName(k) || v < 0 || v > 1 {
-			return errors.NewDomainError("INVALID_WEIGHT", "invalid scoring weight: "+k)
+	// Typos first — an unknown key is the user's actual problem even when a
+	// dimension is also missing.
+	for k := range raw {
+		if !validWeightName(k) {
+			return errors.NewDomainError("WEIGHTS_INVALID", "invalid scoring weight: "+k)
 		}
+	}
+	for _, dim := range weightDimensions {
+		if _, ok := raw[dim]; !ok {
+			return errors.NewDomainError("WEIGHTS_INCOMPLETE", "scoring_weights must include every dimension: "+strings.Join(weightDimensions, ", "))
+		}
+	}
+	for _, v := range raw {
+		if v < 0 || v > 1 {
+			return errors.NewDomainError("WEIGHTS_INVALID", "invalid scoring weight: value out of range")
+		}
+	}
+	sum := 0.0
+	for _, v := range raw {
+		sum += v
+	}
+	// Scale to integer percent before comparing: float64 accumulation must not
+	// decide the ±0.01 boundary (1.01 - 1.0 == 0.010000000000000009).
+	scaled := int(math.Round(sum * 100))
+	if scaled < 100-1 || scaled > 100+1 {
+		return errors.NewDomainError("WEIGHTS_SUM_INVALID", "scoring_weights must sum to 1.0 (±0.01)")
 	}
 	j.ScoringWeights = raw
 	return nil

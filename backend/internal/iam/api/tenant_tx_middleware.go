@@ -40,7 +40,7 @@ func TenantTxMiddleware(pool *gorm.DB) fiber.Handler {
 			})
 		}
 
-		c.SetUserContext(db.WithTx(ctx, tx))
+		c.SetUserContext(db.WithTx(db.WithAfterCommit(ctx), tx))
 
 		if err := c.Next(); err != nil {
 			return err
@@ -54,6 +54,15 @@ func TenantTxMiddleware(pool *gorm.DB) fiber.Handler {
 
 		commitCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		return tx.WithContext(commitCtx).Commit().Error
+		if err := tx.WithContext(commitCtx).Commit().Error; err != nil {
+			return err
+		}
+		// J8: after-commit side effects (async enqueues) fire only after the
+		// row is durable. A failing hook is logged here — it must never fail
+		// the request since the commit already succeeded. The hook registry
+		// lives on the ctx handed to the handler (c.UserContext after line 43).
+		handlerCtx := c.UserContext()
+		db.RunAfterCommit(handlerCtx)
+		return nil
 	}
 }
