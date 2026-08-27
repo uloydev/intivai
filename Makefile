@@ -61,10 +61,14 @@ check:
 	cd frontend && npx vitest run
 	$(MAKE) lint-docs
 
-# Docs gates: markdownlint (config .markdownlint-cli2.jsonc) + internal link check.
-# Skips gracefully when the linter is unavailable (offline) — CI always runs it.
+# Docs gates: markdownlint (config .markdownlint-cli2.jsonc) + internal link
+# check + docs-vs-code sync (live docs must reference existing paths, the
+# current migration range, and real env vars).
+# Skips markdownlint gracefully when the linter is unavailable (offline) — CI
+# always runs it.
 lint-docs:
 	@bash scripts/check-doc-links.sh
+	@bash scripts/check-docs-code-sync.sh
 	@if command -v markdownlint-cli2 >/dev/null 2>&1; then \
 	  markdownlint-cli2; \
 	elif [ -x frontend/node_modules/.bin/markdownlint-cli2 ]; then \
