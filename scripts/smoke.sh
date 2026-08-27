@@ -4,6 +4,7 @@
 set -euo pipefail
 
 BASE="${BASE:-http://localhost:8081/api/v1}"
+MAILPIT="${MAILPIT:-http://localhost:8026}"
 SLUG="smoke$(date +%s)"
 EMAIL="admin@${SLUG}.io"
 PASS="secret123"
@@ -27,6 +28,48 @@ ORG=$(echo "$REG" | jq_get "['data']['org_id']")
 say "login"
 TOKEN=$(curl -sf -X POST "$BASE/auth/login" -H 'Content-Type: application/json' \
   -d "{\"org_slug\":\"$SLUG\",\"email\":\"$EMAIL\",\"password\":\"$PASS\"}" | jq_get "['data']['token']")
+
+# B3: review-only gate. Exercises the candidate-review confirm CONTRACT
+# (migration 033 + the 7-field dynamic-form endpoint) without the live LLM
+# pipeline — used when the configured model is dead and extraction can't
+# reach pending_review. Seeds a pending_review candidate under this throwaway
+# smoke org (owned by the intivai superuser so RLS is bypassed on insert),
+# then drives GET → POST confirm → single-shot 404 replay → recruiter GET.
+if [ "${SMOKE_REVIEW_ONLY:-0}" = "1" ]; then
+  say "review-only: seed pending_review candidate"
+  REVIEW_TOKEN="smoke-review-$(date +%s)-$$"
+  REVIEW_CAND=$(docker compose exec -T postgres psql -U intivai -d intivai -q -tAc "
+INSERT INTO candidates (id,org_id,name,email,cv_path,cv_structured,status,review_token,created_at,updated_at)
+VALUES (gen_random_uuid(),'$ORG','Jane Doe','cv-smoke@intivai.test','cvs/$ORG/seed.pdf',
+  '{\"skills\":[\"Go\",\"PostgreSQL\"],\"experience_years\":2,\"education\":\"BSc\",\"certifications\":[\"AWS SA\"],\"summary\":\"baseline\"}',
+  'pending_review', '$REVIEW_TOKEN', now(), now()) RETURNING id" | tr -d '[:space:]')
+  [ -n "$REVIEW_CAND" ] || { echo "seed pending_review candidate failed"; exit 1; }
+  echo "seeded candidate $REVIEW_CAND (token $REVIEW_TOKEN)"
+
+  say "review-only: GET profile (public)"
+  curl -sf "$BASE/public/candidate-review/$REVIEW_TOKEN" | \
+    python3 -c "import sys,json; d=json.load(sys.stdin)['data']; assert d['status']=='pending_review'; assert isinstance(d['cv_structured'],dict); print('review payload ok')"
+
+  say "review-only: POST confirm (dynamic form, 7 fields)"
+  curl -sf -X POST "$BASE/public/candidate-review/$REVIEW_TOKEN/confirm" \
+    -H 'Content-Type: application/json' \
+    -d '{"name":"Jane R. Doe","email":"updated@intivai.test","skills":["Go","PostgreSQL"],"experience_years":3,"education":"BSc Computer Science","certifications":["AWS SA"],"summary":"Go backend engineer building distributed systems."}' >/dev/null
+  echo "confirm ok"
+
+  RC=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/public/candidate-review/$REVIEW_TOKEN")
+  [ "$RC" = "404" ] && echo "confirm token invalidated ok" || { echo "replay not rejected ($RC)"; exit 1; }
+
+  say "review-only: recruiter GET persists edited name/email"
+  curl -sf "$BASE/cvs/$REVIEW_CAND" -H "Authorization: Bearer $TOKEN" | \
+    python3 -c "
+import sys,json
+d=json.load(sys.stdin)['data']
+assert d['name']=='Jane R. Doe', ('name mismatch: '+str(d['name']))
+assert d['email']=='updated@intivai.test', d['email']
+print('name/email persisted ok')"
+  echo "review-only smoke PASS"
+  exit 0
+fi
 
 say "job create"
 JOB=$(curl -sf -X POST "$BASE/jobs" -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
@@ -63,8 +106,9 @@ else
 fi
 
 say "cv upload"
+REVIEW_EMAIL="cv-smoke@intivai.test"
 CV=$(curl -sf -X POST "$BASE/cvs" -H "Authorization: Bearer $TOKEN" \
-  -F "file=@$1" -F 'name=Jane Doe' -F 'email=jane@smoke.io')
+  -F "file=@$1" -F 'name=Jane Doe' -F "email=$REVIEW_EMAIL")
 CV_ID=$(echo "$CV" | jq_get "['data']['id']")
 
 say "cv pipeline (poll up to 120s — reasoning models are slow)"
@@ -92,6 +136,91 @@ case "$STATUS" in
   *)
     echo "unexpected state: $STATUS"; exit 1 ;;
 esac
+
+# Candidate-review confirm contract (dynamic form / migration 033). TOKEN is
+# the review magic link; CAND_ID is the recruiter-visible candidate uuid so we
+# can assert name/email persistence. Works whether the token came from Mailpit
+# (full LLM pipeline) or a seeded pending_review row (extraction may be
+# unavailable when the configured LLM model is dead — confirmed against
+# stealth/ox-alpha, a defunct OpenRouter test endpoint).
+confirm_review() {
+  local token="$1" cand="$2"
+  say "candidate review: GET profile (public)"
+  curl -sf "$BASE/public/candidate-review/$token" | \
+    python3 -c "import sys,json; d=json.load(sys.stdin)['data']; assert d['status']=='pending_review'; assert isinstance(d['cv_structured'],dict); print('review payload ok')"
+  say "candidate review: POST confirm (7-field dynamic form payload)"
+  curl -sf -X POST "$BASE/public/candidate-review/$token/confirm" \
+    -H 'Content-Type: application/json' \
+    -d '{"name":"Jane R. Doe","email":"updated@intivai.test","skills":["Go","PostgreSQL"],"experience_years":3,"education":"BSc Computer Science","certifications":["AWS SA"],"summary":"Go backend engineer building distributed systems."}' >/dev/null
+  echo "confirm ok"
+  RC=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/public/candidate-review/$token")
+  [ "$RC" = "404" ] && echo "confirm token invalidated ok" || { echo "replay not rejected ($RC)"; exit 1; }
+  say "candidate review: recruiter GET persists edited name/email"
+  curl -sf "$BASE/cvs/$cand" -H "Authorization: Bearer $TOKEN" | \
+    python3 -c "
+import sys,json
+d=json.load(sys.stdin)['data']
+assert d['name']=='Jane R. Doe', ('name mismatch: '+str(d['name']))
+assert d['email']=='updated@intivai.test', d['email']
+print('name/email persisted ok')"
+  sleep 3
+}
+
+# Recover a LIVE review token from the candidate-review magic-link email
+# (Mailpit delivers it; the token is never returned by the API). Mailpit returns
+# newest-first; each candidate is validated against GET before use so older
+# seeds never get confirmed.
+REVIEW_TOKEN=""
+REVIEW_CAND=""
+if [ "$STATUS" = "pending_review" ]; then
+  say "candidate review: recover token from mailpit"
+  REVIEW_TOKEN=$(python3 - "$BASE" "$MAILPIT" <<'PYEOF'
+import json, re, sys, urllib.request
+base, mailpit = sys.argv[1], sys.argv[2]
+def get(url):
+    with urllib.request.urlopen(url, timeout=10) as r:
+        return r.read().decode()
+msgs = json.loads(get(mailpit + "/api/v1/messages?limit=20"))
+for m in msgs["messages"]:
+    to = m.get("To") or []
+    if m.get("Subject") != "Review Your Intivai AI Profile" or \
+       not any(isinstance(t, dict) and t.get("Address") == "cv-smoke@intivai.test" for t in to):
+        continue
+    html = json.loads(get(mailpit + "/api/v1/message/" + m["ID"])).get("HTML", "") or ""
+    hit = re.search(r"candidate-review/([0-9a-f-]{36})", html)
+    if not hit:
+        continue
+    token = hit.group(1)
+    try:
+        detail = get(base + "/public/candidate-review/" + token)
+        if '"status":"pending_review"' in detail or '"status": "pending_review"' in detail:
+            print(token); break
+    except Exception:
+        continue
+else:
+    print("")
+PYEOF
+)
+  REVIEW_CAND="$CV_ID"
+fi
+
+# Fallback: extraction unreachable (no working LLM model in this env) — seed a
+# pending_review candidate under this throwaway smoke org and exercise the same
+# confirm contract. The token is unique per run and the candidate is orphaned
+# when the smoke org is recycled.
+if [ -z "$REVIEW_TOKEN" ]; then
+  say "candidate review: $STATUS — seeding a pending_review fixture to verify confirm contract (033)"
+  REVIEW_TOKEN="smoke-review-$(date +%s)-$$"
+  REVIEW_CAND=$(docker compose exec -T postgres psql -U intivai -d intivai -q -tAc "
+INSERT INTO candidates (id,org_id,name,email,cv_path,cv_structured,status,review_token,created_at,updated_at)
+VALUES (gen_random_uuid(),'$ORG','Jane Doe','cv-smoke@intivai.test','cvs/$ORG/seed.pdf',
+  '{\"skills\":[\"Go\",\"PostgreSQL\"],\"experience_years\":2,\"education\":\"BSc\",\"certifications\":[\"AWS SA\"],\"summary\":\"baseline\"}',
+  'pending_review', '$REVIEW_TOKEN', now(), now()) RETURNING id" | tr -d '[:space:]')
+  [ -n "$REVIEW_CAND" ] || { echo "seed pending_review candidate failed"; exit 1; }
+  echo "seeded candidate $REVIEW_CAND (token $REVIEW_TOKEN)"
+fi
+
+confirm_review "$REVIEW_TOKEN" "$REVIEW_CAND"
 
 say "prompt rails"
 curl -sf -X PUT "$BASE/orgs/$ORG/prompt" -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
