@@ -17,11 +17,12 @@ const safetyRails = `Safety rails (non-negotiable, always in effect):
 type ComposerInput struct {
 	DefaultPrompt  string // empty → DefaultInterviewerPrompt
 	TenantPrompt   string // optional
-	CompanyContext string // optional
+	CompanyContext string // optional (org company context)
+	JobContext     string // optional (per-job candidate Q&A context, D2)
 }
 
 // ComposeSystemPrompt builds the interview system prompt:
-// base → tenant prompt → company context → safety rails (last).
+// base → tenant prompt → company context → job candidate context → safety rails (last).
 // Rails are pinned last regardless of input content.
 func ComposeSystemPrompt(in ComposerInput) string {
 	base := strings.TrimSpace(in.DefaultPrompt)
@@ -36,6 +37,9 @@ func ComposeSystemPrompt(in ComposerInput) string {
 	}
 	if ctx := strings.TrimSpace(in.CompanyContext); ctx != "" {
 		parts = append(parts, "Company context:\n"+ctx)
+	}
+	if jc := strings.TrimSpace(in.JobContext); jc != "" {
+		parts = append(parts, "Job candidate context:\n"+jc)
 	}
 	parts = append(parts, safetyRails)
 

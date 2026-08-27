@@ -26,6 +26,31 @@ func TestComposeOrderAndRailsLast(t *testing.T) {
 	}
 }
 
+// TestRailsLastWithJobContext proves the per-job candidate context (D2) is
+// merged AFTER company context but the safety rails remain the final segment
+// regardless of how many optional sections are present.
+func TestRailsLastWithJobContext(t *testing.T) {
+	out := ComposeSystemPrompt(ComposerInput{
+		TenantPrompt:   "Interview for fintech Go roles.",
+		CompanyContext: "We build payment infrastructure in Go.",
+		JobContext:     "This role is fully remote. Salary range $120k-$150k. 4 weeks PTO.",
+	})
+	idxTenant := strings.Index(out, "Interview for fintech")
+	idxCompany := strings.Index(out, "Company context:")
+	idxJob := strings.Index(out, "Job candidate context:")
+	idxRails := strings.Index(out, "Safety rails")
+	if idxTenant < 0 || idxCompany < 0 || idxJob < 0 || idxRails < 0 {
+		t.Fatalf("missing sections: %s", out)
+	}
+	if idxTenant >= idxCompany || idxCompany >= idxJob || idxJob >= idxRails {
+		t.Fatalf("wrong order: tenant=%d company=%d job=%d rails=%d", idxTenant, idxCompany, idxJob, idxRails)
+	}
+	// Rails must remain the literal last segment.
+	if !strings.HasSuffix(out, "return to the interview.") {
+		t.Fatalf("rails not at end:\n%s", out)
+	}
+}
+
 func TestRailsCannotBeOverridden(t *testing.T) {
 	// Tenant tries to move rails: composer ignores injection, rails still last.
 	out := ComposeSystemPrompt(ComposerInput{
