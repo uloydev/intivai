@@ -15,6 +15,7 @@ type Org struct {
 	Plan              string
 	ScoringWeights    map[string]float64 // per-tenant partial override; falls back to global defaults
 	MinScoreToProceed *float64           // per-tenant threshold override (default 50 via code)
+	CandidateQALimit  *int               // per-tenant candidate Q&A cap (B4/D3); nil → default 10
 }
 
 func NewOrg(name, slug string) (*Org, error) {

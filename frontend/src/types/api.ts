@@ -185,6 +185,12 @@ export interface AnswerDTO {
   answered_at: string
 }
 
+export interface QAPair {
+  question: string
+  answer: string
+  created_at: string
+}
+
 export interface EvaluationReport {
   overall_score: number
   dimensions: Record<string, { score: number; weight: number }>
@@ -279,6 +285,7 @@ export interface InterviewDetail {
   proctoring_events?: ProctoringEvent[]
   proctoring_summary?: ProctoringSummary
   coding_sessions?: CodingSession[]
+  qa_pairs?: QAPair[]
   created_at: string
   completed_at?: string
 }

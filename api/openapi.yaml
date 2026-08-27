@@ -247,6 +247,70 @@ paths:
         "400":
           $ref: "#/components/responses/BadRequest"
 
+  # ── Per-job candidate Q&A context (authed, admin/recruiter) ────────────
+  /api/v1/jobs/{id}/candidate-context:
+    get:
+      tags: [Jobs]
+      summary: Get the candidate Q&A context authored for this job
+      parameters:
+        - $ref: "#/components/parameters/JobID"
+      responses:
+        "200":
+          description: Current candidate context
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CandidateContext"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+    put:
+      tags: [Jobs]
+      summary: Create or replace the candidate Q&A context for this job
+      parameters:
+        - $ref: "#/components/parameters/JobID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [content]
+              properties:
+                content:
+                  type: string
+                  maxLength: 4000
+      responses:
+        "200":
+          description: Saved candidate context (version bumped)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CandidateContext"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/jobs/{id}/candidate-context/suggest:
+    post:
+      tags: [Jobs]
+      summary: Draft a candidate context from the job description (AI, never persisted)
+      parameters:
+        - $ref: "#/components/parameters/JobID"
+      responses:
+        "200":
+          description: AI draft for recruiter review (not saved)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  draft:
+                    type: string
+        "404":
+          $ref: "#/components/responses/NotFound"
+
   # ── CVs / Candidates ───────────────────────────────────────────────────
   /api/v1/cvs:
     post:
@@ -555,6 +619,45 @@ paths:
                   system_prompt:
                     type: string
 
+  /api/v1/orgs/{orgId}/settings/candidate-qa-limit:
+    put:
+      tags: [Contexts]
+      summary: Set the per-org candidate Q&A cap (0..50; nil defaults to 10)
+      parameters:
+        - $ref: "#/components/parameters/OrgID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [candidate_qa_limit]
+              properties:
+                candidate_qa_limit:
+                  type: integer
+                  minimum: 0
+                  maximum: 50
+                  description: Max candidate Q&A pairs per interview. Omitted/nil keeps the code default of 10.
+      responses:
+        "200":
+          description: Limit updated
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [candidate_qa_limit]
+                properties:
+                  candidate_qa_limit:
+                    type: integer
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
   # ── Interviews ─────────────────────────────────────────────────────────
   /api/v1/interviews:
     post:
@@ -577,6 +680,10 @@ paths:
       responses:
         "201":
           description: Interview created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreateInterviewResult"
         "400":
           $ref: "#/components/responses/BadRequest"
 
@@ -1450,9 +1557,29 @@ components:
           type: string
         is_published:
           type: boolean
+        rubric:
+          type: string
+          description: Generated scoring rubric (JSON-encoded); omitted until the rubric worker succeeds.
+        question_set_error:
+          type: string
+          description: Terminal interview-question generation failure (retry budget exhausted). Omitted when the stored set generated cleanly.
         created_at:
           type: string
           format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    CandidateContext:
+      type: object
+      properties:
+        job_id:
+          type: string
+          format: uuid
+        content:
+          type: string
+        version:
+          type: integer
         updated_at:
           type: string
           format: date-time
@@ -1563,6 +1690,26 @@ components:
           type: string
           format: date-time
 
+    CreateInterviewResult:
+      type: object
+      properties:
+        interview_id:
+          type: string
+          format: uuid
+        invitation_token:
+          type: string
+        expires_at:
+          type: string
+          format: date-time
+        context_version:
+          type: integer
+        email_enqueued:
+          type: boolean
+          description: false + email_error when the invite email could not be queued (D9)
+        email_error:
+          type: string
+          description: operator-visible reason when email_enqueued is false
+
     InterviewDetail:
       type: object
       properties:
@@ -1592,6 +1739,19 @@ components:
           type: array
           items:
             type: object
+        qa_pairs:
+          type: array
+          description: Candidate free-form Q&A (B4) — question, grounded answer, and when it was recorded
+          items:
+            type: object
+            properties:
+              question:
+                type: string
+              answer:
+                type: string
+              created_at:
+                type: string
+                format: date-time
         created_at:
           type: string
           format: date-time
@@ -1792,7 +1952,11 @@ components:
 
   responses:
     BadRequest:
-      description: Invalid input
+      description: >-
+        Invalid input. Job scoring_weights errors: WEIGHTS_INVALID (unknown
+        dimension name or value outside 0..1), WEIGHTS_INCOMPLETE (scoring_weights
+        missing a required dimension), WEIGHTS_SUM_INVALID (weights must sum to
+        1.0 ±0.01), JOB_WEIGHTS_LOCKED (scoring weights frozen once published).
       content:
         application/json:
           schema:
@@ -1800,6 +1964,13 @@ components:
 
     Unauthorized:
       description: Authentication required or invalid token
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+
+    Forbidden:
+      description: Insufficient role or cross-tenant access
       content:
         application/json:
           schema:

@@ -35,6 +35,16 @@ func (m *memRepo) GetOrgBySlug(_ context.Context, slug string) (*iamdomain.Org, 
 	}
 	return nil, iamdomain.ErrNotFound
 }
+func (m *memRepo) UpdateOrgCandidateQALimit(_ context.Context, orgID uuid.UUID, limit int) error {
+	for _, o := range m.orgs {
+		if o.ID == orgID {
+			q := limit
+			o.CandidateQALimit = &q
+			return nil
+		}
+	}
+	return iamdomain.ErrNotFound
+}
 func (m *memRepo) CreateUser(_ context.Context, u *iamdomain.User) error {
 	m.users = append(m.users, u)
 	return nil

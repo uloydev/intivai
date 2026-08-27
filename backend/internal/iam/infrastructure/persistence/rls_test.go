@@ -77,6 +77,48 @@ func TestTenantIsolation(t *testing.T) {
 	if id.OrgID != orgA.ID || id.Role != iamdomain.RoleAdmin {
 		t.Fatalf("login identity = %+v, want org %s admin", id, orgA.ID)
 	}
+
+	// J13: org QA limit setter round-trips within the tenant...
+	if err := txm.RunInTx(ctx, &orgA.ID, func(tctx context.Context) error {
+		return repo.UpdateOrgCandidateQALimit(tctx, orgA.ID, 25)
+	}); err != nil {
+		t.Fatalf("UpdateOrgCandidateQALimit: %v", err)
+	}
+	if err := txm.RunInTx(ctx, &orgA.ID, func(tctx context.Context) error {
+		got, err := repo.GetOrg(tctx, orgA.ID)
+		if err != nil {
+			return err
+		}
+		if got.CandidateQALimit == nil || *got.CandidateQALimit != 25 {
+			t.Fatalf("candidate limit = %v, want 25", got.CandidateQALimit)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// ...and is invisible cross-tenant (RLS), as is the update itself.
+	if err := txm.RunInTx(ctx, &orgA.ID, func(tctx context.Context) error {
+		err = repo.UpdateOrgCandidateQALimit(tctx, orgB.ID, 30)
+		if !errors.Is(err, iamdomain.ErrNotFound) {
+			t.Fatalf("cross-tenant update err = %v, want not found", err)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := txm.RunInTx(ctx, &orgA.ID, func(tctx context.Context) error {
+		got, err := repo.GetOrg(tctx, orgA.ID)
+		if err != nil {
+			return err
+		}
+		if got.CandidateQALimit == nil || *got.CandidateQALimit != 25 {
+			t.Fatalf("limit changed cross-tenant: %v", got.CandidateQALimit)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func seedTenant(t *testing.T, ctx context.Context, txm *PostgresTxManager, repo *PostgresIAMRepo, slug string) (*iamdomain.Org, *iamdomain.User) {

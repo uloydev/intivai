@@ -46,9 +46,9 @@ func (r *PostgresIAMRepo) CreateOrg(ctx context.Context, org *iamdomain.Org) err
 		}
 	}
 	err = tx.WithContext(ctx).Exec(
-		`INSERT INTO orgs (id, name, slug, plan, scoring_weights, min_score_to_proceed, created_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-		org.ID, org.Name, org.Slug, org.Plan, weights, org.MinScoreToProceed, org.CreatedAt).Error
+		`INSERT INTO orgs (id, name, slug, plan, scoring_weights, min_score_to_proceed, candidate_qa_limit, created_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+		org.ID, org.Name, org.Slug, org.Plan, weights, org.MinScoreToProceed, org.CandidateQALimit, org.CreatedAt).Error
 	return mapDuplicate(err, "orgs_slug_key", iamdomain.ErrDuplicateSlug)
 }
 
@@ -58,7 +58,7 @@ func (r *PostgresIAMRepo) GetOrg(ctx context.Context, id uuid.UUID) (*iamdomain.
 		return nil, err
 	}
 	row := tx.Raw(
-		`SELECT id, name, slug, plan, scoring_weights, min_score_to_proceed, created_at FROM orgs WHERE id = $1`, id).Row()
+		`SELECT id, name, slug, plan, scoring_weights, min_score_to_proceed, candidate_qa_limit, created_at FROM orgs WHERE id = $1`, id).Row()
 	return scanOrg(row)
 }
 
@@ -68,8 +68,28 @@ func (r *PostgresIAMRepo) GetOrgBySlug(ctx context.Context, slug string) (*iamdo
 		return nil, err
 	}
 	row := tx.Raw(
-		`SELECT id, name, slug, plan, scoring_weights, min_score_to_proceed, created_at FROM orgs WHERE slug = $1`, slug).Row()
+		`SELECT id, name, slug, plan, scoring_weights, min_score_to_proceed, candidate_qa_limit, created_at FROM orgs WHERE slug = $1`, slug).Row()
 	return scanOrg(row)
+}
+
+// UpdateOrgCandidateQALimit sets the per-tenant candidate Q&A cap (B4/D3).
+// The orgs RLS policy scopes the UPDATE to app.org_id; a zero-row result means
+// the org is unknown to the caller's tenant — mapped to ErrNotFound. The orgs
+// table has no updated_at column (migration 004), so none is touched here.
+func (r *PostgresIAMRepo) UpdateOrgCandidateQALimit(ctx context.Context, orgID uuid.UUID, limit int) error {
+	tx, err := r.tx(ctx)
+	if err != nil {
+		return err
+	}
+	res := tx.WithContext(ctx).Exec(
+		`UPDATE orgs SET candidate_qa_limit = $2 WHERE id = $1`, orgID, limit)
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return iamdomain.ErrNotFound
+	}
+	return nil
 }
 
 type orgScanner interface {
@@ -81,8 +101,9 @@ func scanOrg(row orgScanner) (*iamdomain.Org, error) {
 		org      iamdomain.Org
 		weights  []byte
 		minScore *float64
+		qaLimit  *int
 	)
-	err := row.Scan(&org.ID, &org.Name, &org.Slug, &org.Plan, &weights, &minScore, &org.CreatedAt)
+	err := row.Scan(&org.ID, &org.Name, &org.Slug, &org.Plan, &weights, &minScore, &qaLimit, &org.CreatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, iamdomain.ErrNotFound
 	}
@@ -90,6 +111,7 @@ func scanOrg(row orgScanner) (*iamdomain.Org, error) {
 		return nil, err
 	}
 	org.MinScoreToProceed = minScore
+	org.CandidateQALimit = qaLimit
 	if len(weights) > 0 {
 		if err := json.Unmarshal(weights, &org.ScoringWeights); err != nil {
 			return nil, fmt.Errorf("decode scoring weights: %w", err)

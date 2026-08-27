@@ -11,6 +11,9 @@ type IAMRepository interface {
 	CreateOrg(ctx context.Context, org *Org) error
 	GetOrg(ctx context.Context, id uuid.UUID) (*Org, error)
 	GetOrgBySlug(ctx context.Context, slug string) (*Org, error)
+	// UpdateOrgCandidateQALimit sets the per-tenant candidate Q&A cap (B4/D3).
+	// ErrNotFound when the org does not exist (or crosses the tenant boundary).
+	UpdateOrgCandidateQALimit(ctx context.Context, orgID uuid.UUID, limit int) error
 	CreateUser(ctx context.Context, user *User) error
 	GetUserByID(ctx context.Context, id uuid.UUID) (*User, error)
 	GetUserByEmail(ctx context.Context, orgID uuid.UUID, email string) (*User, error)
