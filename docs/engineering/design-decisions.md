@@ -52,7 +52,7 @@ reasoning. Status markers: ✅ implemented as designed · ⚠️ deviated (reaso
 | §4.3 Mnemosyne bank per tenant | ✅ SQLite (dev) + **pgvector bank (prod)** + cosine recall | `memory/infrastructure/{native,postgres}` |
 | §4.3 fastembed bge-small | ⚠️ cybertron (pure Go) with `multi-qa-MiniLM-L6-cos-v1` default — bge-small is gated on HuggingFace; set `EMBED_MODEL_NAME` when accessible | `embedding/` |
 | §4.4 Asynq queue | ✅ task names single-sourced; workers for parse, extract, score, eval, email | `pkg/queue` + `internal/*/application` |
-| §4.5 golang-migrate embedded | ✅ migrations 001–032, `-migrate-only` mode | `pkg/db/` |
+| §4.5 golang-migrate embedded | ✅ migrations 001–033, `-migrate-only` mode | `pkg/db/` |
 | §4.6 Observability | ✅ JSON logs, health/ready probes (DB/Redis/MinIO), Prometheus metrics; ✅ Sentry backend wired (`pkg/observability`: DSN-gated init, fibersentry middleware, worker panic capture, request/org-id tags; no prod DSN yet); FE Sentry wired | `pkg/logger`, `pkg/metrics`, `pkg/observability`, `cmd/server` |
 | §4.7 CORS/CSWSH | ✅ origin allowlist (CORS + WS), `?ticket=` for browsers | `httpmw/cors.go`, `interview/api` |
 | §4.8 Rate limiting | ✅ Redis sliding window (auth/tenant/user), fail-open | `httpmw/ratelimit.go` |

@@ -77,9 +77,8 @@
 | `compliance/access_control_policy.md` · `data_retention_policy.md` · `incident_response_plan.md` · `soc2_readiness.md` | Controls & policies — describe reality | corrected 2026-08-24 |
 | `runbooks/deploy.md` · `rollback.md` · `restore-drill.md` · `llm-outage.md` | Operational procedures | current |
 
-> **Active execution mode:** no active plan file since 2026-08-27 — remediation is
-> ledger-driven (`docs/FINDINGS.md` is the single backlog; dates + owners on every
-> non-closed row). A new plan file is only created for a new multi-batch scope.
+> **Active execution mode:** plan file exists for the active multi-batch scope —
+> `docs/plans/active/feature-plan-2026-08-27-candidate-review-dynamic-form.md` (EXECUTED). Remediation is otherwise ledger-driven (`docs/FINDINGS.md` is the single backlog; dates + owners on every non-closed row). A new plan file is only created for a new multi-batch scope.
 
 ## Governance rules
 
