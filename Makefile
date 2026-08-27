@@ -54,7 +54,15 @@ COMPOSE := docker compose --env-file .env -f docker-compose.yml -f docker-compos
 COMPOSE_PROD := docker compose --env-file .env.prod -f docker-compose.yml -f docker-compose.prod.yml
 
 # Full pre-commit gate: backend lint/vet/build/unit tests + FE typecheck/build + FE unit tests + docs gates
-check:
+# Gate self-tests — verify the gates THEMSELVES still detect failures.
+# (A gate that silently passes is worse than no gate: it lies green.)
+.gate-selfcheck:
+	@printf "gate self-tests:\n"
+	@bash scripts/test-check-openapi-drift.sh && echo "  openapi-drift self-test OK (5/5)"
+	@bash scripts/test-check-docs-code-sync.sh && echo "  docs-code-sync self-test OK (6/6)"
+	@echo "gate self-tests passed"
+
+check: .gate-selfcheck
 	$(MAKE) -C backend check
 	cd frontend && npm run lint
 	cd frontend && npm run build
