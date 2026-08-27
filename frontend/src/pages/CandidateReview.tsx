@@ -1,67 +1,39 @@
-import { useState, useEffect } from "react"
 import { useParams, useNavigate } from "react-router-dom"
 import { useQuery, useMutation } from "@tanstack/react-query"
-import { CheckCircle, Warning, MagnifyingGlass, Robot, ArrowRight } from "@phosphor-icons/react"
+import { CheckCircle, Warning, MagnifyingGlass, Robot } from "@phosphor-icons/react"
 import { api } from "@/lib/api"
 import { Button } from "@/components/ui/button"
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card"
 import { toast } from "sonner"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Badge } from "@/components/ui/badge"
-
-interface ResumeData {
-  skills: string[]
-  experience_years: number
-  education: string
-  certifications: string[]
-  summary: string
-}
-
-interface CVDetail {
-  id: string
-  name: string
-  email: string
-  status: string
-  cv_structured: ResumeData
-}
+import { ResumeReviewForm } from "@/components/candidates/ResumeReviewForm"
+import type { CVDetail, CVDraftProfile } from "@/types/api"
 
 export function CandidateReviewPage() {
   const { id: token } = useParams<{ id: string }>()
   const navigate = useNavigate()
-  const [editedData, setEditedData] = useState<string>("")
-  
+
   const { data: cv, isLoading, error } = useQuery({
     queryKey: ["candidate-review", token],
     queryFn: async () => {
       const res = await api.get<CVDetail>(`/public/candidate-review/${token}`)
       return res
     },
-    retry: false
+    retry: false,
   })
 
-  useEffect(() => {
-    if (cv?.cv_structured) {
-      setEditedData(JSON.stringify(cv.cv_structured || {}, null, 2))
-    }
-  }, [cv])
-
   const confirmMutation = useMutation({
-    mutationFn: async () => {
-      let parsed: ResumeData
-      try {
-        parsed = JSON.parse(editedData) as ResumeData
-      } catch {
-        throw new Error("Invalid JSON format in the editor")
-      }
-      return api.post(`/public/candidate-review/${token}/confirm`, parsed)
+    mutationFn: async (draft: CVDraftProfile) => {
+      return api.post(`/public/candidate-review/${token}/confirm`, draft)
     },
     onSuccess: () => {
       toast.success("Profile confirmed and submitted for screening!")
-      navigate("/candidate/portal") // redirect to portal
+      navigate("/candidate/portal")
     },
     onError: (e) => {
       toast.error(e instanceof Error ? e.message : "Failed to confirm profile")
-    }
+    },
   })
 
   if (isLoading) {
@@ -90,6 +62,18 @@ export function CandidateReviewPage() {
     )
   }
 
+  const initial = {
+    ...(cv.cv_structured ?? {
+      skills: [],
+      experience_years: 0,
+      education: "",
+      certifications: [],
+      summary: "",
+    }),
+    name: cv.name,
+    email: cv.email,
+  }
+
   return (
     <div className="max-w-4xl mx-auto py-12 px-6 animate-in fade-in duration-500 space-y-8">
       <div className="space-y-3">
@@ -109,19 +93,16 @@ export function CandidateReviewPage() {
           <CardTitle className="text-lg font-display flex items-center justify-between">
             <span className="flex items-center gap-2">
               <Robot className="h-5 w-5 text-primary" weight="fill" />
-              Extracted Structured Data
+              Your Profile Details
             </span>
           </CardTitle>
         </CardHeader>
-        <CardContent className="p-0">
-          <div className="bg-card">
-            <textarea
-              className="w-full h-[350px] p-4 bg-card text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary/50 resize-y border-0"
-              value={editedData}
-              onChange={(e) => setEditedData(e.target.value)}
-              spellCheck={false}
-            />
-          </div>
+        <CardContent className="p-6">
+          <ResumeReviewForm
+            initial={initial}
+            onSubmit={(draft) => confirmMutation.mutate(draft)}
+            disabled={confirmMutation.isPending}
+          />
         </CardContent>
       </Card>
 
@@ -130,27 +111,9 @@ export function CandidateReviewPage() {
         <div className="space-y-1">
           <h4 className="text-sm font-bold text-foreground">Ready to Submit?</h4>
           <p className="text-xs text-muted-foreground leading-relaxed">
-            By confirming, this structured data will be used by our scoring engine to evaluate your application against the job requirements. Ensure the details accurately reflect your experience.
+            By confirming, this profile will be used by our scoring engine to evaluate your application against the job requirements. Ensure the details accurately reflect your experience.
           </p>
         </div>
-      </div>
-
-      <div className="flex justify-end gap-3 pt-4 border-t border-border/50">
-        <Button
-          variant="gradient"
-          size="lg"
-          className="shadow-md shadow-primary/20 w-full sm:w-auto"
-          onClick={() => confirmMutation.mutate()}
-          disabled={confirmMutation.isPending}
-        >
-          {confirmMutation.isPending ? (
-            "Submitting..."
-          ) : (
-            <>
-              Confirm & Continue to Screening <ArrowRight className="ml-2 h-4 w-4" />
-            </>
-          )}
-        </Button>
       </div>
     </div>
   )

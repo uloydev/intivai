@@ -99,10 +99,23 @@ export interface CVListItem {
   created_at: string
 }
 
+export interface ResumeData {
+  skills: string[]
+  experience_years: number
+  education: string
+  certifications: string[]
+  summary: string
+}
+
+export interface CVDraftProfile extends ResumeData {
+  name: string
+  email: string
+}
+
 export interface CVDetail extends CVListItem {
   cv_path: string
   cv_raw_text?: string
-  cv_structured?: unknown
+  cv_structured?: ResumeData
 }
 
 export interface BulkUploadResponse {
