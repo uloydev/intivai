@@ -68,10 +68,10 @@ func (r *PostgresCandidateRepo) GetByReviewToken(ctx context.Context, token stri
 // ConfirmReview — atomically confirm the extracted profile (SECURITY DEFINER);
 // returns the candidate's org + id, or uuid.Nil when the token is invalid or
 // the candidate is no longer pending review.
-func (r *PostgresCandidateRepo) ConfirmReview(ctx context.Context, token string, structured []byte) (uuid.UUID, uuid.UUID, error) {
+func (r *PostgresCandidateRepo) ConfirmReview(ctx context.Context, token string, structured []byte, name, email string) (uuid.UUID, uuid.UUID, error) {
 	var orgID, candID uuid.UUID
 	row := r.pool.WithContext(ctx).Raw(
-		`SELECT org_id, candidate_id FROM candidate_confirm_review($1, $2)`, token, string(structured)).Row()
+		`SELECT org_id, candidate_id FROM candidate_confirm_review($1, $2, $3, $4)`, token, string(structured), name, email).Row()
 	err := row.Scan(&orgID, &candID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return uuid.Nil, uuid.Nil, nil

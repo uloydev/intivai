@@ -14,6 +14,19 @@ import (
 	"github.com/intivai/backend/internal/shared/httpapi"
 )
 
+// confirmProfileRequest — public confirm body (D7): name/email are candidate
+// identity (persisted on the candidates row), the rest are the 5 resume
+// fields stored inside cv_structured.
+type confirmProfileRequest struct {
+	Name            string   `json:"name"`
+	Email           string   `json:"email"`
+	Skills          []string `json:"skills"`
+	ExperienceYears float64  `json:"experience_years"`
+	Education       string   `json:"education"`
+	Certifications  []string `json:"certifications"`
+	Summary         string   `json:"summary"`
+}
+
 type CVHandler struct {
 	svc         *application.CVService
 	maxUploadMB int
@@ -137,17 +150,23 @@ func (h *CVHandler) ConfirmProfile(c *fiber.Ctx) error {
 		return httpapi.Error(c, sharederr.NewDomainError("BAD_REQUEST", "token is required"))
 	}
 
-	var req scrdomain.ResumeData
+	var req confirmProfileRequest
 	if err := c.BodyParser(&req); err != nil {
 		return httpapi.Error(c, sharederr.NewDomainError("BAD_REQUEST", "invalid json payload"))
 	}
 
-	structuredData, err := json.Marshal(req)
+	structuredData, err := json.Marshal(scrdomain.ResumeData{
+		Skills:          req.Skills,
+		ExperienceYears: req.ExperienceYears,
+		Education:       req.Education,
+		Certifications:  req.Certifications,
+		Summary:         req.Summary,
+	})
 	if err != nil {
 		return httpapi.Error(c, sharederr.NewDomainError("BAD_REQUEST", "failed to serialize json payload"))
 	}
 
-	if err := h.svc.ConfirmProfile(c.UserContext(), token, structuredData); err != nil {
+	if err := h.svc.ConfirmProfile(c.UserContext(), token, req.Name, req.Email, structuredData); err != nil {
 		return httpapi.Error(c, err)
 	}
 

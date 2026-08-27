@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/mail"
 	"strings"
 
 	"github.com/google/uuid"
@@ -21,6 +22,21 @@ import (
 )
 
 const TaskParseCV = "parse_cv"
+
+// Profile caps (D3) — the public confirm endpoint is token-addressed and
+// unauthenticated, so limits are defense-in-depth against storage abuse.
+// Single source of truth for the backend; the FE mirrors them (D3).
+const (
+	MaxProfileNameLen  = 200
+	MaxProfileEmailLen = 254
+	MaxProfileSkills   = 50
+	MaxSkillLen        = 100
+	MaxProfileCerts    = 25
+	MaxCertLen         = 100
+	MaxEducationLen    = 200
+	MaxSummaryLen      = 2000
+	MaxExperienceYears = 50
+)
 
 // ObjectStore — MinIO storage as an interface (stubbable in tests).
 type ObjectStore interface {
@@ -299,8 +315,18 @@ func (s *CVService) ReviewProfile(ctx context.Context, token string) (*CVDetail,
 	return toDetail(candidate), nil
 }
 
-func (s *CVService) ConfirmProfile(ctx context.Context, token string, structuredData []byte) error {
-	orgID, candID, err := s.repo.ConfirmReview(ctx, token, structuredData)
+// ConfirmProfile validates the candidate-verified profile (caps D3) and
+// atomically confirms it: name/email persist on the candidate row (identity),
+// the 5 resume fields land inside cv_structured, token is cleared and status
+// becomes 'extracted'. Then fan-out score_cv per application.
+func (s *CVService) ConfirmProfile(ctx context.Context, token, name, email string, structuredData []byte) error {
+	name = strings.TrimSpace(name)
+	email = strings.TrimSpace(email)
+	if err := validateProfile(name, email, structuredData); err != nil {
+		return err
+	}
+
+	orgID, candID, err := s.repo.ConfirmReview(ctx, token, structuredData, name, email)
 	if err != nil {
 		return err
 	}
@@ -332,6 +358,54 @@ func (s *CVService) ConfirmProfile(ctx context.Context, token string, structured
 		}, asynq.MaxRetry(5)); err != nil {
 			log.Warn().Err(err).Str("application_id", appID).Msg("enqueue score_cv failed")
 		}
+	}
+	return nil
+}
+
+func validateProfile(name, email string, structuredData []byte) error {
+	if name == "" {
+		return errors.NewDomainError("CANDIDATE_PROFILE_INVALID", "name is required")
+	}
+	if len(name) > MaxProfileNameLen {
+		return errors.NewDomainError("CANDIDATE_PROFILE_INVALID", fmt.Sprintf("name must be at most %d characters", MaxProfileNameLen))
+	}
+	if email != "" {
+		if len(email) > MaxProfileEmailLen {
+			return errors.NewDomainError("CANDIDATE_PROFILE_INVALID", fmt.Sprintf("email must be at most %d characters", MaxProfileEmailLen))
+		}
+		if _, err := mail.ParseAddress(email); err != nil {
+			return errors.NewDomainError("CANDIDATE_PROFILE_INVALID", "email is not a valid address")
+		}
+	}
+
+	var r scrdomain.ResumeData
+	if err := json.Unmarshal(structuredData, &r); err != nil {
+		return errors.NewDomainError("CANDIDATE_PROFILE_INVALID", "profile data is not valid json")
+	}
+	if len(r.Skills) > MaxProfileSkills {
+		return errors.NewDomainError("CANDIDATE_PROFILE_INVALID", fmt.Sprintf("at most %d skills are allowed", MaxProfileSkills))
+	}
+	for _, skill := range r.Skills {
+		if len(skill) > MaxSkillLen {
+			return errors.NewDomainError("CANDIDATE_PROFILE_INVALID", fmt.Sprintf("each skill must be at most %d characters", MaxSkillLen))
+		}
+	}
+	if len(r.Certifications) > MaxProfileCerts {
+		return errors.NewDomainError("CANDIDATE_PROFILE_INVALID", fmt.Sprintf("at most %d certifications are allowed", MaxProfileCerts))
+	}
+	for _, cert := range r.Certifications {
+		if len(cert) > MaxCertLen {
+			return errors.NewDomainError("CANDIDATE_PROFILE_INVALID", fmt.Sprintf("each certification must be at most %d characters", MaxCertLen))
+		}
+	}
+	if len(r.Education) > MaxEducationLen {
+		return errors.NewDomainError("CANDIDATE_PROFILE_INVALID", fmt.Sprintf("education must be at most %d characters", MaxEducationLen))
+	}
+	if len(r.Summary) > MaxSummaryLen {
+		return errors.NewDomainError("CANDIDATE_PROFILE_INVALID", fmt.Sprintf("summary must be at most %d characters", MaxSummaryLen))
+	}
+	if r.ExperienceYears < 0 || r.ExperienceYears > MaxExperienceYears {
+		return errors.NewDomainError("CANDIDATE_PROFILE_INVALID", fmt.Sprintf("experience_years must be between 0 and %d", MaxExperienceYears))
 	}
 	return nil
 }

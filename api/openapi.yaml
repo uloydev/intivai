@@ -1254,7 +1254,39 @@ paths:
           application/json:
             schema:
               type: object
-              description: ResumeData fields (name, email, experience, skills, etc.)
+              required: [name, skills, experience_years, education, certifications, summary]
+              properties:
+                name:
+                  type: string
+                  maxLength: 200
+                  description: Candidate-edited full name (persisted on the candidate row)
+                email:
+                  type: string
+                  format: email
+                  maxLength: 254
+                  description: Optional candidate email (bulk-uploaded candidates may lack one)
+                skills:
+                  type: array
+                  maxItems: 50
+                  items:
+                    type: string
+                    maxLength: 100
+                experience_years:
+                  type: number
+                  minimum: 0
+                  maximum: 50
+                education:
+                  type: string
+                  maxLength: 200
+                certifications:
+                  type: array
+                  maxItems: 25
+                  items:
+                    type: string
+                    maxLength: 100
+                summary:
+                  type: string
+                  maxLength: 2000
       responses:
         "200":
           description: Profile confirmed

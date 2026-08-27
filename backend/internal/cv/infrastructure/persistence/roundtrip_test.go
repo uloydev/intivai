@@ -92,6 +92,84 @@ func TestGetByReviewTokenPublicLookup(t *testing.T) {
 	}
 }
 
+// D1: confirm persists candidate-edited name/email alongside the structured
+// profile atomically (single UPDATE in the SECURITY DEFINER function), clears
+// the token, and is a no-op (uuid.Nil) on replay. Runs OUTSIDE any tenant tx
+// — the confirm endpoint is public.
+func TestConfirmReviewUpdatesNameEmail(t *testing.T) {
+	url := os.Getenv("TEST_DATABASE_URL")
+	if url == "" {
+		t.Skip("TEST_DATABASE_URL not set")
+	}
+	pool, err := db.NewPool(context.Background(), url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	orgID := uuid.NewString()
+	seedOrg(t, pool, orgID, "crm"+orgID[:8])
+
+	repo := NewPostgresCandidateRepo(pool)
+	token := uuid.NewString()
+	c := &cvdomain.Candidate{
+		Entity: shareddomain.Entity{ID: uuid.New(), CreatedAt: time.Now().UTC()},
+		OrgID:  uuid.MustParse(orgID), Name: "Review", Email: "r@x.io",
+		Status:    cvdomain.StatusPendingReview,
+		CVRawText: "raw cv", CVStructured: json.RawMessage(`{"skills":["Go"]}`),
+		ReviewToken: &token,
+	}
+	if err := db.RunInTx(ctx, pool, orgID, func(tctx context.Context) error {
+		if err := repo.Create(tctx, c); err != nil {
+			return err
+		}
+		return repo.Update(tctx, c)
+	}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	structured := []byte(`{"skills":["Go","SQL"],"experience_years":5,"education":"MSc","certifications":["AWS"],"summary":"backend"}`)
+	orgIDGot, candIDGot, err := repo.ConfirmReview(ctx, token, structured, "New Name", "new@x.io")
+	if err != nil {
+		t.Fatalf("confirm: %v", err)
+	}
+	if orgIDGot != c.OrgID || candIDGot != c.ID {
+		t.Fatalf("confirm returned %s/%s, want %s/%s", orgIDGot, candIDGot, c.OrgID, c.ID)
+	}
+
+	if _, err := repo.GetByReviewToken(ctx, token); err != cvdomain.ErrNotFound {
+		t.Fatalf("token not cleared: want ErrNotFound, got %v", err)
+	}
+
+	var got *cvdomain.Candidate
+	err = db.RunInTx(ctx, pool, orgID, func(tctx context.Context) error {
+		got, err = repo.GetByID(tctx, c.ID)
+		return err
+	})
+	if err != nil {
+		t.Fatalf("get after confirm: %v", err)
+	}
+	if got.Name != "New Name" || got.Email != "new@x.io" {
+		t.Fatalf("identity not updated: %+v", got)
+	}
+	if got.Status != cvdomain.StatusExtracted {
+		t.Fatalf("status = %q, want extracted", got.Status)
+	}
+	var rd struct {
+		Skills []string `json:"skills"`
+	}
+	if err := json.Unmarshal(got.CVStructured, &rd); err != nil || len(rd.Skills) != 2 || rd.Skills[0] != "Go" {
+		t.Fatalf("structured not persisted: %s (%v)", got.CVStructured, err)
+	}
+
+	org2, cand2, err := repo.ConfirmReview(ctx, token, structured, "Nope", "n@x.io")
+	if err != nil {
+		t.Fatalf("replay confirm must not error: %v", err)
+	}
+	if org2 != uuid.Nil || cand2 != uuid.Nil {
+		t.Fatalf("replay confirm returned %s/%s, want nil/nil", org2, cand2)
+	}
+}
+
 // Round-trip: candidate with all-NULL optional columns, then structured
 // update, list, delete. Guards NULL scans (cv_ocr_method, raw text, error).
 func TestCandidateRoundTrip(t *testing.T) {

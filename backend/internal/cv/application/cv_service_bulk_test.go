@@ -51,7 +51,7 @@ func (r *bulkRepoFixture) Delete(ctx context.Context, id uuid.UUID) error {
 func (r *bulkRepoFixture) ListByIDs(ctx context.Context, orgID uuid.UUID, ids []uuid.UUID) (map[uuid.UUID]*domain.Candidate, error) {
 	return map[uuid.UUID]*domain.Candidate{}, nil
 }
-func (r *bulkRepoFixture) ConfirmReview(ctx context.Context, token string, structured []byte) (uuid.UUID, uuid.UUID, error) {
+func (r *bulkRepoFixture) ConfirmReview(ctx context.Context, token string, structured []byte, name, email string) (uuid.UUID, uuid.UUID, error) {
 	return uuid.Nil, uuid.Nil, domain.ErrNotFound
 }
 func (r *bulkRepoFixture) GetByID(ctx context.Context, id uuid.UUID) (*domain.Candidate, error) {
