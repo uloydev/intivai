@@ -64,6 +64,14 @@ type Config struct {
 	Sentry struct {
 		DSN string
 	}
+	// Telemetry — OpenTelemetry tracing (docs/plans/active/otel-tracing-plan-2026-08-26.md).
+	// Disabled by default; flipping OTEL_ENABLE=false at runtime is the kill switch.
+	Telemetry struct {
+		Enable       bool
+		ServiceName  string
+		OTLPEndpoint string
+		SampleRatio  float64
+	}
 	Cv struct {
 		MaxUploadMB int
 	}
@@ -149,6 +157,16 @@ func Load() (*Config, error) {
 	cfg.Embeddings.Enabled = v.GetBool("EMBEDDINGS_ENABLED")
 	cfg.Embeddings.ModelDir = getString("EMBED_MODEL_DIR", "./models")
 	cfg.Sentry.DSN = v.GetString("SENTRY_DSN")
+
+	// Telemetry — ratio default 1.0 (dev-friendly); prod compose pins 0.1.
+	cfg.Telemetry.Enable = v.GetBool("OTEL_ENABLE")
+	cfg.Telemetry.ServiceName = getString("OTEL_SERVICE_NAME", "intivai-server")
+	cfg.Telemetry.OTLPEndpoint = getString("OTEL_EXPORTER_OTLP_ENDPOINT", "http://jaeger:4318")
+	if r := v.GetFloat64("OTEL_TRACES_SAMPLER_ARG"); r > 0 {
+		cfg.Telemetry.SampleRatio = r
+	} else if cfg.Telemetry.Enable {
+		cfg.Telemetry.SampleRatio = 1
+	}
 
 	cfg.Cv.MaxUploadMB = getInt("CV_MAX_UPLOAD_MB", 10)
 	if cfg.Cv.MaxUploadMB < 0 {

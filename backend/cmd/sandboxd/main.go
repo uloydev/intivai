@@ -10,10 +10,12 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 
 	"github.com/intivai/backend/internal/sandbox/proto"
 	"github.com/intivai/backend/internal/sandbox/sidecar"
+	"github.com/intivai/backend/pkg/telemetry"
 	"github.com/rs/zerolog/log"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -22,6 +24,20 @@ import (
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	// Tracing (otel-tracing-plan-2026-08-26): spans arrive with Batch F
+	// (grpc interceptors); bootstrap now so the service name exists.
+	shutdownTracing, err := telemetry.Init(ctx, telemetry.Config{
+		Enable:       os.Getenv("INTIVAI_OTEL_ENABLE") == "true",
+		ServiceName:  "intivai-sandboxd",
+		Env:          envOr("INTIVAI_ENV", "dev"),
+		OTLPEndpoint: envOr("INTIVAI_OTEL_EXPORTER_OTLP_ENDPOINT", "http://jaeger:4318"),
+		SampleRatio:  sampleRatio(),
+	})
+	if err != nil {
+		log.Fatal().Err(err).Msg("telemetry")
+	}
+	defer func() { _ = shutdownTracing(context.Background()) }()
 
 	addr := envOr("SANDBOXD_ADDR", ":8443")
 	caFile := os.Getenv("SANDBOXD_CA")
@@ -83,4 +99,12 @@ func envOr(key, def string) string {
 		return v
 	}
 	return def
+}
+
+func sampleRatio() float64 {
+	r, err := strconv.ParseFloat(envOr("INTIVAI_OTEL_TRACES_SAMPLER_ARG", "1"), 64)
+	if err != nil || r <= 0 || r > 1 {
+		return 1
+	}
+	return r
 }

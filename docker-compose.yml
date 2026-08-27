@@ -102,6 +102,12 @@ services:
       INTIVAI_SANDBOX_CA_CERT: /sandbox-certs/ca.pem
       INTIVAI_SANDBOX_CLIENT_CERT: /sandbox-certs/client.pem
       INTIVAI_SANDBOX_CLIENT_KEY: /sandbox-certs/client-key.pem
+      # Tracing (otel-tracing-plan-2026-08-26): off by default everywhere;
+      # dev overlay flips on. Fail-soft — collector down never blocks the API.
+      INTIVAI_OTEL_ENABLE: ${INTIVAI_OTEL_ENABLE:-false}
+      INTIVAI_OTEL_SERVICE_NAME: intivai-server
+      INTIVAI_OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
+      INTIVAI_OTEL_TRACES_SAMPLER_ARG: ${INTIVAI_OTEL_TRACES_SAMPLER_ARG:-1}
     ports:
       - "8080:8080"
     volumes:
@@ -132,6 +138,18 @@ services:
     ports:
       - "1025:1025"
       - "8025:8025"
+
+  # Tracing backend (otel-tracing-plan-2026-08-26, D1/D2): all-in-one,
+  # in-memory capped at 10k traces. No host ports here — dev overlay exposes
+  # the UI; prod stays internal-network only. App never depends_on jaeger
+  # (exporter fails soft).
+  jaeger:
+    image: jaegertracing/jaeger@sha256:46a886260e04002d8f45e213fc39063fa11a50446048fdaa64786fc0840cb9f8
+    command:
+      - --set=extensions.jaeger_storage.backends.some_storage.memory.max_traces=10000
+    environment:
+      JAEGER_LISTEN_HOST: 0.0.0.0
+    mem_limit: 512m
 
   whisper:
     build:

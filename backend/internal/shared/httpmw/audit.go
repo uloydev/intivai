@@ -6,9 +6,12 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // RequestID assigns a request id and exposes it via the X-Request-Id header.
+// The scoped logger also carries trace_id when the tracing middleware ran
+// first — one grep from a log line to its waterfall (plan D6).
 func RequestID(log zerolog.Logger) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		id := c.Get("X-Request-Id")
@@ -17,7 +20,11 @@ func RequestID(log zerolog.Logger) fiber.Handler {
 		}
 		c.Set("X-Request-Id", id)
 		c.Locals("request_id", id)
-		logger := log.With().Str("request_id", id).Logger()
+		builder := log.With().Str("request_id", id)
+		if sc := trace.SpanContextFromContext(c.UserContext()); sc.HasTraceID() {
+			builder = builder.Str("trace_id", sc.TraceID().String())
+		}
+		logger := builder.Logger()
 		c.Locals("logger", logger)
 		return c.Next()
 	}

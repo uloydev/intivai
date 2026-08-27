@@ -28,12 +28,15 @@ func (c *Client) Close() error {
 	return c.client.Close()
 }
 
-// Enqueue adds a task with default retry (3) and timeout (5m).
+// Enqueue adds a task with default retry (3) and timeout (5m). The caller's
+// span context rides in the task header so worker deliveries link back to
+// the producing trace (plan batch D).
 func (c *Client) Enqueue(ctx context.Context, jobType string, payload any, opts ...asynq.Option) (*asynq.TaskInfo, error) {
-	task := asynq.NewTask(jobType, mustMarshal(payload), opts...)
+	task := asynq.NewTaskWithHeaders(jobType, mustMarshal(payload), map[string]string{}, opts...)
 	if task == nil {
 		return nil, fmt.Errorf("new task: nil task for %s", jobType)
 	}
+	injectTraceContext(ctx, task)
 	defaults := []asynq.Option{asynq.MaxRetry(3), asynq.Timeout(5 * time.Minute)}
 	return c.client.EnqueueContext(ctx, task, append(defaults, opts...)...)
 }

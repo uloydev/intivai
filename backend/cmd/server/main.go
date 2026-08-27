@@ -65,7 +65,9 @@ import (
 	"github.com/intivai/backend/pkg/observability"
 	"github.com/intivai/backend/pkg/queue"
 	"github.com/intivai/backend/pkg/storage"
+	"github.com/intivai/backend/pkg/telemetry"
 	"github.com/rs/zerolog"
+	"github.com/uptrace/opentelemetry-go-extra/otelgorm"
 )
 
 // version is overridden at build time via -ldflags "-X main.version=...".
@@ -139,11 +141,37 @@ func main() {
 		logger.Fatal().Msg("JWT_SECRET is required")
 	}
 
+	// A8: empty/malformed PublicURL silently generates dead invite/review
+	// links. In prod, fail fast; in dev, keep the local default (5173 via
+	// config fallback) so local testing is unaffected.
+	if cfg.App.Env == "prod" {
+		pub := cfg.App.PublicURL
+		if pub == "" || !strings.HasPrefix(pub, "http://") && !strings.HasPrefix(pub, "https://") {
+			logger.Fatal().Msg("INTIVAI_APP_PUBLIC_URL must be an absolute http(s) URL in prod")
+		}
+	}
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	// --- Telemetry (tracing) — init before any instrumented component boots;
+	// disabled by default, OTEL_ENABLE=false keeps everything noop.
+	shutdownTracing, err := telemetry.Init(ctx, telemetry.Config{
+		Enable:       cfg.Telemetry.Enable,
+		ServiceName:  cfg.Telemetry.ServiceName,
+		Env:          cfg.App.Env,
+		OTLPEndpoint: cfg.Telemetry.OTLPEndpoint,
+		SampleRatio:  cfg.Telemetry.SampleRatio,
+	})
+	if err != nil {
+		logger.Fatal().Err(err).Msg("telemetry")
+	}
+	defer func() { _ = shutdownTracing(context.Background()) }()
+
 	// --- Infrastructure ---
-	pool, err := db.NewPool(ctx, cfg.Database.URL)
+	// otelgorm emits one db span per statement (plan batch C) — noop when
+	// tracing is disabled.
+	pool, err := db.NewPool(ctx, cfg.Database.URL, db.WithPlugin(otelgorm.NewPlugin()))
 	if err != nil {
 		logger.Fatal().Err(err).Msg("database")
 	}
@@ -205,11 +233,15 @@ func main() {
 	authenticate := application.NewAuthenticate(iamRepo, hasher, tokens, time.Duration(cfg.Auth.JWTExpiryHrs)*time.Hour)
 	createUser := application.NewCreateUser(iamRepo, hasher)
 	authHandler := api.NewAuthHandler(registerOrg, authenticate, createUser)
+	orgSettingsHandler := api.NewOrgSettingsHandler(iamRepo)
 
 	// --- M2 contexts: job, cv, screening, company context ---
 	jobRepo := jobrepo.NewPostgresJobRepo(pool)
-	jobService := jobapp.NewJobService(jobRepo, queueClient)
+	jobCandRepo := jobrepo.NewPostgresCandidateContextRepo(pool)
+	jobService := jobapp.NewJobService(jobRepo, queueClient).WithLogger(logger)
 	jobHandler := jobapi.NewJobHandler(jobService)
+	candidateContextHandler := jobapi.NewCandidateContextHandler(
+		jobapp.NewCandidateContextService(pool, jobCandRepo, jobRepo, llmClient))
 
 	appRepo := scrrepo.NewPostgresApplicationRepo(pool)
 
@@ -266,7 +298,7 @@ func main() {
 			logger.Error().Err(err).Str("org_id", orgID.String()).Str("event", string(event)).Msg("webhook dispatch failed")
 		}
 	})
-	interviewService := ivapp.NewInterviewService(pool, ivRepo, tokenRepo, questionBank, appRepo, candidateRepo, jobRepo, contextRepo, store, tokens, ivdomain.SystemClock(), interviewEnqueuer{client: queueClient, publicURL: cfg.App.PublicURL}, logger)
+	interviewService := ivapp.NewInterviewService(pool, ivRepo, tokenRepo, questionBank, appRepo, candidateRepo, jobRepo, jobCandRepo, contextRepo, store, tokens, ivdomain.SystemClock(), interviewEnqueuer{client: queueClient, publicURL: cfg.App.PublicURL}, orgSettings{repo: iamRepo}, logger)
 	sessionRegistry := ivapi.NewRedisSessionRegistry(rdb, 35*time.Minute)
 	chatHandler := ivapi.NewChatHandler(interviewService, llmClient, tokens, logger, sessionRegistry)
 	evalService := evalapp.NewEvaluationService(pool, ivRepo, appRepo, candidateRepo, jobRepo, store)
@@ -315,7 +347,14 @@ func main() {
 	scoreWorker := scrapp.NewScoreWorker(pool, appRepo, candidateRepo, jobRepo, orgSettings{repo: iamRepo}, embedder, logger)
 	indexWorker := ctxapp.NewIndexWorker(pool, contextRepo, store, memoryFactory, logger)
 	rubricWorker := jobapp.NewRubricWorker(pool, jobRepo, llmClient, logger)
+	// Finding I1: the question worker was constructed nowhere while
+	// Create/Update kept enqueueing generate_question_set tasks — they piled
+	// up unconsumed. Same dependency set as the rubric worker.
+	questionWorker := jobapp.NewQuestionWorker(pool, jobRepo, llmClient, logger)
 	workerMux := asynq.NewServeMux()
+	// Tracing first: delivery spans wrap panic recovery + handlers, and link
+	// back to the producing HTTP trace via task headers (plan batch D).
+	workerMux.Use(queue.TracingMiddleware())
 	workerMux.Use(func(h asynq.Handler) asynq.Handler {
 		return asynq.HandlerFunc(func(ctx context.Context, task *asynq.Task) (err error) {
 			defer func() {
@@ -334,6 +373,7 @@ func main() {
 	scoreWorker.Register(workerMux)
 	indexWorker.Register(workerMux)
 	rubricWorker.Register(workerMux)
+	questionWorker.Register(workerMux)
 	evalWorker.Register(workerMux)
 	emailWorker.Register(workerMux)
 	webhookWorker.Register(workerMux)
@@ -347,6 +387,9 @@ func main() {
 
 	prometheus := fiberprometheus.New("intivai")
 	prometheus.RegisterAt(app, "/metrics")
+	// Tracing first: every downstream span nests inside the server span and
+	// RequestID picks up trace_id for log correlation (plan B batch).
+	app.Use(httpmw.Tracing(httpmw.TracingConfig{}))
 	app.Use(prometheus.Middleware)
 
 	// Sentry wraps recovery: it captures panics and repanics so the standard
@@ -430,7 +473,7 @@ func main() {
 	v1.Post("/candidate/interviews/:id/consent", authRateLimit, chatHandler.Consent)
 	v1.Post("/candidate/interviews/:id/ticket", authRateLimit, chatHandler.Ticket)
 	v1.Post("/candidate/interviews/:id/request-human", authRateLimit, chatHandler.RequestHuman)
-	v1.Post("/candidate/interviews/:id/telemetry", userRateLimit, chatHandler.Telemetry)
+	v1.Post("/candidate/interviews/:id/telemetry", httpmw.RateLimit(rdb, cfg.RateLimit.AuthPerMin, time.Minute, httpmw.IPKey("telemetry:")), chatHandler.Telemetry)
 	v1.Get("/candidate/interviews/:id/chat", chatHandler.RequireTicket, chatHandler.Chat(cfg.App.AllowedOrigins))
 	chatHandler.RegisterVoiceRoutes(v1, cfg.App.AllowedOrigins)
 
@@ -444,6 +487,7 @@ func main() {
 	authed.Get("/jobs", jobHandler.List)
 	authed.Get("/jobs/:id", jobHandler.Get)
 	authed.Patch("/jobs/:id", jobHandler.Update)
+	candidateContextHandler.RegisterRoutes(authed)
 
 	authed.Post("/cvs", cvHandler.Upload)
 	authed.Post("/cvs/bulk", cvHandler.BulkUpload)
@@ -462,6 +506,7 @@ func main() {
 	authed.Delete("/orgs/:orgId/contexts/:contextID", contextHandler.Delete)
 	authed.Put("/orgs/:orgId/prompt", contextHandler.SetPrompt)
 	authed.Get("/orgs/:orgId/prompt", contextHandler.GetPrompt)
+	authed.Put("/orgs/:orgId/settings/candidate-qa-limit", orgSettingsHandler.UpdateCandidateQALimit)
 
 	authed.Post("/interviews", chatHandler.Create)
 	authed.Get("/interviews", evalHandler.ListInterviews)
@@ -534,4 +579,16 @@ func (a orgSettings) ReadOrgSettings(ctx context.Context, orgID uuid.UUID) (map[
 		minScore = *org.MinScoreToProceed
 	}
 	return weights, minScore, nil
+}
+
+// CandidateQALimit adapts the IAM org repo to interview.OrgQALimitReader (D3/B4).
+func (a orgSettings) CandidateQALimit(ctx context.Context, orgID uuid.UUID) (int, error) {
+	org, err := a.repo.GetOrg(ctx, orgID)
+	if err != nil {
+		return 0, err
+	}
+	if org.CandidateQALimit == nil {
+		return 0, nil // ResolveQALimit falls back to DefaultQALimit
+	}
+	return *org.CandidateQALimit, nil
 }

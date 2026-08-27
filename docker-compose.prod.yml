@@ -49,6 +49,11 @@ services:
       INTIVAI_LLM_MAX_RETRIES: ${INTIVAI_LLM_MAX_RETRIES:-3}
       INTIVAI_ALLOWED_ORIGINS: ${INTIVAI_ALLOWED_ORIGINS:?set in .env.prod}
       INTIVAI_APP_PUBLIC_URL: ${INTIVAI_APP_PUBLIC_URL:?set in .env.prod}
+      # OTel (J17): EXPLICIT prod posture — disabled by default (emergency
+      # kill switch OTEL_ENABLE=false); if enabled, sampling defaults to 0.1
+      # (never inherit the development 1.0 ratio).
+      INTIVAI_OTEL_ENABLE: ${INTIVAI_OTEL_ENABLE:-false}
+      INTIVAI_OTEL_TRACES_SAMPLER_ARG: ${INTIVAI_OTEL_TRACES_SAMPLER_ARG:-0.1}
       INTIVAI_MEMORY_DRIVER: ${INTIVAI_MEMORY_DRIVER:-postgres}
       INTIVAI_MEMORY_DATA_DIR: ${INTIVAI_MEMORY_DATA_DIR:-/data}
       INTIVAI_EMBEDDINGS_ENABLED: ${INTIVAI_EMBEDDINGS_ENABLED:-false}
