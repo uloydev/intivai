@@ -63,7 +63,8 @@ func TestContextVersionPinnedAtCreation(t *testing.T) {
 	svc := NewInterviewService(pool,
 		ivrepo.NewPostgresInterviewRepo(pool), ivrepo.NewPostgresTokenRepo(pool), ivrepo.NewPostgresQuestionBank(pool),
 		scrrepo.NewPostgresApplicationRepo(pool), cvrepo.NewPostgresCandidateRepo(pool), jobrepo.NewPostgresJobRepo(pool),
-		contextRepo, minio, auth.NewJWTProvider("test-secret"), ivdomain.SystemClock(), nil, zerolog.Nop())
+		jobrepo.NewPostgresCandidateContextRepo(pool),
+		contextRepo, minio, auth.NewJWTProvider("test-secret"), ivdomain.SystemClock(), nil, nil, zerolog.Nop())
 	actor := iamActor(orgID, "admin")
 
 	// Version 1 context → interview 1 pins version 1.
