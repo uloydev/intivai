@@ -24,6 +24,74 @@ func seedOrg(t *testing.T, pool *gorm.DB, orgID, slug string) {
 	}
 }
 
+// Public review flow: token lookup must work with NO tenant transaction
+// (SECURITY DEFINER function) and decode every column incl. cv_format.
+// Regression: candidate_by_review_token did not expose cv_format while the
+// repo selected COALESCE(cv_format,'pdf') → plan-time 42703 → API 500.
+func TestGetByReviewTokenPublicLookup(t *testing.T) {
+	url := os.Getenv("TEST_DATABASE_URL")
+	if url == "" {
+		t.Skip("TEST_DATABASE_URL not set")
+	}
+	pool, err := db.NewPool(context.Background(), url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	orgID := uuid.NewString()
+	seedOrg(t, pool, orgID, "rt"+orgID[:8])
+
+	repo := NewPostgresCandidateRepo(pool)
+	token := uuid.NewString()
+	c := &cvdomain.Candidate{
+		Entity: shareddomain.Entity{ID: uuid.New(), CreatedAt: time.Now().UTC()},
+		OrgID:  uuid.MustParse(orgID), Name: "Review", Email: "r@x.io",
+		Status:    cvdomain.StatusPendingReview,
+		CVRawText: "raw cv", CVStructured: json.RawMessage(`{"skills":["Go"]}`),
+		ReviewToken: &token,
+	}
+	if err := db.RunInTx(ctx, pool, orgID, func(tctx context.Context) error {
+		if err := repo.Create(tctx, c); err != nil {
+			return err
+		}
+		// Create persists identity/status only; payload lands via Update
+		// (mirrors the worker pipeline).
+		return repo.Update(tctx, c)
+	}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	got, err := repo.GetByReviewToken(ctx, token)
+	if err != nil {
+		t.Fatalf("get by review token (public, no tenant tx): %v", err)
+	}
+	if got.ID != c.ID || got.OrgID != c.OrgID {
+		t.Fatalf("identity mismatch: got %+v", got)
+	}
+	if got.Status != cvdomain.StatusPendingReview {
+		t.Fatalf("status: got %q want pending_review", got.Status)
+	}
+	if got.ReviewToken == nil || *got.ReviewToken != token {
+		t.Fatalf("review token mismatch: %v", got.ReviewToken)
+	}
+	if got.CVRawText != "raw cv" {
+		t.Fatalf("payload round-trip raw: %q", got.CVRawText)
+	}
+	var skills struct {
+		Skills []string `json:"skills"`
+	}
+	if err := json.Unmarshal(got.CVStructured, &skills); err != nil || len(skills.Skills) != 1 || skills.Skills[0] != "Go" {
+		t.Fatalf("payload round-trip structured: %s (%v)", got.CVStructured, err)
+	}
+	if got.CVFormat != "pdf" {
+		t.Fatalf("cv_format default: got %q want pdf", got.CVFormat)
+	}
+
+	if _, err := repo.GetByReviewToken(ctx, uuid.NewString()); err != cvdomain.ErrNotFound {
+		t.Fatalf("unknown token: want ErrNotFound, got %v", err)
+	}
+}
+
 // Round-trip: candidate with all-NULL optional columns, then structured
 // update, list, delete. Guards NULL scans (cv_ocr_method, raw text, error).
 func TestCandidateRoundTrip(t *testing.T) {

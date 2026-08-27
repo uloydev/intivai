@@ -124,7 +124,7 @@ func (h *CVHandler) ReviewProfile(c *fiber.Ctx) error {
 	if token == "" {
 		return httpapi.Error(c, sharederr.NewDomainError("BAD_REQUEST", "token is required"))
 	}
-	result, err := h.svc.ReviewProfile(c.Context(), token)
+	result, err := h.svc.ReviewProfile(c.UserContext(), token)
 	if err != nil {
 		return httpapi.Error(c, err)
 	}
@@ -147,7 +147,7 @@ func (h *CVHandler) ConfirmProfile(c *fiber.Ctx) error {
 		return httpapi.Error(c, sharederr.NewDomainError("BAD_REQUEST", "failed to serialize json payload"))
 	}
 
-	if err := h.svc.ConfirmProfile(c.Context(), token, structuredData); err != nil {
+	if err := h.svc.ConfirmProfile(c.UserContext(), token, structuredData); err != nil {
 		return httpapi.Error(c, err)
 	}
 

@@ -10,6 +10,7 @@ import (
 	ivdomain "github.com/intivai/backend/internal/interview/domain"
 	"github.com/intivai/backend/internal/llm"
 	"github.com/intivai/backend/internal/sandbox/domain"
+	sharederr "github.com/intivai/backend/internal/shared/errors"
 	"github.com/intivai/backend/pkg/db"
 	"gorm.io/gorm"
 )
@@ -35,19 +36,43 @@ type SandboxService struct {
 	runner CodeRunner
 	llm    llm.Provider
 	ivRepo ivdomain.InterviewRepository
+	// runSemaphore (D24): bounds concurrent container executions GLOBALLY —
+	// the HTTP /sandbox/execute path and the WS code.run path both spawn
+	// containers; without a cap, N concurrent requests fan out N container
+	// spawns. Saturation REFUSES (returns a domain error) instead of queuing:
+	// a queued run would pin a connection past its timeout.
+	runSemaphore chan struct{}
 }
 
 func NewSandboxService(pool *gorm.DB, r CodeRunner, p llm.Provider, ivRepo ivdomain.InterviewRepository) *SandboxService {
 	return &SandboxService{
-		pool:   pool,
-		runner: r,
-		llm:    p,
-		ivRepo: ivRepo,
+		pool:         pool,
+		runner:       r,
+		llm:          p,
+		ivRepo:       ivRepo,
+		runSemaphore: make(chan struct{}, maxConcurrentExecutions),
 	}
 }
 
+// maxConcurrentExecutions bounds simultaneous sandbox container runs.
+const maxConcurrentExecutions = 4
+
+// maxTestCasesPerRequest caps test cases per execution request (D24) —
+// mirrors the WS-side maxSandboxTestCases guard so the HTTP path cannot
+// smuggle unbounded subprocess spawns.
+const maxTestCasesPerRequest = 20
+
 // Execute runs the code snippet in a throwaway container via the sidecar.
 func (s *SandboxService) Execute(ctx context.Context, req domain.ExecutionRequest) (*domain.ExecutionResult, error) {
+	select {
+	case s.runSemaphore <- struct{}{}:
+		defer func() { <-s.runSemaphore }()
+	default:
+		return nil, sharederr.NewDomainError("SANDBOX_BUSY", "too many sandbox executions in progress; try again in a moment")
+	}
+	if len(req.TestCases) > maxTestCasesPerRequest {
+		req.TestCases = req.TestCases[:maxTestCasesPerRequest]
+	}
 	return s.runner.Execute(ctx, req)
 }
 
