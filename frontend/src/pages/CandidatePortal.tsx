@@ -675,11 +675,11 @@ export function CandidatePortal() {
                                   ✦
                                 </span>
                                 <h4 className="text-sm font-bold text-foreground">
-                                  Assessment Performance & Strengths Summary
+                                  Assessment Summary
                                 </h4>
                               </div>
                               <p className="text-xs text-muted-foreground mt-0.5">
-                                Automated feedback derived from your technical interview and coding session.
+                                A summary of your interview results. Automated scores are approximations — a human recruiter makes the final decision.
                               </p>
                             </div>
                             {app.overall_score !== null && app.overall_score !== undefined && (

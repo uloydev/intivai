@@ -141,7 +141,7 @@ describe("CandidatePortal — G10 no fabricated feedback", () => {
     renderPortal("/candidate/portal")
 
     await waitFor(() => {
-      expect(screen.getByText("Assessment Performance & Strengths Summary")).toBeDefined()
+      expect(screen.getByText("Assessment Summary")).toBeDefined()
     })
     expect(screen.getByText("No automated feedback available yet.")).toBeDefined()
     expect(screen.queryByText(/Strong technical articulation/)).toBeNull()

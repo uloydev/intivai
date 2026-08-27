@@ -70,6 +70,47 @@ describe("ChatClient", () => {
     ])
   })
 
+  it("J10: sends candidate_question frames via sendCandidateQuestion", () => {
+    const client = new ChatClient({ ticket: "t", onFrame: () => undefined, onClose: () => undefined })
+    client.connect("iv-1")
+    const ws = FakeWebSocket.instances[0]
+    client.sendCandidateQuestion("What does the team use for CI?")
+    client.sendCandidateQuestion("How many engineers are in the org?")
+    expect(ws.sent).toEqual([
+      JSON.stringify({ type: "candidate_question", content: "What does the team use for CI?" }),
+      JSON.stringify({ type: "candidate_question", content: "How many engineers are in the org?" }),
+    ])
+  })
+
+  it("J10: returns false when the socket is not open", () => {
+    const client = new ChatClient({ ticket: "t", onFrame: () => undefined, onClose: () => undefined })
+    client.connect("iv-1")
+    const ws = FakeWebSocket.instances[0]
+    ws.readyState = 3
+    expect(client.sendCandidateQuestion("Q?")).toBe(false)
+  })
+
+  it("J10: parses qa_answer frames (answered and refused)", () => {
+    const frames: ChatFrame[] = []
+    const client = new ChatClient({ ticket: "t", onFrame: (f) => frames.push(f), onClose: () => undefined })
+    client.connect("iv-1")
+    const ws = FakeWebSocket.instances[0]
+    ws.emit({ type: "qa_answer", question: "What is the salary range?", answer: "The range is in the posting.", refused: false })
+    ws.emit({ type: "qa_answer", question: "How many people?", answer: "No data about that.", refused: true })
+    expect(frames).toEqual([
+      { type: "qa_answer", question: "What is the salary range?", answer: "The range is in the posting.", refused: false },
+      { type: "qa_answer", question: "How many people?", answer: "No data about that.", refused: true },
+    ])
+  })
+
+  it("sends candidate_question only as typed content", () => {
+    const client = new ChatClient({ ticket: "t", onFrame: () => undefined, onClose: () => undefined })
+    client.connect("iv-1")
+    const ws = FakeWebSocket.instances[0]
+    expect(client.sendCandidateQuestion("")).toBe(true)
+    expect(JSON.parse(ws.sent[0])).toEqual({ type: "candidate_question", content: "" })
+  })
+
   it("reports close reason", () => {
     const reasons: string[] = []
     const client = new ChatClient({ ticket: "t", onFrame: () => undefined, onClose: (r) => reasons.push(r) })

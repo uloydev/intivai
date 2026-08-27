@@ -9,7 +9,16 @@ import {
   CheckCircle,
 } from "@phosphor-icons/react"
 import { Link } from "react-router-dom"
-import { api } from "@/lib/api"
+import { api, ApiError } from "@/lib/api"
+import {
+  DEFAULT_WEIGHT_MAP,
+  WEIGHT_DIMENSIONS,
+  buildSaveWeights,
+  isWeightMapComplete,
+  isWeightSumValid,
+  weightSum,
+  type WeightKey,
+} from "@/lib/weights"
 import type { Application, Job } from "@/types/api"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -78,29 +87,53 @@ export function JobsPage() {
   const [enableScreening, setEnableScreening] = useState(true)
   const [passThreshold, setPassThreshold] = useState(70)
 
+  // Scoring weights state
+  const [editingJob, setEditingJob] = useState<Job | null>(null)
+  const [weights, setWeights] = useState<Record<string, number>>({ ...DEFAULT_WEIGHT_MAP })
+  const [useDefaultWeights, setUseDefaultWeights] = useState(true)
+  const [weightsError, setWeightsError] = useState<string | null>(null)
+
   const minExpNum = Number.parseInt(minExp || "0", 10)
   const minExpValid = Number.isFinite(minExpNum) && minExpNum >= 0
 
+  const isEditing = editingJob !== null
+  const weightsLocked = isEditing && editingJob.is_published === true
+  const weightsControlsDisabled = weightsLocked || useDefaultWeights
+
   const create = useMutation({
-    mutationFn: () =>
-      api.post<Job>("/jobs", {
+    mutationFn: () => {
+      const payload: Record<string, unknown> = {
         title,
         description,
         required_skills: skills.split(",").map((s) => s.trim()).filter(Boolean),
         min_experience: minExpNum,
         min_score_to_proceed: enableScreening ? passThreshold : 0,
-      }),
+      }
+      // D1: never send scoring_weights when locked (published). D10: otherwise
+      // always send the explicit resolution — in defaults mode that is
+      // DEFAULT_WEIGHT_MAP, because PATCH nil = keep would silently leave
+      // previously-saved custom weights effective while the form shows defaults.
+      if (!weightsLocked) {
+        payload.scoring_weights = buildSaveWeights(useDefaultWeights, weights)
+      }
+      if (isEditing) {
+        return api.patch<Job>(`/jobs/${editingJob.id}`, payload)
+      }
+      return api.post<Job>("/jobs", payload)
+    },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["jobs"] })
-      setOpen(false)
-      setTitle("")
-      setDescription("")
-      setSkills("")
-      setMinExp("3")
-      setModalTab("details")
-      toast.success("Job role & assessment pipeline published successfully")
+      closeModal()
+      toast.success(isEditing ? "Job updated" : "Job role & assessment pipeline published successfully")
     },
-    onError: (e) => toast.error(e instanceof Error ? e.message : "Create failed"),
+    onError: (e) => {
+      // Surface WEIGHTS_* rejections inline without closing the form (G7).
+      const msg = e instanceof Error ? e.message : "Save failed"
+      if (e instanceof ApiError && e.code.startsWith("WEIGHTS_")) {
+        setWeightsError(msg)
+      }
+      toast.error(msg)
+    },
   })
 
 	const patchStatus = useMutation({
@@ -124,6 +157,46 @@ export function JobsPage() {
 		// G7: silent failures leave recruiters believing the publish state changed.
 		onError: (e) => toast.error(e instanceof Error ? e.message : "Publish state update failed"),
 	})
+
+  function closeModal() {
+    setOpen(false)
+    setEditingJob(null)
+    setTitle("")
+    setDescription("")
+    setSkills("")
+    setMinExp("3")
+    setModalTab("details")
+    setEnableScreening(true)
+    setPassThreshold(70)
+    setWeights({ ...DEFAULT_WEIGHT_MAP })
+    setUseDefaultWeights(true)
+    setWeightsError(null)
+  }
+
+  function openEdit(job: Job) {
+    setEditingJob(job)
+    setOpen(true)
+    setModalTab("details")
+    setTitle(job.title)
+    setDescription(job.description)
+    setSkills((job.required_skills ?? []).join(", "))
+    setMinExp(String(job.min_experience))
+    setEnableScreening((job.min_score_to_proceed ?? 0) > 0)
+    setPassThreshold(job.min_score_to_proceed ?? 70)
+    if (job.scoring_weights && isWeightMapComplete(job.scoring_weights)) {
+      setWeights({ ...DEFAULT_WEIGHT_MAP, ...job.scoring_weights })
+      setUseDefaultWeights(false)
+    } else {
+      setWeights({ ...DEFAULT_WEIGHT_MAP })
+      setUseDefaultWeights(true)
+    }
+    setWeightsError(null)
+  }
+
+  function setWeight(key: WeightKey, value: number) {
+    if (weightsLocked) return
+    setWeights((prev) => ({ ...prev, [key]: Number.isFinite(value) ? value : 0 }))
+  }
 
   function toggleSkill(skill: string) {
     const list = skills.split(",").map((s) => s.trim()).filter(Boolean)
@@ -312,6 +385,14 @@ export function JobsPage() {
                     >
                       {job.is_published ? "Unpublish" : "Publish"}
                     </Button>
+                     <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-8 text-xs"
+                      onClick={() => openEdit(job)}
+                    >
+                      Edit
+                    </Button>
                     <Button
                       variant="outline"
                       size="sm"
@@ -329,7 +410,7 @@ export function JobsPage() {
       )}
 
       {/* New Job Modal with Assessment Stage Selection */}
-      <Dialog open={open} onOpenChange={setOpen}>
+      <Dialog open={open} onOpenChange={(o) => { if (!o) closeModal() }}>
         <DialogContent className="sm:max-w-2xl lg:max-w-3xl max-h-[90vh] flex flex-col p-0 overflow-hidden">
           <div className="flex flex-col h-full max-h-[90vh]">
             <DialogHeader className="p-6 pb-3 border-b border-border/80 bg-card/90 backdrop-blur-sm shrink-0">
@@ -435,6 +516,92 @@ export function JobsPage() {
                       className="bg-background/80"
                     />
                   </div>
+
+                  {/* Scoring Weights — D1 lock + D4 sum rule */}
+                  <div className="space-y-3 rounded-xl border border-border/80 bg-background/60 p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <Label className="text-xs font-bold">Scoring Weights</Label>
+                        <p className="text-[11px] text-muted-foreground mt-0.5">
+                          Tune the 5 screening dimensions. The five must sum to ~1.00 (±0.01).
+                        </p>
+                      </div>
+                      <label className="flex shrink-0 items-center gap-1.5 text-[11px] text-muted-foreground cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={useDefaultWeights}
+                          disabled={weightsLocked}
+                          onChange={(e) => {
+                            setUseDefaultWeights(e.target.checked)
+                            // D10: sliders are disabled in defaults mode — show the
+                            // values that will actually be saved, not stale tuning.
+                            if (e.target.checked) setWeights({ ...DEFAULT_WEIGHT_MAP })
+                          }}
+                          className="rounded border-border text-primary h-3.5 w-3.5"
+                        />
+                        Use defaults
+                      </label>
+                    </div>
+
+                    {weightsLocked && (
+                      <p className="text-[11px] text-amber-600">
+                        This job is published — weights are locked (D1) and cannot be changed.
+                      </p>
+                    )}
+
+                    <div className="space-y-2.5">
+                      {WEIGHT_DIMENSIONS.map((d) => (
+                        <div key={d.key} className="flex items-center gap-3">
+                          <span className="w-32 text-xs text-foreground">{d.label}</span>
+                          <input
+                            type="range"
+                            min={0}
+                            max={1}
+                            step={0.05}
+                            value={weights[d.key] ?? 0}
+                            disabled={weightsControlsDisabled}
+                            onChange={(e) => setWeight(d.key, Number(e.target.value))}
+                            className="flex-1 h-1.5 bg-secondary rounded-lg appearance-none cursor-pointer accent-primary disabled:opacity-50"
+                          />
+                          <input
+                            type="number"
+                            min={0}
+                            max={1}
+                            step={0.05}
+                            value={Number((weights[d.key] ?? 0).toFixed(2))}
+                            disabled={weightsControlsDisabled}
+                            onChange={(e) => setWeight(d.key, Number(e.target.value))}
+                            className="w-16 rounded-md border border-border bg-background/80 px-2 py-1 text-xs text-right font-mono"
+                          />
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="flex items-center justify-between border-t border-border/40 pt-2">
+                      <span className="text-[11px] text-muted-foreground">Resolved sum</span>
+                      <span
+                        className={`font-mono text-xs font-bold ${
+                          !useDefaultWeights && !isWeightSumValid(weightSum(weights))
+                            ? "text-amber-600"
+                            : "text-foreground"
+                        }`}
+                      >
+                        {weightSum(weights).toFixed(2)}
+                      </span>
+                    </div>
+
+                    {!useDefaultWeights && !isWeightSumValid(weightSum(weights)) && (
+                      <p className="text-[11px] text-amber-600">
+                        Weights must sum to ~1.00 (±0.01). The backend will reject otherwise.
+                      </p>
+                    )}
+
+                    {weightsError && (
+                      <p className="text-[11px] text-destructive" role="alert">
+                        {weightsError}
+                      </p>
+                    )}
+                  </div>
                 </div>
               ) : (
                 <div className="space-y-3.5">
@@ -517,7 +684,7 @@ export function JobsPage() {
             <DialogFooter className="p-4 px-6 border-t border-border/80 bg-card/90 backdrop-blur-sm shrink-0 flex items-center justify-between sm:justify-between">
               {modalTab === "details" ? (
                 <>
-                  <Button variant="secondary" onClick={() => setOpen(false)}>
+                  <Button variant="secondary" onClick={closeModal}>
                     Cancel
                   </Button>
                   <Button
@@ -541,7 +708,13 @@ export function JobsPage() {
                     className="gap-1 text-xs font-bold shadow-md shadow-primary/20"
                   >
                     <Sparkle className="h-4 w-4" weight="fill" />
-                    {create.isPending ? "Publishing Role..." : "Publish Job & Pipeline"}
+                    {create.isPending
+                      ? isEditing
+                        ? "Saving..."
+                        : "Publishing Role..."
+                      : isEditing
+                        ? "Save Changes"
+                        : "Publish Job & Pipeline"}
                   </Button>
                 </>
               )}

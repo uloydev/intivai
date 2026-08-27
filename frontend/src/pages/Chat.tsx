@@ -46,6 +46,11 @@ export function ChatPage() {
   const scrollRef = useRef<HTMLDivElement>(null)
   const answerRef = useRef<HTMLTextAreaElement>(null)
 
+  // J10 (B4): candidate free-form question — mirrored from the server-side
+  // cap (1000 runes, backend/internal/interview/domain/interview.go).
+  const [qaInput, setQaInput] = useState("")
+  const [showQaInput, setShowQaInput] = useState(false)
+
   // Authenticity & Pacing Telemetry Refs
   const questionDisplayedAtRef = useRef<number>(Date.now())
   const firstKeystrokeAtRef = useRef<number | null>(null)
@@ -96,6 +101,7 @@ export function ChatPage() {
     disconnected,
     expired,
     pendingAnswer,
+    qaPending,
   } = session
 
   // Live question idx for the stable debounced sender callback.
@@ -164,6 +170,20 @@ export function ChatPage() {
 
   const sendAnswer = () => sendWithAction("reply")
   const advanceTopic = () => sendWithAction("advance")
+
+  // J10: submit the candidate question and surface a soft cap hint. The server
+  // refuses further questions via a refused qa_answer frame (transcript copy).
+  const sendCandidateQuestion = () => {
+    const trimmed = qaInput.trim()
+    if (!trimmed || qaPending || !!evaluation || expired || disconnected) return
+    const sent = session.askCandidateQuestion(trimmed)
+    if (sent) {
+      setQaInput("")
+      setShowQaInput(false)
+    } else {
+      toast.error("Connection lost — your question was not sent. Please try again.")
+    }
+  }
 
   const handleTimerExpire = () => {
     if (streaming || pendingAnswer || !!evaluation || expired || disconnected) return
@@ -319,7 +339,7 @@ export function ChatPage() {
         {/* Chat Conversation Column */}
         <div
           className={cn(
-            "flex flex-col h-full overflow-hidden transition-all duration-300",
+            "relative flex flex-col h-full overflow-hidden transition-all duration-300",
             showSandbox ? "lg:w-[45%] lg:border-r lg:border-border border-b lg:border-b-0" : "w-full max-w-4xl mx-auto"
           )}
         >
@@ -363,13 +383,14 @@ export function ChatPage() {
             {bubbles.map((b) => (
               <div
                 key={b.id}
-                className={cn(
-                  "flex gap-3 text-xs sm:text-sm leading-relaxed animate-in fade-in duration-300",
-                  b.kind === "answer" && "justify-end",
-                  b.kind === "question" && "justify-start",
-                  b.kind === "assistant" && "justify-start",
-                  b.kind === "system" && "justify-center"
-                )}
+                  className={cn(
+                    "flex gap-3 text-xs sm:text-sm leading-relaxed animate-in fade-in duration-300",
+                    b.kind === "answer" && "justify-end",
+                    b.kind === "candidate_qa" && "justify-end",
+                    b.kind === "question" && "justify-start",
+                    b.kind === "assistant" && "justify-start",
+                    b.kind === "system" && "justify-center"
+                  )}
               >
                 {/* AI Avatar for Assistant & Question */}
                 {(b.kind === "question" || b.kind === "assistant") && (
@@ -433,6 +454,40 @@ export function ChatPage() {
                 {b.kind === "answer" && (
                   <div className="max-w-[85%] rounded-2xl rounded-tr-sm bg-primary text-primary-foreground p-3.5 text-xs sm:text-sm shadow-md shadow-primary/10 whitespace-pre-wrap leading-relaxed">
                     {b.content}
+                  </div>
+                )}
+
+                {/* Candidate Free-Form Question & Grounded Answer (J10) */}
+                {b.kind === "candidate_qa" && (
+                  <div className="max-w-[85%] space-y-2 min-w-0">
+                    <div className="flex justify-end">
+                      <div className="rounded-2xl rounded-tr-sm bg-primary/15 border border-primary/30 p-3.5 text-xs sm:text-sm text-foreground whitespace-pre-wrap leading-relaxed max-w-full">
+                        {b.questionText ?? b.content}
+                      </div>
+                    </div>
+                    {b.streaming ? (
+                      <div className="flex justify-start">
+                        <div className="flex items-center gap-1.5 rounded-2xl rounded-tl-sm bg-muted/40 border border-border/50 px-4 py-2.5 text-[11px] text-muted-foreground">
+                          <ArrowClockwise className="h-3.5 w-3.5 animate-spin" />
+                          Grounding answer from your company context…
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex justify-start items-end gap-2">
+                        <div
+                          className={cn(
+                            "rounded-2xl rounded-tl-sm bg-muted/40 border p-3.5 text-xs sm:text-sm text-foreground whitespace-pre-wrap leading-relaxed max-w-full",
+                            b.refused ? "border-warning/40 bg-warning/5" : "border-border/50"
+                          )}
+                        >
+                          <div className="flex items-center gap-1.5 text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">
+                            <ChatCircleDots className="h-3.5 w-3.5 text-primary" weight="fill" />
+                            {b.refused ? "Question limit reached" : "Grounded Answer"}
+                          </div>
+                          <Markdown content={b.content} />
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -509,6 +564,7 @@ export function ChatPage() {
                   id="chat-input"
                   ref={answerRef}
                   value={input}
+                  maxLength={4000}
                   onChange={(e) => {
                     const next = e.target.value
                     if (firstKeystrokeAtRef.current === null) {
@@ -620,6 +676,61 @@ export function ChatPage() {
                 <p className="text-[10px] text-success mt-1.5 px-0.5 flex items-center gap-1">
                   <CheckCircle className="h-3 w-3" /> Human interviewer requested — a team member will follow up.
                 </p>
+              )}
+              {/* Ask a Question (J10) */}
+              {!evaluation && !expired && !disconnected && (
+                <div className="mt-2 border-t border-border/40 pt-2">
+                  {showQaInput ? (
+                    <div className="space-y-1.5">
+                      <div className="flex items-end gap-2">
+                        <Textarea
+                          id="candidate-question-input"
+                          value={qaInput}
+                          maxLength={1000}
+                          onChange={(e) => setQaInput(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.nativeEvent.isComposing) return
+                            if (e.key === "Enter" && !e.shiftKey) {
+                              e.preventDefault()
+                              sendCandidateQuestion()
+                            }
+                          }}
+                          placeholder="Ask about the role, team, or process… (max 1000 characters)"
+                          rows={2}
+                          disabled={qaPending || streaming}
+                          className="min-h-[48px] resize-none bg-card rounded-xl border-border/60 text-xs sm:text-sm p-2.5 focus-visible:ring-primary"
+                        />
+                        <Button
+                          variant="gradient"
+                          size="icon"
+                          className="h-[48px] w-[48px] rounded-xl shrink-0"
+                          title="Send question (Enter)"
+                          aria-label="Send question"
+                          onClick={sendCandidateQuestion}
+                          disabled={!qaInput.trim() || qaPending || streaming}
+                        >
+                          <PaperPlaneRight className="h-5 w-5" weight="bold" />
+                        </Button>
+                      </div>
+                      <div className="flex items-center justify-between px-0.5">
+                        <span className="text-[10px] text-muted-foreground mr-2">
+                          {qaPending ? "Waiting for an answer…" : "Your question is answered from our company information only."}
+                        </span>
+                        <span className={cn("text-[10px] font-mono", qaInput.length > 1000 ? "text-destructive" : "text-muted-foreground")}>
+                          {qaInput.length}/1000
+                        </span>
+                      </div>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setShowQaInput(true)}
+                      className="text-[10px] text-muted-foreground hover:text-foreground mt-1.5 px-0.5 underline-offset-2 hover:underline flex items-center gap-1 transition-colors"
+                    >
+                      <ChatCircleDots className="h-3 w-3" /> Ask a question about the role
+                    </button>
+                  )}
+                </div>
               )}
             </div>
           )}

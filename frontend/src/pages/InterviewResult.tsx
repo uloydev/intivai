@@ -9,6 +9,7 @@ import {
   ArrowLeft,
   DownloadSimple,
   ChatCircleText,
+  ChatCircleDots,
   User,
 } from "@phosphor-icons/react"
 import { Code2 } from "lucide-react"
@@ -526,6 +527,44 @@ export function InterviewResultPage() {
           </div>
         </Card>
       )}
+
+      {/* Candidate Free-Form Q&A (B4) */}
+      <Card className="glass border-border/60 overflow-hidden shadow-sm">
+        <div className="p-6 space-y-4">
+          <div className="flex items-center gap-3 border-b border-border/50 pb-3">
+            <ChatCircleDots className="h-5 w-5 text-primary" weight="fill" />
+            <h3 className="font-display font-bold text-base tracking-tight">Candidate Q&amp;A</h3>
+            <p className="text-xs text-muted-foreground">
+              Questions the candidate asked during the interview and the answers grounded in your company context.
+            </p>
+          </div>
+          {detail.qa_pairs && detail.qa_pairs.length > 0 ? (
+            <div className="space-y-3">
+              {detail.qa_pairs.map((pair, idx) => (
+                <div key={idx} className="rounded-xl border border-border/50 bg-background/60 p-4 space-y-2.5">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-start gap-2">
+                      <User className="h-3.5 w-3.5 text-primary shrink-0 mt-0.5" />
+                      <p className="text-xs sm:text-sm font-medium text-foreground">{pair.question}</p>
+                    </div>
+                    <span className="text-[10px] font-mono text-muted-foreground shrink-0">
+                      {new Date(pair.created_at).toLocaleString()}
+                    </span>
+                  </div>
+                  <div className="flex items-start gap-2">
+                    <ChatCircleDots className="h-3.5 w-3.5 text-muted-foreground shrink-0 mt-0.5" weight="fill" />
+                    <p className="text-xs sm:text-sm text-muted-foreground leading-relaxed">{pair.answer}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-xs text-muted-foreground rounded-xl border border-dashed border-border p-6 text-center">
+              No candidate questions asked.
+            </p>
+          )}
+        </div>
+      </Card>
 
       {/* Reject Confirmation AlertDialog */}
       <AlertDialog open={showRejectConfirm} onOpenChange={setShowRejectConfirm}>

@@ -51,6 +51,15 @@ export type ChatFrame =
       message: string
     }
   | { type: "pong" }
+  // J10 (B4): grounded answer to a candidate_question frame. Refused=true is
+  // the polite cap/expiry refusal, NOT an error frame — the answer text is the
+  // refusal copy for the transcript.
+  | {
+      type: "qa_answer"
+      question: string
+      answer: string
+      refused?: boolean
+    }
 
 export interface ChatClientOptions {
   ticket: string
@@ -151,6 +160,13 @@ export class ChatClient {
 
   resume(sessionId: string): void {
     this.send({ type: "resume", session_id: sessionId })
+  }
+
+  // J10 (B4): send a free-form candidate question; the server answers with a
+  // qa_answer frame (refused=true on cap exhaustion). Text is capped at 1000
+  // runes server-side — the UI clamps the input to the same bound.
+  sendCandidateQuestion(content: string): boolean {
+    return this.send({ type: "candidate_question", content })
   }
 
   sendTelemetry(eventType: string, questionIdx?: number, details?: Record<string, unknown>): boolean {
