@@ -101,7 +101,6 @@
   /* Shadow tokens */
   --shadow-card: 0 1px 3px rgba(0,0,0,0.1), 0 1px 2px rgba(0,0,0,0.06);
   --shadow-elevated: 0 10px 15px -3px rgba(0,0,0,0.1), 0 4px 6px -4px rgba(0,0,0,0.1);
-  --shadow-glow-primary: 0 0 20px rgba(30,58,95,0.15);
 
   /* Animation tokens */
   --duration-fast: 150ms;
@@ -157,7 +156,6 @@
   /* Shadow tokens (dark) */
   --shadow-card: 0 1px 3px rgba(0,0,0,0.3), 0 1px 2px rgba(0,0,0,0.2);
   --shadow-elevated: 0 10px 15px -3px rgba(0,0,0,0.3), 0 4px 6px -4px rgba(0,0,0,0.2);
-  --shadow-glow-primary: 0 0 20px rgba(59,130,246,0.15);
 }
 
 * {

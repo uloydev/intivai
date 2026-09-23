@@ -6,7 +6,7 @@ import {
   Sun,
   Moon,
   ShieldCheck,
-  Sparkle,
+  ChatCircleText,
   Cpu,
   List,
   X,
@@ -42,7 +42,7 @@ const NAV: PublicNavItem[] = [
     mobileIconClass: "text-cyan-400",
     desktopIconClass: "text-cyan-500",
   },
-  { to: "/#demo", label: "AI Evaluator", section: "demo", icon: Sparkle, mobileIconClass: "text-primary" },
+  { to: "/#demo", label: "AI Evaluator", section: "demo", icon: ChatCircleText, mobileIconClass: "text-primary" },
   { to: "/#how-it-works", label: "How it Works", section: "how-it-works" },
   { to: "/#features", label: "Intelligence", section: "features", icon: Cpu },
   { to: "/#calculator", label: "ROI Calculator", section: "calculator", icon: Calculator },
@@ -154,7 +154,7 @@ export function PublicLayout() {
   return (
     <div className="flex min-h-screen flex-col bg-background text-foreground selection:bg-primary/20 selection:text-primary">
       {/* Public Header */}
-      <header className="sticky top-0 z-50 flex h-16 items-center justify-between border-b border-border/50 bg-background/80 px-6 backdrop-blur-xl md:px-12">
+      <header className="sticky top-0 z-50 flex h-16 items-center justify-between border-b border-border bg-card/95 px-6 md:px-12">
         <Link
           to="/"
           onClick={(e) => {
@@ -165,10 +165,10 @@ export function PublicLayout() {
           }}
           className="flex items-center gap-2.5"
         >
-          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary text-primary-foreground font-bold font-display text-lg shadow-lg shadow-primary/25">
+          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary text-primary-foreground font-bold font-display text-lg shadow-sm">
             I
           </div>
-          <span className="font-display text-xl font-bold tracking-tight bg-gradient-to-r from-primary via-blue-500 to-indigo-500 bg-clip-text text-transparent">
+          <span className="font-display text-xl font-bold tracking-tight text-foreground">
             Intivai
           </span>
         </Link>
@@ -193,7 +193,7 @@ export function PublicLayout() {
           </Button>
 
           {authenticated ? (
-            <Button asChild variant="gradient" size="sm" className="shadow-md shadow-primary/20 text-xs hidden sm:inline-flex">
+            <Button asChild size="sm" className="text-xs hidden sm:inline-flex">
               <Link to="/dashboard">
                 Workspace <ArrowRight className="ml-1.5 h-3.5 w-3.5" />
               </Link>
@@ -203,7 +203,7 @@ export function PublicLayout() {
               <Button asChild variant="ghost" size="sm" className="text-xs font-medium">
                 <Link to="/login">Sign In</Link>
               </Button>
-              <Button asChild variant="gradient" size="sm" className="text-xs shadow-md shadow-primary/20">
+              <Button asChild size="sm" className="text-xs">
                 <Link to="/register">Get Started Free</Link>
               </Button>
             </div>
@@ -230,7 +230,7 @@ export function PublicLayout() {
         <div
           ref={mobileDrawerRef}
           id="mobile-nav-drawer"
-          className="lg:hidden border-b border-border/60 bg-background/95 backdrop-blur-xl px-6 py-5 space-y-4 animate-in slide-in-from-top-2 duration-200 z-40 sticky top-16"
+          className="lg:hidden border-b border-border bg-card px-6 py-5 space-y-4 animate-in slide-in-from-top-2 duration-200 z-40 sticky top-16"
         >
           <nav className="flex flex-col space-y-3 text-sm font-semibold">
             {NAV.map((item) => renderNavLink(item, "mobile"))}
@@ -238,7 +238,7 @@ export function PublicLayout() {
 
           <div className="pt-3 border-t border-border/50 flex flex-col gap-2">
             {authenticated ? (
-              <Button asChild variant="gradient" className="w-full justify-center">
+              <Button asChild className="w-full justify-center">
                 <Link to="/dashboard" onClick={() => closeMenu()}>
                   Go to Workspace <ArrowRight className="ml-2 h-4 w-4" />
                 </Link>
@@ -250,7 +250,7 @@ export function PublicLayout() {
                     Sign In
                   </Link>
                 </Button>
-                <Button asChild variant="gradient" className="w-full shadow-md shadow-primary/20">
+                <Button asChild className="w-full">
                   <Link to="/register" onClick={() => closeMenu()}>
                     Get Started
                   </Link>
@@ -283,7 +283,7 @@ export function PublicLayout() {
                 <span className="font-display text-lg font-bold">Intivai</span>
               </div>
               <p className="text-xs text-muted-foreground max-w-sm leading-relaxed">
-                Next-generation autonomous AI recruitment platform. Delivering real-time semantic CV matching, token-streamed technical interviews, and bias-free candidate evaluations.
+                Autonomous technical recruitment platform. Delivering semantic resume screening, structured technical interviews, and objective evaluation scorecards.
               </p>
               <div className="flex items-center gap-2 text-xs text-muted-foreground pt-1">
                 <ShieldCheck className="h-4 w-4 text-emerald-500" />
