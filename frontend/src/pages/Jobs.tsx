@@ -4,7 +4,6 @@ import {
   Briefcase,
   Plus,
   MagnifyingGlass,
-  Sparkle,
   UsersThree,
   CheckCircle,
 } from "@phosphor-icons/react"
@@ -227,7 +226,7 @@ export function JobsPage() {
             Configure target competencies, experience gates, and automated CV screening rails.
           </p>
         </div>
-        <Button onClick={() => setOpen(true)} variant="gradient" className="shadow-md shadow-primary/20">
+        <Button onClick={() => setOpen(true)} className="shadow-sm">
           <Plus className="mr-1.5 h-4 w-4" weight="bold" /> Post New Job
         </Button>
       </div>
@@ -298,7 +297,7 @@ export function JobsPage() {
             return (
               <div
                 key={job.id}
-                className="glass rounded-xl border border-border/60 p-5 shadow-sm transition-all hover:border-primary/40 hover:shadow-md flex flex-col justify-between"
+                className="rounded-xl border border-border bg-card p-5 shadow-sm transition-all hover:border-primary/40 flex flex-col justify-between"
               >
                 <div>
                   <div className="flex items-start justify-between gap-3">
@@ -413,9 +412,9 @@ export function JobsPage() {
       <Dialog open={open} onOpenChange={(o) => { if (!o) closeModal() }}>
         <DialogContent className="sm:max-w-2xl lg:max-w-3xl max-h-[90vh] flex flex-col p-0 overflow-hidden">
           <div className="flex flex-col h-full max-h-[90vh]">
-            <DialogHeader className="p-6 pb-3 border-b border-border/80 bg-card/90 backdrop-blur-sm shrink-0">
+            <DialogHeader className="p-6 pb-3 border-b border-border bg-card shrink-0">
               <DialogTitle className="font-display text-xl font-bold flex items-center gap-2">
-                <Sparkle className="h-5 w-5 text-primary" weight="fill" /> Create Job & Assessment Pipeline
+                <Plus className="h-5 w-5 text-primary" weight="bold" /> Create Job & Assessment Pipeline
               </DialogTitle>
               <DialogDescription className="text-xs">
                 Configure role requirements, CV screening cutoff thresholds, and AI assessment stages.
@@ -681,7 +680,7 @@ export function JobsPage() {
               )}
             </div>
 
-            <DialogFooter className="p-4 px-6 border-t border-border/80 bg-card/90 backdrop-blur-sm shrink-0 flex items-center justify-between sm:justify-between">
+            <DialogFooter className="p-4 px-6 border-t border-border bg-card shrink-0 flex items-center justify-between sm:justify-between">
               {modalTab === "details" ? (
                 <>
                   <Button variant="secondary" onClick={closeModal}>
@@ -702,12 +701,11 @@ export function JobsPage() {
                     ← Back to Details
                   </Button>
                   <Button
-                    variant="gradient"
                     onClick={() => create.mutate()}
                     disabled={!title.trim() || !minExpValid || create.isPending}
-                    className="gap-1 text-xs font-bold shadow-md shadow-primary/20"
+                    className="gap-1 text-xs font-bold shadow-sm"
                   >
-                    <Sparkle className="h-4 w-4" weight="fill" />
+                    <Plus className="h-4 w-4" weight="bold" />
                     {create.isPending
                       ? isEditing
                         ? "Saving..."

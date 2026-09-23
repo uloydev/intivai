@@ -158,7 +158,7 @@ function ResumeReviewForm({ initial, onSubmit, submitLabel, disabled = false }: 
       </section>
 
       <div className="flex justify-end pt-2">
-        <Button type="submit" variant="gradient" size="lg" disabled={disabled || invalid} className="shadow-md shadow-primary/20 w-full sm:w-auto">
+        <Button type="submit" size="lg" disabled={disabled || invalid} className="w-full sm:w-auto">
           {submitLabel ?? "Confirm & Continue to Screening"}
           <ArrowRight className="ml-2 h-4 w-4" />
         </Button>

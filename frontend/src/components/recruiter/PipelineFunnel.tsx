@@ -83,7 +83,7 @@ export function PipelineFunnel({
   )
 
   return (
-    <Card className="glass border-border/60 shadow-md">
+    <Card className="border-border/80 shadow-sm">
       <CardHeader className="flex flex-row items-center justify-between pb-3">
         <div>
           <div className="flex items-center gap-2">

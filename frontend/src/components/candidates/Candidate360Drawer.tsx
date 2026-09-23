@@ -9,7 +9,9 @@ import {
   XCircle,
   FileText,
   Copy,
-  Sparkle,
+  ChatCircleText,
+  Scales,
+  Plus,
   NotePencil,
   Trophy,
 } from "@phosphor-icons/react"
@@ -155,7 +157,7 @@ export function Candidate360Drawer({
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
       <DialogContent
         showCloseButton={false}
-        className="fixed inset-y-0 right-0 top-0 left-auto flex h-full w-full max-w-full translate-x-0 translate-y-0 flex-col gap-0 rounded-none border-l border-border bg-card p-0 shadow-2xl ring-0 data-open:animate-in data-open:fade-in-0 data-open:slide-in-from-right data-closed:animate-out data-closed:slide-out-to-right sm:max-w-2xl lg:max-w-3xl xl:max-w-4xl"
+        className="fixed inset-y-0 right-0 top-0 left-auto flex h-full w-full max-w-full translate-x-0 translate-y-0 flex-col gap-0 rounded-none border-l border-border bg-card p-0 shadow-lg ring-0 data-open:animate-in data-open:fade-in-0 data-open:slide-in-from-right data-closed:animate-out data-closed:slide-out-to-right sm:max-w-2xl lg:max-w-3xl xl:max-w-4xl"
         aria-label="Candidate 360 profile drawer"
       >
         {/* Drawer Header */}
@@ -228,7 +230,7 @@ export function Candidate360Drawer({
                 : "border-transparent text-muted-foreground hover:text-foreground"
             )}
           >
-            <Sparkle className="h-4 w-4" />
+            <ChatCircleText className="h-4 w-4" />
             <span>AI Assessment & Telemetry</span>
           </button>
 
@@ -314,7 +316,7 @@ export function Candidate360Drawer({
                   <div className="space-y-3 rounded-xl border border-border/70 bg-muted/20 p-4">
                     <div className="flex items-center justify-between gap-1.5">
                       <div className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
-                        <Sparkle className="h-4 w-4 text-primary" weight="fill" />
+                        <Scales className="h-4 w-4 text-primary" weight="fill" />
                         <span>AI Screening Recommendation</span>
                       </div>
                       <span className="text-xs text-muted-foreground">
@@ -389,7 +391,7 @@ export function Candidate360Drawer({
                       </div>
                     </div>
 
-                    <Button asChild variant="gradient" className="w-full gap-2 text-xs font-bold">
+                    <Button asChild className="w-full gap-2 text-xs font-bold">
                       <Link to={`/interviews/${application.interview_id || ""}`}>
                         <Trophy className="h-4 w-4" weight="bold" />
                         <span>Open Comprehensive Scorecard & Replay →</span>
@@ -437,7 +439,7 @@ export function Candidate360Drawer({
                             disabled={createInterview.isPending}
                             className="gap-1.5 text-xs shrink-0"
                           >
-                            <Sparkle className="h-3.5 w-3.5" weight="fill" />
+                            <Plus className="h-3.5 w-3.5" weight="bold" />
                             {createInterview.isPending ? "Generating..." : "Regenerate invitation"}
                           </Button>
                         </div>
@@ -446,11 +448,10 @@ export function Candidate360Drawer({
                       <Button
                         onClick={() => createInterview.mutate()}
                         disabled={createInterview.isPending}
-                        variant="gradient"
                         size="sm"
                         className="w-full gap-2 font-semibold"
                       >
-                        <Sparkle className="h-4 w-4" weight="fill" />
+                        <Plus className="h-4 w-4" weight="bold" />
                         {createInterview.isPending ? "Generating..." : "Generate AI Interview Session"}
                       </Button>
                     )}
@@ -506,7 +507,6 @@ export function Candidate360Drawer({
               <Button
                 onClick={handleSaveDecision}
                 disabled={saveDecision.isPending || currentStage === ""}
-                variant="gradient"
                 className="w-full text-xs font-bold"
               >
                 {saveDecision.isPending ? "Saving..." : "Save Candidate Decision & Notes"}

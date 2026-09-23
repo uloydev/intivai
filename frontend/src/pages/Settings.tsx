@@ -99,7 +99,6 @@ export function SettingsPage() {
               )}
             </div>
             <Button
-              variant="gradient"
               onClick={() => parsed !== null && updateMutation.mutate(parsed)}
               disabled={parsed === null || isLoading || updateMutation.isPending}
             >

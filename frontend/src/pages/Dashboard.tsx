@@ -6,7 +6,6 @@ import {
   UsersThree,
   ChatCircleText,
   TrendUp,
-  Sparkle,
   Plus,
   ArrowRight,
   MicrophoneStage,
@@ -19,8 +18,6 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
-import { GlareHover } from "@/components/ui/glare-hover"
-import { NumberTicker } from "@/components/ui/number-ticker"
 import { cn } from "@/lib/utils"
 
 export function DashboardPage() {
@@ -76,14 +73,9 @@ export function DashboardPage() {
       {/* Header with Quick Actions */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <div className="flex items-center gap-2">
-            <h1 className="font-display text-3xl font-bold tracking-tight text-foreground">Recruitment Command Center</h1>
-            <Badge variant="outline" className="gap-1 border-primary/30 bg-primary/5 text-primary text-xs py-0.5">
-              <Sparkle className="h-3 w-3" weight="fill" /> AI Powered
-            </Badge>
-          </div>
+          <h1 className="font-display text-3xl font-bold tracking-tight text-foreground">Recruitment Command Center</h1>
           <p className="text-sm text-muted-foreground mt-1">
-            Real-time screening intelligence, automated candidate evaluations, and voice interview telemetry.
+            Real-time screening intelligence, candidate evaluations, and interview telemetry.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2.5">
@@ -92,7 +84,7 @@ export function DashboardPage() {
               <Plus className="mr-1.5 h-4 w-4" /> Upload CV
             </Link>
           </Button>
-          <Button asChild variant="gradient" size="sm" className="rounded-lg shadow-md shadow-primary/20">
+          <Button asChild size="sm" className="rounded-lg shadow-sm">
             <Link to="/jobs">
               <Briefcase className="mr-1.5 h-4 w-4" /> Post New Job
             </Link>
@@ -112,33 +104,30 @@ export function DashboardPage() {
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {/* Metric 1: Active Jobs */}
         <Link to="/jobs">
-          <GlareHover background="transparent" color="#1E3A5F" opacity={0.08} className="rounded-xl w-full">
-            <Card className="glass relative overflow-hidden border-border/60 transition-all hover:border-primary/40 w-full">
-              <CardHeader className="flex flex-row items-center justify-between pb-2">
-                <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Active Roles</CardTitle>
-                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 text-primary">
-                  <Briefcase className="h-4 w-4" weight="bold" />
+          <Card className="relative overflow-hidden border-border/80 transition-all hover:border-primary/40 w-full shadow-sm">
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Active Roles</CardTitle>
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                <Briefcase className="h-4 w-4" weight="bold" />
+              </div>
+            </CardHeader>
+            <CardContent>
+              {loadingJobs ? (
+                <Skeleton className="h-8 w-16" />
+              ) : (
+                <div className="flex items-baseline justify-between">
+                  <span className="font-display text-3xl font-bold tabular-nums">{activeJobs.length}</span>
+                  <span className="text-xs font-medium text-muted-foreground">{jobs?.length ?? 0} total</span>
                 </div>
-              </CardHeader>
-              <CardContent>
-                {loadingJobs ? (
-                  <Skeleton className="h-8 w-16" />
-                ) : (
-                  <div className="flex items-baseline justify-between">
-                    <span className="font-display text-3xl font-bold"><NumberTicker value={activeJobs.length} /></span>
-                    <span className="text-xs font-medium text-muted-foreground">{jobs?.length ?? 0} total</span>
-                  </div>
-                )}
-                <p className="mt-1 text-xs text-muted-foreground">Positions actively accepting applicants</p>
-              </CardContent>
-            </Card>
-          </GlareHover>
+              )}
+              <p className="mt-1 text-xs text-muted-foreground">Positions actively accepting applicants</p>
+            </CardContent>
+          </Card>
         </Link>
 
         {/* Metric 2: CVs Ingested */}
         <Link to="/cvs">
-          <GlareHover background="transparent" color="#2563EB" opacity={0.08} className="rounded-xl w-full">
-          <Card className="glass relative overflow-hidden border-border/60 transition-all hover:border-primary/40 w-full">
+          <Card className="relative overflow-hidden border-border/80 transition-all hover:border-primary/40 w-full shadow-sm">
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">CVs Ingested</CardTitle>
               <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-info/10 text-info">
@@ -150,20 +139,18 @@ export function DashboardPage() {
                 <Skeleton className="h-8 w-16" />
               ) : (
                 <div className="flex items-baseline justify-between">
-                  <span className="font-display text-3xl font-bold"><NumberTicker value={totalCVs} /></span>
+                  <span className="font-display text-3xl font-bold tabular-nums">{totalCVs}</span>
                   <Badge variant="info" size="sm">OCR + Parsed</Badge>
                 </div>
               )}
               <p className="mt-1 text-xs text-muted-foreground">Auto-extracted candidate profiles</p>
             </CardContent>
           </Card>
-        </GlareHover>
         </Link>
 
         {/* Metric 3: Screening Pass Rate */}
         <Link to="/candidates">
-          <GlareHover background="transparent" color="#059669" opacity={0.08} className="rounded-xl w-full">
-          <Card className="glass relative overflow-hidden border-border/60 transition-all hover:border-primary/40 w-full">
+          <Card className="relative overflow-hidden border-border/80 transition-all hover:border-primary/40 w-full shadow-sm">
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Screening Pass Rate (all roles)</CardTitle>
               <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-success/10 text-success">
@@ -175,8 +162,8 @@ export function DashboardPage() {
                 <Skeleton className="h-8 w-16" />
               ) : (
                 <div className="flex items-baseline justify-between">
-                  <span className="font-display text-3xl font-bold text-success">
-                    {passRate !== null ? <><NumberTicker value={passRate} />%</> : "—"}
+                  <span className="font-display text-3xl font-bold text-success tabular-nums">
+                    {passRate !== null ? `${passRate}%` : "—"}
                   </span>
                   {passRate !== null && (
                     <span className="text-xs font-medium text-muted-foreground">{passedApps.length}/{totalApps} passed</span>
@@ -186,32 +173,29 @@ export function DashboardPage() {
               <p className="mt-1 text-xs text-muted-foreground">Match threshold benchmark</p>
             </CardContent>
           </Card>
-        </GlareHover>
         </Link>
 
         {/* Metric 4: AI Interviews */}
         <Link to="/interviews">
-          <GlareHover background="transparent" color="#4F46E5" opacity={0.08} className="rounded-xl w-full">
-            <Card className="glass relative overflow-hidden border-border/60 transition-all hover:border-primary/40 w-full">
-              <CardHeader className="flex flex-row items-center justify-between pb-2">
-                <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Interviews Run</CardTitle>
-                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-500/10 text-indigo-500">
-                  <ChatCircleText className="h-4 w-4" weight="bold" />
+          <Card className="relative overflow-hidden border-border/80 transition-all hover:border-primary/40 w-full shadow-sm">
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Interviews Run</CardTitle>
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-500/10 text-indigo-500">
+                <ChatCircleText className="h-4 w-4" weight="bold" />
+              </div>
+            </CardHeader>
+            <CardContent>
+              {loadingInterviews ? (
+                <Skeleton className="h-8 w-16" />
+              ) : (
+                <div className="flex items-baseline justify-between">
+                  <span className="font-display text-3xl font-bold tabular-nums">{interviews?.length ?? 0}</span>
+                  <Badge variant="info" size="sm">{completedInterviews.length} completed</Badge>
                 </div>
-              </CardHeader>
-              <CardContent>
-                {loadingInterviews ? (
-                  <Skeleton className="h-8 w-16" />
-                ) : (
-                  <div className="flex items-baseline justify-between">
-                    <span className="font-display text-3xl font-bold"><NumberTicker value={interviews?.length ?? 0} /></span>
-                    <Badge variant="info" size="sm">{completedInterviews.length} completed</Badge>
-                  </div>
-                )}
-                <p className="mt-1 text-xs text-muted-foreground">Real-time chat & voice sessions</p>
-              </CardContent>
-            </Card>
-          </GlareHover>
+              )}
+              <p className="mt-1 text-xs text-muted-foreground">Real-time chat & voice sessions</p>
+            </CardContent>
+          </Card>
         </Link>
       </div>
 
@@ -220,7 +204,7 @@ export function DashboardPage() {
         {/* Left 2 Cols: Active Job Openings & Screened Candidates */}
         <div className="space-y-6 lg:col-span-2">
           {/* Active Job Openings */}
-          <Card className="glass border-border/60">
+          <Card className="border-border/80 shadow-sm">
             <CardHeader className="flex flex-row items-center justify-between">
               <div>
                 <CardTitle className="font-display text-lg">Active Job Roles</CardTitle>
@@ -286,7 +270,7 @@ export function DashboardPage() {
           </Card>
 
           {/* Recent Candidates & Screening */}
-          <Card className="glass border-border/60">
+          <Card className="border-border/80 shadow-sm">
             <CardHeader className="flex flex-row items-center justify-between">
               <div>
                 <CardTitle className="font-display text-lg">Candidate Screening Feed</CardTitle>
@@ -354,7 +338,7 @@ export function DashboardPage() {
         {/* Right 1 Col: Quick Mode Launchers & Telemetry */}
         <div className="space-y-6">
           {/* Quick Launch Interview Modes */}
-          <Card className="glass border-primary/20 bg-gradient-to-br from-primary/5 via-card to-card">
+          <Card className="border-border/80 shadow-sm">
             <CardHeader>
               <CardTitle className="font-display text-lg flex items-center gap-2">
                 <Lightning className="h-5 w-5 text-primary" weight="fill" /> Quick Interview Modes
@@ -388,24 +372,18 @@ export function DashboardPage() {
                 </p>
               </div>
 
-              <Button asChild variant="gradient" size="sm" className="w-full text-xs mt-1 shadow-md shadow-primary/20">
+              <Button asChild size="sm" className="w-full text-xs mt-1">
                 <Link to="/interviews">Manage Interview Sessions →</Link>
               </Button>
             </CardContent>
           </Card>
 
           {/* System Telemetry & Health */}
-          <Card className="glass border-border/60">
+          <Card className="border-border/80 shadow-sm">
             <CardHeader className="pb-3">
               <CardTitle className="font-display text-sm flex items-center justify-between">
                 <span>Infrastructure Telemetry</span>
                 <span className="flex h-2 w-2 relative">
-                  <span
-                    className={cn(
-                      "animate-ping absolute inline-flex h-full w-full rounded-full opacity-75",
-                      health === "healthy" ? "bg-success" : "bg-warning"
-                    )}
-                  />
                   <span
                     className={cn(
                       "relative inline-flex rounded-full h-2 w-2",

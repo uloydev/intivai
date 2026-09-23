@@ -635,7 +635,7 @@ export function CandidatesPage() {
 
       {/* Floating Bulk Actions Bar */}
       {selectedAppIds.size > 0 && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 bg-card/95 border border-primary/40 rounded-2xl shadow-2xl backdrop-blur-xl p-3 sm:px-6 flex flex-wrap items-center gap-3 sm:gap-4 animate-in slide-in-from-bottom-5">
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 bg-card border border-border rounded-xl shadow-lg p-3 sm:px-6 flex flex-wrap items-center gap-3 sm:gap-4 animate-in slide-in-from-bottom-5">
           <div className="flex items-center gap-2">
             <span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary text-primary-foreground font-bold text-xs">
               {selectedAppIds.size}

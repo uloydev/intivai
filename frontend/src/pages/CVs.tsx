@@ -8,7 +8,6 @@ import {
   ArrowClockwise,
   CheckCircle,
   XCircle,
-  Sparkle,
   Briefcase,
   Trash,
   Files,
@@ -221,7 +220,7 @@ export function CVsPage() {
       </div>
 
       {/* Upload Card */}
-      <Card className="glass border-primary/20 bg-gradient-to-b from-card via-card to-primary/5 shadow-md">
+      <Card className="border-border bg-card shadow-sm">
         <CardHeader className="pb-3 border-b border-border/50 mb-4">
           <div className="flex items-center justify-between">
             <div>
@@ -318,7 +317,6 @@ export function CVsPage() {
               <div className="flex items-end md:col-span-2">
                 <Button
                   className="w-full shadow-sm"
-                  variant="gradient"
                   onClick={() => {
                     setUploading(true)
                     upload.mutate()
@@ -346,7 +344,6 @@ export function CVsPage() {
                   />
                   <Button
                     className="shadow-sm shrink-0"
-                    variant="gradient"
                     onClick={() => {
                       setUploading(true)
                       bulkUpload.mutate()
@@ -483,7 +480,7 @@ export function CVsPage() {
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
             <DialogTitle className="font-display text-lg flex items-center gap-2">
-              <Sparkle className="h-5 w-5 text-primary" weight="fill" /> Screen Candidate against Role
+              <MagnifyingGlass className="h-5 w-5 text-primary" weight="bold" /> Screen Candidate against Role
             </DialogTitle>
             <DialogDescription>
               Select an active job role to run AI semantic matching and CV scoring for {screenCandidate?.name}.
@@ -513,7 +510,6 @@ export function CVsPage() {
               Cancel
             </Button>
             <Button
-              variant="gradient"
               onClick={() => screenMutation.mutate()}
               disabled={!selectedJobId || screenMutation.isPending}
             >

@@ -71,7 +71,7 @@ export function IntegrationsPage() {
           <h1 className="text-2xl font-bold tracking-tight">Integrations</h1>
           <p className="text-sm text-muted-foreground">Configure webhooks to push data to your ATS or custom endpoints.</p>
         </div>
-        <Button onClick={() => setShowForm(!showForm)} variant="gradient">
+        <Button onClick={() => setShowForm(!showForm)}>
           <Plus className="mr-2 h-4 w-4" /> Add Webhook
         </Button>
       </div>
