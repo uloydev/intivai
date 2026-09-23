@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState } from "react"
 import {
-  Sparkle,
   CheckCircle,
   PaperPlaneRight,
-  Robot,
+  Cpu,
   User,
   ChartBar,
   WarningCircle,
+  CircleNotch,
 } from "@phosphor-icons/react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
@@ -202,12 +202,9 @@ export function DemoSimulator() {
   return (
     <section id="demo" className="px-6 max-w-4xl mx-auto">
       <div className="text-center space-y-2 mb-8">
-        <Badge variant="outline" className="text-primary border-primary/30 bg-primary/5 text-xs">
-          Live AI Competency Engine
-        </Badge>
-        <h2 className="font-display text-2xl sm:text-3xl font-bold">Interactive AI Technical Evaluator</h2>
+        <h2 className="font-display text-2xl sm:text-3xl font-bold tracking-tight">Interactive Technical Evaluation Preview</h2>
         <p className="text-xs sm:text-sm text-muted-foreground max-w-xl mx-auto">
-          Test the live scoring engine below. Choose an engineering discipline, type an answer (or insert a sample), and see real-time competency breakdown.
+          Test the scoring rubric below. Choose an engineering topic, type a response (or insert a sample), and review the real-time competency breakdown.
         </p>
       </div>
 
@@ -217,10 +214,10 @@ export function DemoSimulator() {
           <button
             key={scenario.id}
             onClick={() => handleScenarioChange(scenario.id)}
-            className={`px-3.5 py-2 rounded-xl text-xs font-semibold transition-all ${
+            className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
               activeScenarioId === scenario.id
-                ? "bg-primary text-primary-foreground shadow-md shadow-primary/20"
-                : "bg-card border border-border/60 text-muted-foreground hover:text-foreground hover:bg-muted/50"
+                ? "bg-primary text-primary-foreground shadow-sm"
+                : "bg-card border border-border text-muted-foreground hover:text-foreground hover:bg-muted"
             }`}
           >
             {scenario.category}
@@ -228,22 +225,22 @@ export function DemoSimulator() {
         ))}
       </div>
 
-      <Card className="glass border-primary/30 shadow-2xl shadow-primary/10 overflow-hidden">
-        <div className="border-b border-border/50 bg-muted/40 px-6 py-3.5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+      <Card className="border-border bg-card shadow-sm overflow-hidden">
+        <div className="border-b border-border bg-muted/30 px-6 py-3.5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
           <div className="flex items-center gap-2">
-            <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary text-primary-foreground text-xs font-bold font-display">
+            <div className="flex h-7 w-7 items-center justify-center rounded-md bg-primary text-primary-foreground text-xs font-bold font-display">
               I
             </div>
             <div>
               <span className="font-display font-semibold text-xs text-foreground block">
-                Intivai AI Interviewer
+                Intivai Technical Interviewer
               </span>
               <span className="text-[10px] text-muted-foreground block">{currentScenario.role}</span>
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <Badge className="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20 text-[10px]">
-              Adaptive Rubric Active
+            <Badge variant="outline" className="border-border text-muted-foreground text-[10px]">
+              Rubric Active
             </Badge>
           </div>
         </div>
@@ -251,10 +248,10 @@ export function DemoSimulator() {
         <CardContent className="p-6 space-y-5">
           {/* AI Question */}
           <div className="flex items-start gap-3">
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-sm">
-              <Robot className="h-4 w-4" weight="fill" />
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground shadow-sm">
+              <Cpu className="h-4 w-4" weight="bold" />
             </div>
-            <div className="rounded-2xl rounded-tl-sm bg-card border border-primary/20 p-4 text-xs sm:text-sm leading-relaxed max-w-2xl">
+            <div className="rounded-lg bg-muted/40 border border-border p-4 text-xs sm:text-sm leading-relaxed max-w-2xl">
               <p className="font-medium text-foreground">"{currentScenario.question}"</p>
             </div>
           </div>
@@ -266,21 +263,21 @@ export function DemoSimulator() {
               <button
                 type="button"
                 onClick={() => setSimAnswer(currentScenario.sampleGood)}
-                className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 text-[11px] text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/20 font-medium"
+                className="rounded-md border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 text-[11px] text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/20 font-medium"
               >
                 ✓ Strong Senior Answer
               </button>
               <button
                 type="button"
                 onClick={() => setSimAnswer(currentScenario.sampleBasic)}
-                className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-[11px] text-amber-600 dark:text-amber-400 hover:bg-amber-500/20 font-medium"
+                className="rounded-md border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-[11px] text-amber-600 dark:text-amber-400 hover:bg-amber-500/20 font-medium"
               >
                 ⚠ Basic / Brief Answer
               </button>
               <button
                 type="button"
                 onClick={() => setSimAnswer("I have worked with this before in some projects.")}
-                className="rounded-lg border border-destructive/30 bg-destructive/10 px-2.5 py-1 text-[11px] text-destructive hover:bg-destructive/20 font-medium"
+                className="rounded-md border border-destructive/30 bg-destructive/10 px-2.5 py-1 text-[11px] text-destructive hover:bg-destructive/20 font-medium"
               >
                 ✕ Evasive Answer
               </button>
@@ -290,10 +287,10 @@ export function DemoSimulator() {
           {/* Candidate Response Output if submitted */}
           {simSubmitted && (
             <div className="flex items-start justify-end gap-3 animate-in fade-in duration-300">
-              <div className="rounded-2xl rounded-tr-sm bg-primary text-primary-foreground p-4 text-xs sm:text-sm leading-relaxed max-w-xl">
+              <div className="rounded-lg bg-primary text-primary-foreground p-4 text-xs sm:text-sm leading-relaxed max-w-xl">
                 <p>{simAnswer}</p>
               </div>
-              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-muted text-muted-foreground border border-border">
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground border border-border">
                 <User className="h-4 w-4" weight="bold" />
               </div>
             </div>
@@ -301,19 +298,19 @@ export function DemoSimulator() {
 
           {/* AI Real-time Dynamic Feedback */}
           {isEvaluating && (
-            <div className="flex items-center gap-3 p-4 rounded-xl border border-primary/20 bg-primary/5 text-xs text-primary animate-pulse">
-              <Sparkle className="h-5 w-5 animate-spin" weight="bold" />
-              <span>Analyzing response against technical rubric and trade-off vectors...</span>
+            <div className="flex items-center gap-3 p-4 rounded-lg border border-border bg-muted/40 text-xs text-foreground">
+              <CircleNotch className="h-4 w-4 animate-spin text-primary" weight="bold" />
+              <span>Analyzing response against technical rubric...</span>
             </div>
           )}
 
           {evalResult && (
             <div className="space-y-3 animate-in fade-in zoom-in-95 duration-300">
-              <div className="rounded-2xl border border-border/80 bg-card p-5 space-y-4 shadow-sm">
+              <div className="rounded-lg border border-border bg-card p-5 space-y-4 shadow-sm">
                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-border/50 pb-3">
                   <div className="flex items-center gap-2">
                     <div
-                      className={`flex h-8 w-8 items-center justify-center rounded-xl font-bold text-xs ${
+                      className={`flex h-8 w-8 items-center justify-center rounded-lg font-bold text-xs ${
                         evalResult.score >= 80
                           ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
                           : evalResult.score >= 60
@@ -351,7 +348,7 @@ export function DemoSimulator() {
 
                 {/* Dimension Ratings */}
                 <div className="grid grid-cols-3 gap-2 pt-1 text-center">
-                  <div className="rounded-lg bg-muted/40 p-2 border border-border/40">
+                  <div className="rounded-md bg-muted/40 p-2 border border-border">
                     <span className="text-[10px] text-muted-foreground uppercase font-semibold block">
                       Tech Depth
                     </span>
@@ -359,7 +356,7 @@ export function DemoSimulator() {
                       {evalResult.dimensions.technical}/100
                     </span>
                   </div>
-                  <div className="rounded-lg bg-muted/40 p-2 border border-border/40">
+                  <div className="rounded-md bg-muted/40 p-2 border border-border">
                     <span className="text-[10px] text-muted-foreground uppercase font-semibold block">
                       Communication
                     </span>
@@ -367,7 +364,7 @@ export function DemoSimulator() {
                       {evalResult.dimensions.communication}/100
                     </span>
                   </div>
-                  <div className="rounded-lg bg-muted/40 p-2 border border-border/40">
+                  <div className="rounded-md bg-muted/40 p-2 border border-border">
                     <span className="text-[10px] text-muted-foreground uppercase font-semibold block">
                       Problem Solving
                     </span>
@@ -380,7 +377,7 @@ export function DemoSimulator() {
                 {/* Strengths & Gaps */}
                 <div className="grid gap-2 sm:grid-cols-2 pt-1 text-xs">
                   {evalResult.strengths.length > 0 && (
-                    <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-3 space-y-1">
+                    <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/5 p-3 space-y-1">
                       <span className="font-bold text-[11px] text-emerald-600 dark:text-emerald-400 flex items-center gap-1 uppercase tracking-wider">
                         <CheckCircle className="h-3.5 w-3.5" weight="fill" /> Strengths
                       </span>
@@ -392,7 +389,7 @@ export function DemoSimulator() {
                     </div>
                   )}
                   {evalResult.gaps.length > 0 && (
-                    <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-3 space-y-1">
+                    <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 p-3 space-y-1">
                       <span className="font-bold text-[11px] text-amber-600 dark:text-amber-400 flex items-center gap-1 uppercase tracking-wider">
                         <WarningCircle className="h-3.5 w-3.5" weight="fill" /> Growth Areas
                       </span>
@@ -419,8 +416,7 @@ export function DemoSimulator() {
               />
               <div className="flex justify-end">
                 <Button
-                  variant="gradient"
-                  className="h-10 px-6 font-semibold"
+                  className="h-9 px-4 font-semibold text-xs shadow-sm"
                   onClick={handleSimulate}
                   disabled={!simAnswer.trim() || isEvaluating}
                 >
@@ -433,7 +429,7 @@ export function DemoSimulator() {
               <Button
                 variant="outline"
                 size="sm"
-                className="text-xs rounded-xl"
+                className="text-xs rounded-lg border-border"
                 onClick={() => {
                   setSimSubmitted(false)
                   setEvalResult(null)

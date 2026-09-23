@@ -5,11 +5,9 @@ import {
   Briefcase,
   MagnifyingGlass,
   CheckCircle,
-  Sparkle,
   ArrowRight,
   CloudArrowUp,
   Clock,
-  Robot,
   MapPin,
   CurrencyDollar,
   Buildings,
@@ -194,9 +192,6 @@ export function CareersPage() {
     <div className="space-y-12 py-10 px-6 max-w-6xl mx-auto animate-in fade-in duration-500">
       {/* Header Banner */}
       <div className="text-center space-y-4 max-w-3xl mx-auto">
-        <Badge variant="outline" className="text-primary border-primary/30 bg-primary/5 text-xs py-1 px-3">
-          <Sparkle className="mr-1.5 h-3.5 w-3.5" weight="fill" /> Public Career Board
-        </Badge>
         <h1 className="font-display text-4xl sm:text-5xl font-extrabold tracking-tight">
           Join High-Growth Engineering Teams
         </h1>
@@ -207,7 +202,7 @@ export function CareersPage() {
         <div className="pt-2 flex items-center justify-center gap-3">
           <Link
             to="/candidate/portal"
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold bg-primary/10 border border-primary/20 text-primary hover:bg-primary/20 transition-colors"
+            className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-medium bg-muted border border-border text-foreground hover:bg-muted/80 transition-colors"
           >
             <span>Already applied? Track your status in the Candidate Portal</span> →
           </Link>
@@ -288,39 +283,39 @@ export function CareersPage() {
             return (
               <Card
                 key={job.id}
-                className="glass border-border/60 p-6 flex flex-col justify-between hover:border-primary/40 hover:shadow-xl hover:shadow-primary/5 transition-all duration-300 rounded-2xl group"
+                className="border-border bg-card p-5 flex flex-col justify-between shadow-sm transition-all rounded-lg group"
               >
                 <div className="space-y-3.5">
                   {/* Top Company & Hiring Meta */}
                   <div className="flex items-start justify-between gap-3">
                     <div>
                       <div className="flex items-center gap-2 mb-1.5 flex-wrap">
-                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-primary/10 text-primary border border-primary/20">
+                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md text-xs font-semibold bg-muted text-foreground border border-border">
                           <Buildings className="h-3 w-3" /> {job.org_name || "Hiring Company"}
                         </span>
-                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-muted text-muted-foreground">
+                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md text-xs font-medium bg-muted text-muted-foreground">
                           <MapPin className="h-3 w-3" /> {job.location || "Remote"}
                         </span>
                         {job.employment_type && (
-                          <span className="px-2 py-0.5 rounded-full text-[11px] font-medium bg-muted/80 text-muted-foreground">
+                          <span className="px-2 py-0.5 rounded-md text-[11px] font-medium bg-muted/80 text-muted-foreground">
                             {job.employment_type}
                           </span>
                         )}
                       </div>
-                      <h2 className="font-display text-xl font-bold tracking-tight text-foreground group-hover:text-primary transition-colors">
+                      <h2 className="font-display text-lg font-bold tracking-tight text-foreground group-hover:text-primary transition-colors">
                         {job.title}
                       </h2>
                     </div>
 
-                    <Badge className="bg-success/10 text-success border-success/20 text-[10px] shrink-0">
+                    <Badge variant="outline" className="text-[10px] shrink-0 border-border text-muted-foreground">
                       Actively Hiring
                     </Badge>
                   </div>
 
                   {/* Salary Bracket Banner */}
                   {salary && (
-                    <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-emerald-950/30 border border-emerald-800/40 text-emerald-300 font-semibold text-xs">
-                      <CurrencyDollar className="h-3.5 w-3.5 text-emerald-400" />
+                    <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-muted border border-border text-foreground font-medium text-xs">
+                      <CurrencyDollar className="h-3.5 w-3.5 text-muted-foreground" />
                       <span>{salary}</span>
                     </div>
                   )}
@@ -334,7 +329,7 @@ export function CareersPage() {
                     {(job.required_skills ?? []).map((skill) => (
                       <span
                         key={skill}
-                        className="rounded-lg bg-primary/5 border border-primary/15 px-2 py-0.5 text-[11px] font-medium text-foreground"
+                        className="rounded-md bg-muted border border-border px-2 py-0.5 text-[11px] font-medium text-muted-foreground"
                       >
                         {skill}
                       </span>
@@ -343,19 +338,18 @@ export function CareersPage() {
                 </div>
 
                 {/* Footer Actions */}
-                <div className="pt-6 mt-4 border-t border-border/40 flex items-center justify-between gap-3">
+                <div className="pt-5 mt-4 border-t border-border flex items-center justify-between gap-3">
                   <button
                     type="button"
                     onClick={() => handleViewDetails(job)}
-                    className="text-xs font-semibold text-muted-foreground hover:text-primary transition-colors flex items-center gap-1"
+                    className="text-xs font-semibold text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1"
                   >
                     <Eye className="h-3.5 w-3.5" /> Details & Specs
                   </button>
 
                   <Button
-                    variant="gradient"
                     size="sm"
-                    className="shadow-md shadow-primary/20 rounded-xl"
+                    className="shadow-sm rounded-lg"
                     onClick={() => handleApplyClick(job)}
                   >
                     Apply Now <ArrowRight className="ml-1.5 h-3.5 w-3.5" />
@@ -372,9 +366,9 @@ export function CareersPage() {
         <DialogContent className="sm:max-w-3xl lg:max-w-4xl max-h-[90vh] flex flex-col p-0 overflow-hidden">
           {selectedJob && (
             <div className="flex flex-col h-full max-h-[90vh]">
-              <DialogHeader className="p-6 pb-4 border-b border-border/80 bg-card/90 backdrop-blur-sm shrink-0">
+              <DialogHeader className="p-6 pb-4 border-b border-border bg-card shrink-0">
                 <div className="flex items-center gap-2 mb-2 flex-wrap">
-                  <Badge variant="outline" className="text-primary border-primary/30 bg-primary/5 text-xs font-semibold">
+                  <Badge variant="outline" className="border-border text-foreground text-xs font-semibold">
                     {selectedJob.org_name || "Company Role"}
                   </Badge>
                   <span className="text-xs text-muted-foreground flex items-center gap-1">
@@ -389,8 +383,8 @@ export function CareersPage() {
                     {selectedJob.title}
                   </DialogTitle>
                   {selectedSalary && (
-                    <span className="inline-flex items-center px-3 py-1 rounded-xl bg-emerald-950/40 border border-emerald-800/50 text-emerald-300 font-bold text-xs shrink-0 self-start sm:self-auto">
-                      💰 {selectedSalary}
+                    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-muted border border-border text-foreground font-semibold text-xs shrink-0 self-start sm:self-auto">
+                      <CurrencyDollar className="h-3.5 w-3.5 text-muted-foreground" /> {selectedSalary}
                     </span>
                   )}
                 </div>
@@ -464,7 +458,7 @@ export function CareersPage() {
                   {/* Right Column: Key Facts, Benefits & Assessment Rails */}
                   <div className="lg:col-span-5 space-y-4">
                     {/* Role Facts Card */}
-                    <div className="rounded-xl border border-border/80 bg-background/60 p-4 space-y-3">
+                    <div className="rounded-lg border border-border bg-card p-4 space-y-3">
                       <h4 className="text-xs font-bold uppercase tracking-wider text-foreground">Position Details</h4>
                       <div className="space-y-2 text-xs">
                         <div className="flex justify-between items-center py-1 border-b border-border/40">
@@ -481,7 +475,7 @@ export function CareersPage() {
                         </div>
                         <div className="flex justify-between items-center py-1">
                           <span className="text-muted-foreground">Proctoring Mode</span>
-                          <Badge variant="outline" className="text-[10px] capitalize">
+                          <Badge variant="outline" className="text-[10px] capitalize border-border">
                             {selectedJob.proctoring_mode || "Optional"}
                           </Badge>
                         </div>
@@ -490,7 +484,7 @@ export function CareersPage() {
 
                     {/* Required Skills Badges */}
                     {selectedJob.required_skills && selectedJob.required_skills.length > 0 && (
-                      <div className="rounded-xl border border-border/80 bg-background/60 p-4 space-y-2.5">
+                      <div className="rounded-lg border border-border bg-card p-4 space-y-2.5">
                         <h4 className="text-xs font-bold uppercase tracking-wider text-foreground">Required Tech Stack</h4>
                         <div className="flex flex-wrap gap-1.5">
                           {selectedJob.required_skills.map((skill) => (
@@ -504,14 +498,14 @@ export function CareersPage() {
 
                     {/* Benefits & Perks */}
                     {selectedJob.benefits && selectedJob.benefits.length > 0 && (
-                      <div className="rounded-xl border border-emerald-900/40 bg-emerald-950/20 p-4 space-y-2.5">
-                        <h4 className="text-xs font-bold uppercase tracking-wider text-emerald-400 flex items-center gap-1.5">
-                          <Gift className="h-3.5 w-3.5" /> Benefits & Perks
+                      <div className="rounded-lg border border-border bg-card p-4 space-y-2.5">
+                        <h4 className="text-xs font-bold uppercase tracking-wider text-foreground flex items-center gap-1.5">
+                          <Gift className="h-3.5 w-3.5 text-primary" /> Benefits & Perks
                         </h4>
                         <div className="space-y-2">
                           {selectedJob.benefits.map((ben, idx) => (
                             <div key={idx} className="text-xs text-muted-foreground flex items-start gap-2">
-                              <span className="text-emerald-400 font-bold mt-0.5">✓</span>
+                              <span className="text-success font-bold mt-0.5">✓</span>
                               <span className="leading-relaxed">{ben}</span>
                             </div>
                           ))}
@@ -522,11 +516,11 @@ export function CareersPage() {
                 </div>
               </div>
 
-              <DialogFooter className="p-4 px-6 border-t border-border/80 bg-card/90 backdrop-blur-sm shrink-0 flex items-center justify-between sm:justify-between">
+              <DialogFooter className="p-4 px-6 border-t border-border bg-card shrink-0 flex items-center justify-between sm:justify-between">
                 <Button variant="secondary" onClick={() => setDetailModalOpen(false)}>
                   Close
                 </Button>
-                <Button variant="gradient" onClick={() => handleApplyClick(selectedJob)} className="shadow-md shadow-primary/20">
+                <Button onClick={() => handleApplyClick(selectedJob)} className="shadow-sm">
                   Apply for this Role <ArrowRight className="ml-1.5 h-3.5 w-3.5" />
                 </Button>
               </DialogFooter>
@@ -540,9 +534,9 @@ export function CareersPage() {
         <DialogContent className="sm:max-w-lg md:max-w-xl max-h-[90vh] flex flex-col p-0 overflow-hidden">
           {!submitted ? (
             <div className="flex flex-col h-full max-h-[90vh]">
-              <DialogHeader className="p-6 pb-4 border-b border-border/80 bg-card/90 backdrop-blur-sm shrink-0">
+              <DialogHeader className="p-6 pb-4 border-b border-border bg-card shrink-0">
                 <div className="flex items-center gap-2 mb-1">
-                  <Badge variant="outline" className="text-primary border-primary/30 bg-primary/5 text-[10px] font-semibold">
+                  <Badge variant="outline" className="border-border text-foreground text-[10px] font-semibold">
                     Direct Application
                   </Badge>
                   {selectedJob?.org_name && (
@@ -553,7 +547,7 @@ export function CareersPage() {
                   Apply for {selectedJob?.title}
                 </DialogTitle>
                 <DialogDescription className="text-xs">
-                  Submit your details and PDF resume. Intivai's AI will parse your technical background and schedule your interview.
+                  Submit your details and PDF resume. Intivai's engine will parse your technical background and schedule your interview.
                 </DialogDescription>
               </DialogHeader>
 
@@ -565,7 +559,7 @@ export function CareersPage() {
                     placeholder="e.g. Jane Doe"
                     value={name}
                     onChange={(e) => setName(e.target.value)}
-                    className="bg-background/80"
+                    className="bg-background"
                   />
                 </div>
 
@@ -577,7 +571,7 @@ export function CareersPage() {
                     placeholder="jane.doe@example.com"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
-                    className="bg-background/80"
+                    className="bg-background"
                   />
                 </div>
 
@@ -598,7 +592,7 @@ export function CareersPage() {
                       setFile(f)
                       setFileError(null)
                     }}
-                    className="bg-background/80 file:mr-2 file:rounded-md file:border-0 file:bg-primary/10 file:px-2 file:py-1 file:text-xs file:font-semibold file:text-primary"
+                    className="bg-background file:mr-2 file:rounded-md file:border-0 file:bg-primary/10 file:px-2 file:py-1 file:text-xs file:font-semibold file:text-primary"
                   />
                   {fileError ? (
                     <p className="text-[11px] font-medium text-destructive">{fileError}</p>
@@ -610,18 +604,17 @@ export function CareersPage() {
                 </div>
               </div>
 
-              <DialogFooter className="p-4 px-6 border-t border-border/80 bg-card/90 backdrop-blur-sm shrink-0 flex items-center justify-between sm:justify-between">
+              <DialogFooter className="p-4 px-6 border-t border-border bg-card shrink-0 flex items-center justify-between sm:justify-between">
                 <Button variant="secondary" onClick={() => setApplyModalOpen(false)}>
                   Cancel
                 </Button>
                 <Button
-                  variant="gradient"
                   onClick={() => {
                     setSubmitting(true)
                     applyMutation.mutate()
                   }}
                   disabled={!name.trim() || !email.trim() || !file || !!fileError || submitting}
-                  className="shadow-md shadow-primary/20"
+                  className="shadow-sm"
                 >
                   <CloudArrowUp className="mr-1.5 h-4 w-4" weight="bold" />
                   {submitting ? "Analyzing & Submitting…" : "Submit Application"}
@@ -630,19 +623,19 @@ export function CareersPage() {
             </div>
           ) : (
             <div className="p-8 text-center space-y-4">
-              <div className="flex h-16 w-16 mx-auto items-center justify-center rounded-2xl bg-success/10 text-success">
-                <CheckCircle className="h-10 w-10" weight="fill" />
+              <div className="flex h-14 w-14 mx-auto items-center justify-center rounded-xl bg-success/10 text-success">
+                <CheckCircle className="h-8 w-8" weight="bold" />
               </div>
               <div>
-                <h3 className="font-display text-2xl font-bold">Application Received!</h3>
+                <h3 className="font-display text-xl font-bold">Application Received</h3>
                 <p className="text-xs text-muted-foreground max-w-sm mx-auto mt-1.5 leading-relaxed">
-                  Thank you, <strong className="text-foreground">{name}</strong>. Your resume has been uploaded and queued for automated AI screening against the <strong className="text-foreground">{selectedJob?.title}</strong> role requirements.
+                  Thank you, <strong className="text-foreground">{name}</strong>. Your resume has been uploaded and queued for evaluation against the <strong className="text-foreground">{selectedJob?.title}</strong> role requirements.
                 </p>
               </div>
 
-              <div className="rounded-xl border border-primary/20 bg-primary/5 p-4 text-xs text-muted-foreground text-left space-y-2">
+              <div className="rounded-lg border border-border bg-muted/30 p-4 text-xs text-muted-foreground text-left space-y-2">
                 <p className="font-semibold text-foreground flex items-center gap-1.5">
-                  <Robot className="h-4 w-4 text-primary" weight="fill" /> What happens next:
+                  What happens next:
                 </p>
                 <ul className="space-y-1 pl-1">
                   <li>• Semantic engine extracts your technical skills and calculates match compatibility.</li>
@@ -651,7 +644,7 @@ export function CareersPage() {
               </div>
 
               <div className="pt-2 flex flex-col sm:flex-row gap-2 justify-center">
-                <Button asChild variant="gradient" className="shadow-md shadow-primary/20">
+                <Button asChild className="shadow-sm">
                   <Link to={portalToken ? `/candidate/portal?token=${encodeURIComponent(portalToken)}` : "/candidate/portal"}>
                     Track in Candidate Portal <ArrowRight className="ml-1.5 h-3.5 w-3.5" />
                   </Link>

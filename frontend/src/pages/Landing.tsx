@@ -1,7 +1,6 @@
 import { useState, useEffect } from "react"
 import { Link, useLocation } from "react-router-dom"
 import {
-  Sparkle,
   Briefcase,
   MicrophoneStage,
   ArrowRight,
@@ -15,8 +14,6 @@ import {
 } from "@phosphor-icons/react"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
-import { Badge } from "@/components/ui/badge"
-import { BlurFade } from "@/components/ui/blur-fade"
 import { DemoSimulator } from "@/components/landing/DemoSimulator"
 import { RoiCalculator } from "@/components/landing/RoiCalculator"
 
@@ -42,30 +39,22 @@ export function LandingPage() {
     <div className="space-y-16 md:space-y-24 pb-20 animate-in fade-in duration-700">
       {/* 1. HERO SECTION */}
       <section className="relative pt-12 md:pt-20 px-6 text-center max-w-5xl mx-auto space-y-8">
-        <div className="inline-flex items-center gap-2 rounded-full border border-primary/30 bg-primary/10 px-4 py-1.5 text-xs font-semibold text-primary shadow-sm backdrop-blur-md">
-          <Sparkle className="h-4 w-4" weight="fill" />
-          <span>Next-Gen Autonomous Technical Interview Platform</span>
-        </div>
-
-        <h1 className="font-display text-4xl font-extrabold tracking-tight sm:text-6xl md:text-7xl leading-[1.1]">
-          Screen, Probe, and Grade Engineers with{" "}
-          <span className="bg-gradient-to-r from-primary via-blue-500 to-indigo-500 bg-clip-text text-transparent">
-            Real-Time AI
-          </span>
+        <h1 className="font-display text-4xl font-extrabold tracking-tight sm:text-6xl md:text-7xl leading-[1.1] text-foreground">
+          Autonomous Technical Interviews Backed by Objective Engineering Rubrics
         </h1>
 
         <p className="mx-auto max-w-2xl text-base sm:text-lg text-muted-foreground leading-relaxed">
-          Intivai conducts adaptive chat technical interviews with a live code editor, detects candidate-environment signals in real-time, matches resumes using vector semantics, and generates boardroom-ready executive scorecards.
+          Intivai pairs adaptive technical interviewing and live code evaluation with vector-based resume matching and auditable scoring rubrics.
         </p>
 
         {/* Dual Call-to-Action */}
         <div className="flex flex-col sm:flex-row items-center justify-center gap-4 pt-2">
-          <Button asChild size="lg" variant="gradient" className="h-12 px-8 font-semibold shadow-lg shadow-primary/25 rounded-xl text-sm">
+          <Button asChild size="lg" className="h-11 px-6 font-semibold shadow-sm text-sm">
             <Link to="/careers">
               <Briefcase className="mr-2 h-4 w-4" weight="bold" /> Explore Careers & Apply
             </Link>
           </Button>
-          <Button asChild size="lg" variant="outline" className="h-12 px-8 font-semibold rounded-xl text-sm border-border/80 hover:bg-muted">
+          <Button asChild size="lg" variant="outline" className="h-11 px-6 font-semibold text-sm border-border hover:bg-muted">
             <Link to="/login">
               Recruiter Console Demo <ArrowRight className="ml-2 h-4 w-4" />
             </Link>
@@ -73,22 +62,22 @@ export function LandingPage() {
         </div>
 
         {/* Live Metrics Row */}
-        <div className="grid grid-cols-2 gap-4 md:grid-cols-4 pt-8 max-w-4xl mx-auto border-y border-border/50 py-6">
+        <div className="grid grid-cols-2 gap-4 md:grid-cols-4 pt-8 max-w-4xl mx-auto border-y border-border py-6 text-left">
           <div className="space-y-1">
-            <p className="font-display text-3xl font-extrabold text-primary">10x</p>
-            <p className="text-xs text-muted-foreground">Faster Candidate Turnaround</p>
+            <p className="font-display text-base font-bold text-foreground">Adaptive Chat & Sandbox</p>
+            <p className="text-xs text-muted-foreground">Interactive questioning with Monaco editor & automated test runs</p>
           </div>
           <div className="space-y-1">
-            <p className="font-display text-3xl font-extrabold text-foreground">100%</p>
-            <p className="text-xs text-muted-foreground">Deterministic Safety Rails</p>
+            <p className="font-display text-base font-bold text-foreground">Auditable Rubrics</p>
+            <p className="text-xs text-muted-foreground">Full transcripts, code execution logs, and per-question rationale</p>
           </div>
           <div className="space-y-1">
-            <p className="font-display text-3xl font-extrabold text-success">&lt; 3.0s</p>
-            <p className="text-xs text-muted-foreground">Voice Latency (demo)</p>
+            <p className="font-display text-base font-bold text-foreground">384-Dim Vector Match</p>
+            <p className="text-xs text-muted-foreground">Semantic resume scoring via pgvector cosine distance</p>
           </div>
           <div className="space-y-1">
-            <p className="font-display text-3xl font-extrabold text-info">384-Dim</p>
-            <p className="text-xs text-muted-foreground">Vector Semantic Matching</p>
+            <p className="font-display text-base font-bold text-foreground">Tenant-Isolated</p>
+            <p className="text-xs text-muted-foreground">Kernel-enforced PostgreSQL Row-Level Security per organization</p>
           </div>
         </div>
       </section>
@@ -97,23 +86,19 @@ export function LandingPage() {
       <DemoSimulator />
 
       {/* 3. HOW IT WORKS LIFECYCLE */}
-      <BlurFade delay={0.1} inView>
-        <section id="how-it-works" className="scroll-mt-24 px-6 max-w-6xl mx-auto space-y-12">
+      <section id="how-it-works" className="scroll-mt-24 px-6 max-w-6xl mx-auto space-y-12">
         <div className="text-center space-y-3">
-          <Badge variant="outline" className="text-primary border-primary/30 bg-primary/5 text-xs">
-            End-to-End Workflow
-          </Badge>
           <h2 className="font-display text-3xl sm:text-4xl font-bold tracking-tight">
             How Autonomous Screening Works
           </h2>
           <p className="text-sm text-muted-foreground max-w-2xl mx-auto">
-            A frictionless candidate-first journey backed by rigorous multi-modal AI evaluation and deterministic enterprise rails.
+            A structured candidate evaluation process backed by deterministic technical rubrics and telemetry validation.
           </p>
         </div>
 
         <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
-          <Card className="glass border-border/60 p-5 space-y-3 relative overflow-hidden">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 text-primary font-display font-bold text-sm">
+          <Card className="border-border bg-card p-5 space-y-3 relative overflow-hidden shadow-sm">
+            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10 text-primary font-display font-bold text-sm">
               01
             </div>
             <h3 className="font-display font-bold text-base">Job & Rail Setup</h3>
@@ -122,8 +107,8 @@ export function LandingPage() {
             </p>
           </Card>
 
-          <Card className="glass border-border/60 p-5 space-y-3 relative overflow-hidden">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-info/10 text-info font-display font-bold text-sm">
+          <Card className="border-border bg-card p-5 space-y-3 relative overflow-hidden shadow-sm">
+            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-info/10 text-info font-display font-bold text-sm">
               02
             </div>
             <h3 className="font-display font-bold text-base">Semantic CV Matching</h3>
@@ -132,94 +117,86 @@ export function LandingPage() {
             </p>
           </Card>
 
-          <Card className="glass border-border/60 p-5 space-y-3 relative overflow-hidden">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-500/10 text-indigo-500 font-display font-bold text-sm">
+          <Card className="border-border bg-card p-5 space-y-3 relative overflow-hidden shadow-sm">
+            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-accent/10 text-accent font-display font-bold text-sm">
               03
             </div>
-            <h3 className="font-display font-bold text-base">Voice, Chat & Sandbox</h3>
+            <h3 className="font-display font-bold text-base">Chat & Coding Sandbox</h3>
             <p className="text-xs leading-relaxed text-muted-foreground">
-              Candidates complete adaptive chat interviews with live pair-programming in Monaco editor and anti-cheat guardrails. Voice rounds are in a gated early-access demo.
+              Candidates complete adaptive chat interviews with live pair-programming in Monaco editor and anti-cheat guardrails.
             </p>
           </Card>
 
-          <Card className="glass border-border/60 p-5 space-y-3 relative overflow-hidden">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-success/10 text-success font-display font-bold text-sm">
+          <Card className="border-border bg-card p-5 space-y-3 relative overflow-hidden shadow-sm">
+            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-success/10 text-success font-display font-bold text-sm">
               04
             </div>
             <h3 className="font-display font-bold text-base">Scorecards & ATS Sync</h3>
             <p className="text-xs leading-relaxed text-muted-foreground">
-              Instant executive scorecards synthesize technical depth, problem-solving, code complexity, and export Maroto PDFs.
+              Executive scorecards synthesize technical depth, problem-solving, code complexity, and export Maroto PDFs.
             </p>
           </Card>
         </div>
       </section>
-      </BlurFade>
 
       {/* 4. ENTERPRISE PROCTORING & ANTI-CHEATING SHOWCASE */}
       <section id="proctoring" className="scroll-mt-24 px-6 max-w-6xl mx-auto space-y-12">
         <div className="text-center space-y-3">
-          <Badge variant="outline" className="text-primary border-primary/30 bg-primary/5 text-xs">
-            Integrity Guardrails
-          </Badge>
           <h2 className="font-display text-3xl sm:text-4xl font-bold tracking-tight">
-            Enterprise Anti-Cheating & AI Proctoring
+            Integrity Guardrails & Telemetry
           </h2>
           <p className="text-sm text-muted-foreground max-w-2xl mx-auto">
-            Hiring decisions require absolute integrity. Intivai actively monitors telemetry across browser focus, clipboard activity, and audio streams to prevent AI-generated ghostwriting.
+            Hiring decisions require verifiable integrity. Intivai logs environment signals across window focus, clipboard activity, and audio streams.
           </p>
         </div>
 
         <div className="grid gap-6 md:grid-cols-3">
-          <Card className="glass border-border/60 p-6 space-y-4 hover:border-primary/40 transition-all shadow-sm">
-            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+          <Card className="border-border bg-card p-6 space-y-4 shadow-sm">
+            <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-primary/10 text-primary">
               <ShieldCheck className="h-6 w-6" weight="bold" />
             </div>
             <h3 className="font-display font-bold text-lg">Focus & Tab-Switch Tracking</h3>
             <p className="text-xs leading-relaxed text-muted-foreground">
-              Continuously logs window blur, tab switching, and away duration. Frequent departures trigger automated penalty calculations and recruiter audit flags.
+              Logs window blur, tab switching, and away duration. Frequent departures trigger automated penalty flags for recruiter review.
             </p>
           </Card>
 
-          <Card className="glass border-border/60 p-6 space-y-4 hover:border-primary/40 transition-all shadow-sm">
-            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-warning/10 text-warning">
+          <Card className="border-border bg-card p-6 space-y-4 shadow-sm">
+            <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-warning/10 text-warning">
               <Lightning className="h-6 w-6" weight="bold" />
             </div>
             <h3 className="font-display font-bold text-lg">Clipboard Paste Telemetry</h3>
             <p className="text-xs leading-relaxed text-muted-foreground">
-              Detects sudden multi-paragraph code or text pastes within seconds of question dispatch, preventing candidates from copy-pasting answers from external LLMs.
+              Detects large text and code pastes within short intervals after question dispatch to flag unverified external assistance.
             </p>
           </Card>
 
-          <Card className="glass border-border/60 p-6 space-y-4 hover:border-primary/40 transition-all shadow-sm">
-            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-success/10 text-success">
+          <Card className="border-border bg-card p-6 space-y-4 shadow-sm">
+            <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-success/10 text-success">
               <MicrophoneStage className="h-6 w-6" weight="bold" />
             </div>
             <h3 className="font-display font-bold text-lg">Voice Stream Audio Anomaly</h3>
             <p className="text-xs leading-relaxed text-muted-foreground">
-              Planned capability for voice rounds (early-access demo): frequency analysis to detect secondary background speakers, whisper prompting, or synthetic proxy voices. Not yet available in chat-only interviews.
+              Planned capability for voice rounds (early-access demo): frequency analysis to detect secondary background speakers or synthetic proxies.
             </p>
           </Card>
         </div>
       </section>
 
       {/* 5. CORE PLATFORM PILLARS */}
-      <BlurFade delay={0.2} inView>
-        <section id="features" className="scroll-mt-24 px-6 max-w-6xl mx-auto space-y-12">
+      <section id="features" className="scroll-mt-24 px-6 max-w-6xl mx-auto space-y-12">
         <div className="text-center space-y-3">
-          <Badge variant="outline" className="text-primary border-primary/30 bg-primary/5 text-xs">
-            Complete Architecture
-          </Badge>
           <h2 className="font-display text-3xl sm:text-4xl font-bold tracking-tight">
             Built for Modern Engineering Hiring
           </h2>
           <p className="text-sm text-muted-foreground max-w-2xl mx-auto">
-            From the moment a CV is uploaded to final score synthesis, Intivai operates with complete autonomy and enterprise isolation.
+            From CV ingestion to final scorecard synthesis, Intivai operates with complete autonomy and tenant isolation.
           </p>
         </div>
 
         <div className="grid gap-6 md:grid-cols-3">
-          <Card className="glass border-border/60 hover:border-primary/40 transition-all hover:shadow-xl hover:shadow-primary/5 p-6 space-y-4">
-            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-info/10 text-info">
+          <Card className="border-border bg-card shadow-sm p-6 space-y-4">
+            <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-info/10 text-info">
               <Cpu className="h-6 w-6" weight="bold" />
             </div>
             <h3 className="font-display font-bold text-lg">Semantic CV Vector Screening</h3>
@@ -228,8 +205,8 @@ export function LandingPage() {
             </p>
           </Card>
 
-          <Card className="glass border-border/60 hover:border-primary/40 transition-all hover:shadow-xl hover:shadow-primary/5 p-6 space-y-4">
-            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+          <Card className="border-border bg-card shadow-sm p-6 space-y-4">
+            <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-primary/10 text-primary">
               <MicrophoneStage className="h-6 w-6" weight="bold" />
             </div>
             <h3 className="font-display font-bold text-lg">WebRTC Voice Interviewing</h3>
@@ -238,8 +215,8 @@ export function LandingPage() {
             </p>
           </Card>
 
-          <Card className="glass border-border/60 hover:border-primary/40 transition-all hover:shadow-xl hover:shadow-primary/5 p-6 space-y-4">
-            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-success/10 text-success">
+          <Card className="border-border bg-card shadow-sm p-6 space-y-4">
+            <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-success/10 text-success">
               <FilePdf className="h-6 w-6" weight="bold" />
             </div>
             <h3 className="font-display font-bold text-lg">Executive PDF Scorecards</h3>
@@ -256,16 +233,13 @@ export function LandingPage() {
       {/* 7. ENTERPRISE COMPLIANCE & SECURITY */}
       <section id="security" className="scroll-mt-24 px-6 max-w-5xl mx-auto space-y-8">
         <div className="text-center space-y-3">
-          <Badge variant="outline" className="text-primary border-primary/30 bg-primary/5 text-xs">
-            Enterprise Grade
-          </Badge>
           <h2 className="font-display text-3xl sm:text-4xl font-bold tracking-tight">
             Security, Privacy & Bias-Free Compliance
           </h2>
         </div>
 
         <div className="grid gap-4 sm:grid-cols-3">
-          <div className="rounded-2xl border border-border/60 bg-card p-5 space-y-2">
+          <div className="rounded-lg border border-border bg-card p-5 space-y-2 shadow-sm">
             <LockKey className="h-6 w-6 text-primary" weight="bold" />
             <h4 className="font-display font-bold text-sm">Postgres Row-Level Security (RLS)</h4>
             <p className="text-xs text-muted-foreground leading-relaxed">
@@ -273,7 +247,7 @@ export function LandingPage() {
             </p>
           </div>
 
-          <div className="rounded-2xl border border-border/60 bg-card p-5 space-y-2">
+          <div className="rounded-lg border border-border bg-card p-5 space-y-2 shadow-sm">
             <Scales className="h-6 w-6 text-success" weight="bold" />
             <h4 className="font-display font-bold text-sm">GDPR & AI Bias Mitigation</h4>
             <p className="text-xs text-muted-foreground leading-relaxed">
@@ -281,7 +255,7 @@ export function LandingPage() {
             </p>
           </div>
 
-          <div className="rounded-2xl border border-border/60 bg-card p-5 space-y-2">
+          <div className="rounded-lg border border-border bg-card p-5 space-y-2 shadow-sm">
             <ShieldCheck className="h-6 w-6 text-info" weight="bold" />
             <h4 className="font-display font-bold text-sm">Automated Mailer & ATS Webhooks</h4>
             <p className="text-xs text-muted-foreground leading-relaxed">
@@ -290,11 +264,9 @@ export function LandingPage() {
           </div>
         </div>
       </section>
-      </BlurFade>
 
       {/* 8. FREQUENTLY ASKED QUESTIONS (FAQ) */}
-      <BlurFade delay={0.3} inView>
-        <section id="faq" className="scroll-mt-24 px-6 max-w-3xl mx-auto space-y-6">
+      <section id="faq" className="scroll-mt-24 px-6 max-w-3xl mx-auto space-y-6">
         <div className="text-center space-y-2">
           <h2 className="font-display text-2xl sm:text-3xl font-bold">Frequently Asked Questions</h2>
           <p className="text-xs sm:text-sm text-muted-foreground">
@@ -323,7 +295,7 @@ export function LandingPage() {
           ].map((item, idx) => (
             <div
               key={idx}
-              className="rounded-2xl border border-border/60 bg-card p-4 transition-all cursor-pointer"
+              className="rounded-lg border border-border bg-card p-4 transition-all cursor-pointer shadow-sm"
               onClick={() => setOpenFaq(openFaq === idx ? null : idx)}
               role="button"
               tabIndex={0}
@@ -345,7 +317,7 @@ export function LandingPage() {
                 />
               </div>
               <div className={`overflow-hidden transition-all duration-300 ease-in-out ${openFaq === idx ? "max-h-40 opacity-100" : "max-h-0 opacity-0"}`}>
-                <p className="text-xs text-muted-foreground pt-2.5 leading-relaxed border-t border-border/40 mt-2.5">
+                <p className="text-xs text-muted-foreground pt-2.5 leading-relaxed border-t border-border mt-2.5">
                   {item.a}
                 </p>
               </div>
@@ -353,22 +325,21 @@ export function LandingPage() {
           ))}
         </div>
       </section>
-      </BlurFade>
 
       {/* 9. CALL TO ACTION BANNER */}
       <section className="px-6 max-w-5xl mx-auto">
-        <div className="glass rounded-3xl border border-primary/30 bg-gradient-to-r from-primary/15 via-card to-blue-500/15 p-10 md:p-16 text-center space-y-6 shadow-2xl shadow-primary/10">
-          <h2 className="font-display text-3xl sm:text-5xl font-extrabold tracking-tight">
+        <div className="rounded-xl border border-border bg-card p-8 md:p-12 text-center space-y-4 shadow-sm">
+          <h2 className="font-display text-2xl sm:text-4xl font-bold tracking-tight">
             Ready to Automate Your Technical Hiring?
           </h2>
           <p className="text-sm sm:text-base text-muted-foreground max-w-xl mx-auto">
             Browse our open job openings as a candidate or launch your organization workspace today.
           </p>
           <div className="flex flex-wrap items-center justify-center gap-4 pt-2">
-            <Button asChild size="lg" variant="gradient" className="h-12 px-8 font-semibold shadow-lg shadow-primary/25 rounded-xl">
+            <Button asChild size="lg" className="h-11 px-6 font-semibold shadow-sm">
               <Link to="/careers">Browse Open Roles</Link>
             </Button>
-            <Button asChild size="lg" variant="outline" className="h-12 px-8 font-semibold rounded-xl">
+            <Button asChild size="lg" variant="outline" className="h-11 px-6 font-semibold border-border">
               <Link to="/register">Create Recruiter Workspace</Link>
             </Button>
           </div>
