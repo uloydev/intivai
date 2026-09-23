@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { useNavigate, useParams, useSearchParams } from "react-router-dom"
 import {
-  Sparkle,
   ArrowRight,
   SpinnerGap,
   Clock,
@@ -14,7 +13,6 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Label } from "@/components/ui/label"
-import { Badge } from "@/components/ui/badge"
 import { toast } from "sonner"
 
 export function InvitePage() {
@@ -66,21 +64,16 @@ export function InvitePage() {
   }, [autoStart, busy, consented, failed, id, start, token])
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-primary/10 via-background to-background p-4 animate-in fade-in duration-500">
+    <div className="flex min-h-screen items-center justify-center bg-background p-4 animate-in fade-in duration-500">
       <div className="w-full max-w-lg space-y-4">
-        <Card className="glass border-primary/20 shadow-2xl shadow-primary/10 overflow-hidden relative">
+        <Card className="border-border bg-card shadow-sm overflow-hidden relative">
           <CardHeader className="text-center pb-2">
-            <div className="mx-auto mb-2 flex h-12 w-12 items-center justify-center rounded-2xl bg-primary text-primary-foreground font-bold font-display text-xl shadow-lg shadow-primary/25">
+            <div className="mx-auto mb-2 flex h-12 w-12 items-center justify-center rounded-xl bg-primary text-primary-foreground font-bold font-display text-xl shadow-sm">
               I
-            </div>
-            <div className="flex items-center justify-center gap-1.5 mb-1">
-              <Badge variant="outline" className="gap-1 border-primary/30 bg-primary/5 text-primary text-xs py-0.5">
-                <Sparkle className="h-3 w-3" weight="fill" /> Candidate Portal
-              </Badge>
             </div>
             <CardTitle className="font-display text-2xl font-bold tracking-tight">Interview Invitation</CardTitle>
             <CardDescription className="text-xs">
-              Welcome! You've been invited to complete an interactive AI screening interview.
+              Welcome! You've been invited to complete a technical screening interview.
             </CardDescription>
           </CardHeader>
 
@@ -127,8 +120,7 @@ export function InvitePage() {
             </div>
 
             <Button
-              className="w-full font-semibold shadow-md shadow-primary/20"
-              variant="gradient"
+              className="w-full font-semibold shadow-sm"
               size="lg"
               onClick={start}
               disabled={!consented || busy || !token || failed}

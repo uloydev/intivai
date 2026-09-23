@@ -55,8 +55,7 @@ function SubmitButton({
   return (
     <Button
       type="submit"
-      variant="gradient"
-      className="w-full h-12 rounded-xl font-semibold shadow-lg shadow-primary/25 disabled:opacity-50 flex items-center justify-center gap-2"
+      className="w-full h-11 rounded-lg font-semibold shadow-sm disabled:opacity-50 flex items-center justify-center gap-2"
       disabled={loading || disabled}
     >
       {loading ? (
@@ -282,18 +281,18 @@ export function CandidatePortal() {
           /* Authentication Screen */
           <div className="max-w-md mx-auto">
             <div className="text-center mb-8">
-              <div className="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-gradient-to-tr from-primary to-blue-500 text-primary-foreground font-bold text-xl shadow-lg shadow-primary/25 mb-4">
-                ✦
+              <div className="inline-flex items-center justify-center w-12 h-12 rounded-lg bg-primary text-primary-foreground font-bold text-xl shadow-sm mb-4">
+                I
               </div>
               <h1 className="text-3xl font-extrabold tracking-tight text-foreground sm:text-4xl">
                 Candidate Portal
               </h1>
               <p className="mt-2 text-sm text-muted-foreground">
-                Track your job applications, screening scores, and launch your AI assessment sessions.
+                Track your job applications, screening scores, and launch your assessment sessions.
               </p>
             </div>
 
-            <div className="bg-card/80 border border-border rounded-2xl p-8 backdrop-blur-xl shadow-2xl">
+            <div className="bg-card border border-border rounded-xl p-8 shadow-sm">
               {error && (
                 <div className="mb-6 p-4 rounded-xl bg-destructive/10 border border-destructive/30 text-destructive text-sm flex items-start gap-3">
                   <span className="text-destructive font-bold">✕</span>
@@ -410,10 +409,10 @@ export function CandidatePortal() {
           /* Authenticated Candidate Dashboard */
           <div className="space-y-8">
             {/* Header bar */}
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 p-6 bg-card/80 border border-border rounded-2xl backdrop-blur-xl">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 p-6 bg-card border border-border rounded-xl shadow-sm">
               <div>
                 <div className="flex items-center gap-2 mb-1">
-                  <span className="inline-block w-2.5 h-2.5 rounded-full bg-success animate-pulse" />
+                  <span className="inline-block w-2 h-2 rounded-full bg-success" />
                   <h2 className="text-xl font-bold text-foreground">Applicant Tracking Dashboard</h2>
                 </div>
                 <p className="text-sm text-muted-foreground">
@@ -491,7 +490,7 @@ export function CandidatePortal() {
                     You haven't submitted any job applications under this email address yet.
                   </p>
                 </div>
-                <Button asChild variant="gradient" size="sm" className="shadow-md shadow-primary/20">
+                <Button asChild size="sm" className="shadow-sm">
                   <Link to="/careers">
                     Explore Open Careers →
                   </Link>
@@ -500,7 +499,7 @@ export function CandidatePortal() {
             ) : (
               <div className="space-y-6">
                 {appsQuery.isFetching && (
-                  <p className="text-xs text-muted-foreground text-center animate-pulse">
+                  <p className="text-xs text-muted-foreground text-center">
                     Refreshing…
                   </p>
                 )}
@@ -512,7 +511,7 @@ export function CandidatePortal() {
                   return (
                     <div
                       key={app.application_id}
-                      className="p-6 bg-card border border-border rounded-2xl shadow-xl transition-all hover:border-primary/40"
+                      className="p-6 bg-card border border-border rounded-xl shadow-sm transition-all hover:border-primary/40"
                     >
                       {/* Top Job Info Header */}
                       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 pb-6 border-b border-border/80">
@@ -539,9 +538,9 @@ export function CandidatePortal() {
                           {isInterviewReady ? (
                             <Link
                               to={`/invite/${app.interview_id}?t=${encodeURIComponent(app.invitation_token ?? "")}`}
-                              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold text-white bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 active:scale-[0.98] transition-all shadow-lg shadow-emerald-600/25 animate-pulse"
+                              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold text-accent-foreground bg-accent hover:bg-accent/90 active:scale-[0.98] transition-all shadow-sm"
                             >
-                              <span>Launch AI Interview</span> →
+                              <span>Launch Interview</span> →
                             </Link>
                           ) : isCompleted ? (
                             <div className="text-right">
@@ -667,12 +666,12 @@ export function CandidatePortal() {
                           G10: only real evaluation fields from the API payload;
                           fabricated placeholder strengths were removed. */}
                       {isCompleted && (
-                        <div className="mt-6 p-5 rounded-2xl bg-gradient-to-br from-primary/5 via-muted/30 to-background border border-primary/20 space-y-4">
+                        <div className="mt-6 p-5 rounded-xl bg-muted/40 border border-border space-y-4">
                           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 border-b border-border/40 pb-3">
                             <div>
                               <div className="flex items-center gap-2">
-                                <span className="flex h-5 w-5 items-center justify-center rounded-full bg-primary/20 text-primary text-xs font-bold">
-                                  ✦
+                                <span className="flex h-5 w-5 items-center justify-center rounded-full bg-primary/10 text-primary text-xs font-bold">
+                                  I
                                 </span>
                                 <h4 className="text-sm font-bold text-foreground">
                                   Assessment Summary
@@ -716,7 +715,7 @@ export function CandidatePortal() {
         {/* Delete Account Confirmation Modal */}
         {showDeleteConfirm && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-            <div className="bg-card border border-destructive/30 rounded-2xl p-6 max-w-md w-full space-y-4 shadow-xl">
+            <div className="bg-card border border-destructive/30 rounded-xl p-6 max-w-md w-full space-y-4 shadow-lg">
               <div className="flex items-center gap-3">
                 <div className="h-10 w-10 rounded-full bg-destructive/10 flex items-center justify-center">
                   <Trash className="h-5 w-5 text-destructive" />

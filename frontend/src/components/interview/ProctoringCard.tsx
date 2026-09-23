@@ -22,7 +22,7 @@ export function ProctoringCard({ summary, events }: ProctoringCardProps) {
   const isMed = (resolved?.integrity_score ?? 0) >= 60 && (resolved?.integrity_score ?? 0) < 85
 
   return (
-    <Card className="glass border-border/60 overflow-hidden shadow-sm">
+    <Card className="border-border overflow-hidden shadow-sm">
       <div className="p-6 space-y-5">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-border/50 pb-4">
           <div className="flex items-center gap-3">

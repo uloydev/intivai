@@ -1,12 +1,11 @@
 import { useParams, useNavigate } from "react-router-dom"
 import { useQuery, useMutation } from "@tanstack/react-query"
-import { CheckCircle, Warning, MagnifyingGlass, Robot } from "@phosphor-icons/react"
+import { CheckCircle, Warning, UserCheck } from "@phosphor-icons/react"
 import { api } from "@/lib/api"
 import { Button } from "@/components/ui/button"
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card"
 import { toast } from "sonner"
 import { Skeleton } from "@/components/ui/skeleton"
-import { Badge } from "@/components/ui/badge"
 import { ResumeReviewForm } from "@/components/candidates/ResumeReviewForm"
 import type { CVDetail, CVDraftProfile } from "@/types/api"
 
@@ -77,22 +76,19 @@ export function CandidateReviewPage() {
   return (
     <div className="max-w-4xl mx-auto py-12 px-6 animate-in fade-in duration-500 space-y-8">
       <div className="space-y-3">
-        <Badge variant="outline" className="text-primary border-primary/30 bg-primary/5">
-          <MagnifyingGlass className="mr-1.5 h-3.5 w-3.5" weight="bold" /> AI Extraction Review
-        </Badge>
         <h1 className="font-display text-3xl font-extrabold tracking-tight">
           Review Your Extracted Profile
         </h1>
         <p className="text-muted-foreground">
-          Our AI has extracted the following information from your resume for <strong className="text-foreground">{cv.name}</strong>. Please review and correct any inaccuracies before we proceed with the screening.
+          Our automated parsing pipeline has extracted the following information from your resume for <strong className="text-foreground">{cv.name}</strong>. Please review and correct any inaccuracies before we proceed with the screening.
         </p>
       </div>
 
-      <Card className="glass border-primary/20 shadow-lg shadow-primary/5">
+      <Card className="border-border bg-card shadow-sm">
         <CardHeader className="border-b border-border/50 bg-muted/30 pb-4">
           <CardTitle className="text-lg font-display flex items-center justify-between">
             <span className="flex items-center gap-2">
-              <Robot className="h-5 w-5 text-primary" weight="fill" />
+              <UserCheck className="h-5 w-5 text-primary" weight="bold" />
               Your Profile Details
             </span>
           </CardTitle>

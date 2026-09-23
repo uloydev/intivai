@@ -2,10 +2,8 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import { useMutation } from "@tanstack/react-query"
 import { Link, useParams, useSearchParams } from "react-router-dom"
 import {
-  Sparkle,
   PaperPlaneRight,
   Stop,
-  Robot,
   User,
   CheckCircle,
   WarningCircle,
@@ -228,9 +226,9 @@ export function ChatPage() {
   return (
     <div className="flex h-screen flex-col bg-background text-foreground selection:bg-primary/20 selection:text-primary">
       {/* Top Header Bar */}
-      <header className="flex h-14 shrink-0 items-center justify-between border-b border-border/60 bg-background/80 px-4 sm:px-6 backdrop-blur-xl z-10">
+      <header className="flex h-14 shrink-0 items-center justify-between border-b border-border bg-card px-4 sm:px-6 z-10">
         <div className="flex items-center gap-3">
-          <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-primary text-primary-foreground font-bold font-display text-sm shadow-md shadow-primary/25">
+          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground font-bold font-display text-sm shadow-sm">
             I
           </div>
           <div>
@@ -315,7 +313,7 @@ export function ChatPage() {
 
       {/* Stage Timer Gate & Assessment Progress Bar */}
       {!evaluation && !expired && currentIdx > 0 && (
-        <div className="border-b border-border/70 bg-card/60 px-4 py-2.5 backdrop-blur-md">
+        <div className="border-b border-border bg-card px-4 py-2.5">
           <div className="max-w-7xl mx-auto">
             <TimerGate
               sessionRemainingSec={sessionRemainingSec}
@@ -370,10 +368,10 @@ export function ChatPage() {
           >
             {bubbles.length === 0 && !streaming && (
               <div className="flex flex-col items-center justify-center py-20 text-center space-y-3">
-                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-primary/10 text-primary animate-pulse">
-                  <Sparkle className="h-6 w-6" weight="fill" />
+                <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                  <Target className="h-6 w-6" weight="bold" />
                 </div>
-                <p className="font-display font-semibold text-sm">Connecting to AI Interviewer...</p>
+                <p className="font-display font-semibold text-sm">Connecting to Interviewer...</p>
                 <p className="text-xs text-muted-foreground max-w-xs">
                   Formulating competence probing questions tailored to your application.
                 </p>
@@ -395,10 +393,10 @@ export function ChatPage() {
                 {/* AI Avatar for Assistant & Question */}
                 {(b.kind === "question" || b.kind === "assistant") && (
                   <div className={cn(
-                    "flex h-8 w-8 shrink-0 items-center justify-center rounded-xl font-bold shadow-md",
-                    b.kind === "question" ? "bg-primary text-primary-foreground shadow-primary/20" : "bg-muted text-foreground border border-border"
+                    "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg font-bold shadow-sm",
+                    b.kind === "question" ? "bg-primary text-primary-foreground" : "bg-muted text-foreground border border-border"
                   )}>
-                    {b.kind === "question" ? <Target className="h-4 w-4" weight="bold" /> : <Robot className="h-4 w-4" weight="fill" />}
+                    {b.kind === "question" ? <Target className="h-4 w-4" weight="bold" /> : <ChatCircleDots className="h-4 w-4" weight="bold" />}
                   </div>
                 )}
 
@@ -410,7 +408,7 @@ export function ChatPage() {
                   )}>
                     <div className="flex items-center justify-between border-b border-border/40 pb-1.5">
                       <span className="font-display font-bold text-xs text-primary flex items-center gap-1.5">
-                        <Sparkle className="h-3.5 w-3.5" weight="fill" />
+                        <Target className="h-3.5 w-3.5" weight="bold" />
                         {b.isProbe ? (
                           <span>Adaptive Follow-Up Probe ({b.idx || currentIdx} of {Math.max(total, b.idx || currentIdx)})</span>
                         ) : (
@@ -452,7 +450,7 @@ export function ChatPage() {
 
                 {/* Candidate Answer Bubble */}
                 {b.kind === "answer" && (
-                  <div className="max-w-[85%] rounded-2xl rounded-tr-sm bg-primary text-primary-foreground p-3.5 text-xs sm:text-sm shadow-md shadow-primary/10 whitespace-pre-wrap leading-relaxed">
+                  <div className="max-w-[85%] rounded-2xl rounded-tr-sm bg-primary text-primary-foreground p-3.5 text-xs sm:text-sm shadow-sm whitespace-pre-wrap leading-relaxed">
                     {b.content}
                   </div>
                 )}
@@ -513,7 +511,7 @@ export function ChatPage() {
 
           {/* Bottom Bar: Evaluation or Answer Input */}
           {evaluation ? (
-            <div className="border-t border-border/80 bg-card/70 backdrop-blur-xl p-5 space-y-3">
+            <div className="border-t border-border bg-card p-5 space-y-3">
               <div className="flex items-center gap-2 text-success font-display font-bold text-sm">
                 <CheckCircle className="h-5 w-5" weight="fill" />
                 <span>Interview Complete</span>
@@ -529,14 +527,14 @@ export function ChatPage() {
                   </Badge>
                 </div>
               )}
-              <Button asChild variant="gradient" size="sm" className="shadow-md shadow-primary/20">
+              <Button asChild size="sm" className="shadow-sm">
                 <Link to="/candidate/portal">
                   Track your application in the Candidate Portal →
                 </Link>
               </Button>
             </div>
           ) : (
-            <div className="border-t border-border/60 bg-background/80 backdrop-blur-xl p-3.5 sticky bottom-0 z-10">
+            <div className="border-t border-border bg-card p-3.5 sticky bottom-0 z-10">
               {/* Turn progress indicator */}
               {!isTopicComplete && currentIdx > 0 && (
                 <div className="flex items-center justify-between mb-2 px-0.5">
@@ -626,9 +624,8 @@ export function ChatPage() {
                     <>
                       {/* Primary: Send Reply / Clarification (in-topic dialogue) */}
                       <Button
-                        variant="gradient"
                         size="icon"
-                        className="h-[48px] w-[48px] rounded-xl shadow-md shadow-primary/20"
+                        className="h-[48px] w-[48px] rounded-lg shadow-sm"
                         title="Send reply / clarify (Enter)"
                         aria-label="Send reply"
                         onClick={sendAnswer}
@@ -701,9 +698,8 @@ export function ChatPage() {
                           className="min-h-[48px] resize-none bg-card rounded-xl border-border/60 text-xs sm:text-sm p-2.5 focus-visible:ring-primary"
                         />
                         <Button
-                          variant="gradient"
                           size="icon"
-                          className="h-[48px] w-[48px] rounded-xl shrink-0"
+                          className="h-[48px] w-[48px] rounded-lg shrink-0 shadow-sm"
                           title="Send question (Enter)"
                           aria-label="Send question"
                           onClick={sendCandidateQuestion}
@@ -769,7 +765,6 @@ export function ChatPage() {
             </p>
             <div className="flex gap-2">
               <Button
-                variant="gradient"
                 onClick={() => requestHumanMutation.mutate()}
                 disabled={requestHumanMutation.isPending}
               >

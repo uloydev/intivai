@@ -3,7 +3,7 @@ import { CodeEditor } from "./CodeEditor"
 import { STARTER_TEMPLATES } from "./starter-templates"
 import { TerminalConsole } from "./TerminalConsole"
 import { TestCaseManager } from "./TestCaseManager"
-import { Sparkles, Activity, Layers } from "lucide-react"
+import { Code2, Activity, Layers } from "lucide-react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { cn } from "@/lib/utils"
 import type { SandboxLanguage, SandboxTestCase, SandboxExecutionResult, AICodeReview } from "@/types/api"
@@ -155,9 +155,9 @@ export function CodingSandbox({
           {aiReview && (
             <button
               onClick={() => setShowReviewModal(true)}
-              className="flex items-center gap-1.5 text-xs text-purple-300 hover:text-purple-200 bg-purple-950/40 px-2 py-0.5 rounded border border-purple-800/40"
+              className="flex items-center gap-1.5 text-xs text-primary hover:text-primary/80 bg-primary/10 px-2 py-0.5 rounded border border-primary/20"
             >
-              <Sparkles className="w-3 h-3 text-purple-400" />
+              <Code2 className="w-3 h-3 text-primary" />
               <span>Score: {aiReview.quality_score}/100</span>
             </button>
           )}
@@ -182,16 +182,16 @@ export function CodingSandbox({
 
       {/* AI Code Review Modal */}
       <Dialog open={showReviewModal && !!aiReview} onOpenChange={setShowReviewModal}>
-        <DialogContent className="bg-neutral-900 border-purple-900/60 sm:max-w-lg md:max-w-xl w-full p-6 shadow-2xl">
+        <DialogContent className="bg-neutral-900 border-neutral-800 sm:max-w-lg md:max-w-xl w-full p-6 shadow-lg">
           {aiReview && (
             <div className="space-y-4">
               <DialogHeader className="border-b border-neutral-800 pb-3">
                 <div className="flex items-center gap-2">
-                  <div className="p-1.5 rounded-lg bg-purple-950 border border-purple-800 text-purple-400">
-                    <Sparkles className="w-5 h-5" />
+                  <div className="p-1.5 rounded-lg bg-primary/10 border border-primary/20 text-primary">
+                    <Code2 className="w-5 h-5" />
                   </div>
                   <div>
-                    <DialogTitle className="font-bold text-neutral-100 text-sm">AI Algorithmic Code Review</DialogTitle>
+                    <DialogTitle className="font-bold text-neutral-100 text-sm">Algorithmic Code Review</DialogTitle>
                     <p className="text-xs text-neutral-400 mt-1">Quality & complexity inspection</p>
                   </div>
                 </div>

@@ -58,16 +58,16 @@ export function RegisterPage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-primary/10 via-background to-background p-4 animate-in fade-in duration-500">
+    <div className="flex min-h-screen items-center justify-center bg-background p-4 animate-in fade-in duration-500">
       <div className="w-full max-w-md space-y-4">
-        <Card className="glass border-primary/20 shadow-2xl shadow-primary/10 overflow-hidden relative">
+        <Card className="border-border bg-card shadow-sm overflow-hidden relative">
           <CardHeader className="text-center pb-2">
-            <div className="mx-auto mb-2 flex h-12 w-12 items-center justify-center rounded-2xl bg-primary text-primary-foreground font-bold font-display text-xl shadow-lg shadow-primary/25">
+            <div className="mx-auto mb-2 flex h-12 w-12 items-center justify-center rounded-xl bg-primary text-primary-foreground font-bold font-display text-xl shadow-sm">
               I
             </div>
             <CardTitle className="font-display text-2xl font-bold tracking-tight">Create Workspace</CardTitle>
             <CardDescription className="text-xs">
-              Deploy your AI recruitment pipeline and candidate evaluation engine
+              Set up your recruitment pipeline and candidate evaluation engine
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4 pt-2">
@@ -155,7 +155,7 @@ export function RegisterPage() {
                 </div>
               )}
 
-              <Button type="submit" variant="gradient" className="w-full font-semibold shadow-md shadow-primary/20 mt-2" disabled={loading}>
+              <Button type="submit" className="w-full font-semibold shadow-sm mt-2" disabled={loading}>
                 {loading ? <SpinnerGap className="mr-2 h-4 w-4 animate-spin" /> : <ArrowRight className="mr-2 h-4 w-4" />}
                 Initialize Workspace
               </Button>
