@@ -2,8 +2,8 @@
 
 > Brand direction, UX architecture, design tokens, and interaction rules for Intivai.
 > Governed by `antislop` filter (rules R-01 through R-38).
-
-**Dial: ENERGY 2 / RHYTHM 2 / MOTION 1**
+>
+> Dial: ENERGY 2 / RHYTHM 2 / MOTION 1
 
 ---
 

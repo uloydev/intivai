@@ -119,7 +119,8 @@ func runConn(base, token, org string, appID uuid.UUID, i int) connResult {
 	}
 	stage = "ws"
 	wsURL := "ws" + strings.TrimPrefix(base, "http") + "/api/v1/candidate/interviews/" + ivID.String() + "/chat"
-	log.Printf("dial %s ticketlen=%d", wsURL, len(ticket))
+	cleanURL := strings.ReplaceAll(strings.ReplaceAll(wsURL, "\n", ""), "\r", "")
+	log.Printf("dial %s ticketlen=%d", cleanURL, len(ticket)) //nolint:gosec // G706: test harness CLI logging
 	h := http.Header{
 		"Authorization": {"Bearer " + ticket},
 		"Origin":        {"http://localhost:3000"}, // matches INTIVAI_ALLOWED_ORIGINS
@@ -129,7 +130,8 @@ func runConn(base, token, org string, appID uuid.UUID, i int) connResult {
 		if resp != nil {
 			buf := make([]byte, 128)
 			n, _ := resp.Body.Read(buf)
-			log.Printf("dial %d %v body=%s", resp.StatusCode, err, string(buf[:n]))
+			cleanBody := strings.ReplaceAll(strings.ReplaceAll(string(buf[:n]), "\n", ""), "\r", "")
+			log.Printf("dial %d %v body=%s", resp.StatusCode, err, cleanBody) //nolint:gosec // G706: test harness CLI logging
 			rawProbe(wsURL, ticket)
 		} else {
 			log.Printf("dial err=%v", err)

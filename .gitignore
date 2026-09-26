@@ -36,3 +36,4 @@ frontend/test-results/
 # AI Agents
 .kilo/worktrees
 .kilo/plans
+.agents/
