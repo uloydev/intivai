@@ -1683,6 +1683,10 @@ components:
           type: string
         recruiter_notes:
           type: string
+        scoring_weights:
+          type: object
+          additionalProperties:
+            type: number
         created_at:
           type: string
           format: date-time

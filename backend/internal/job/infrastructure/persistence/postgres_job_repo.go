@@ -382,7 +382,7 @@ func (r *PostgresJobRepo) ListByIDs(ctx context.Context, orgID uuid.UUID, ids []
 		return map[uuid.UUID]*jobdomain.Job{}, nil
 	}
 	rows, err := tx.WithContext(ctx).Raw(
-		`SELECT id, org_id, title, COALESCE(description, ''), COALESCE(location, ''), employment_type, status, created_at FROM jobs
+		`SELECT `+jobColumns+` FROM jobs
 		 WHERE org_id = $1 AND id = ANY($2)`, orgID, ids).Rows()
 	if err != nil {
 		return nil, err
@@ -390,11 +390,11 @@ func (r *PostgresJobRepo) ListByIDs(ctx context.Context, orgID uuid.UUID, ids []
 	defer func() { _ = rows.Close() }()
 	out := map[uuid.UUID]*jobdomain.Job{}
 	for rows.Next() {
-		var j jobdomain.Job
-		if err := rows.Scan(&j.ID, &j.OrgID, &j.Title, &j.Description, &j.Location, &j.EmploymentType, &j.Status, &j.CreatedAt); err != nil {
+		j, err := scanJob(rows)
+		if err != nil {
 			return nil, err
 		}
-		out[j.ID] = &j
+		out[j.ID] = j
 	}
 	return out, rows.Err()
 }

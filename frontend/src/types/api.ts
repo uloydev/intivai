@@ -173,6 +173,7 @@ export interface Application {
   interview_status?: string
   interview_score?: number
   score_breakdown?: ScreeningScoreBreakdown
+  scoring_weights?: Record<string, number>
   recommendation?: string
   integrity_score?: number
   applied_at?: string
