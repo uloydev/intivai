@@ -135,6 +135,12 @@ export function JobsPage() {
     },
   })
 
+  const canPublish =
+    title.trim().length > 0 &&
+    minExpValid &&
+    !create.isPending &&
+    (useDefaultWeights || isWeightSumValid(weightSum(weights)))
+
 	const patchStatus = useMutation({
 		mutationFn: ({ id, status }: { id: string; status: string }) =>
 			api.patch<Job>(`/jobs/${id}`, { status }),
@@ -692,17 +698,17 @@ export function JobsPage() {
                     disabled={!title.trim() || !minExpValid}
                     className="gap-1 text-xs font-bold"
                   >
-                    Next: Configure Stages →
+                    Next: Configure Stages
                   </Button>
                 </>
               ) : (
                 <>
                   <Button variant="secondary" onClick={() => setModalTab("details")}>
-                    ← Back to Details
+                    Back to Details
                   </Button>
                   <Button
                     onClick={() => create.mutate()}
-                    disabled={!title.trim() || !minExpValid || create.isPending}
+                    disabled={!canPublish}
                     className="gap-1 text-xs font-bold shadow-sm"
                   >
                     <Plus className="h-4 w-4" weight="bold" />

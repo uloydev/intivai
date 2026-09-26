@@ -207,4 +207,33 @@ describe("ChatPage — G11 input clamps", () => {
     })
     expect(FakeWebSocket.instances.length).toBe(1)
   })
+
+  it("permits empty input topic advancement on turn 2+ with conclude label", async () => {
+    renderChat()
+    await act(async () => {
+      lastInstance().start()
+      lastInstance().emit({
+        type: "question",
+        idx: 1,
+        content: "What is your experience with distributed queues?",
+        archetype: "conversational",
+        topic_turn: 2,
+        max_topic_turns: 3,
+      })
+    })
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Complete topic and advance" })).toBeDefined()
+    })
+    const advanceBtn = screen.getByRole("button", { name: "Complete topic and advance" })
+    expect(advanceBtn.textContent).toContain("Conclude Topic")
+    expect(advanceBtn.hasAttribute("disabled")).toBe(false)
+
+    fireEvent.click(advanceBtn)
+
+    await waitFor(() => {
+      const frames = lastInstance().sent.map((s) => JSON.parse(s))
+      expect(frames.some((f) => f.type === "answer" && f.action === "advance" && f.content === "[Topic concluded by candidate]")).toBe(true)
+    })
+  })
 })

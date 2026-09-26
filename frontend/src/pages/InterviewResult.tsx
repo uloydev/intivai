@@ -222,7 +222,7 @@ export function InterviewResultPage() {
                     </Button>
                   </div>
                   <p className="text-xs text-muted-foreground leading-relaxed max-w-xl">
-                    Weighted across {dimensionCount} dimensions: automated synthesis derived from {detail.questions.length} dynamically generated competence probes, evaluating factual depth, communication clarity, and problem-solving patterns.
+                    Weighted across {dimensionCount} dimensions: automated synthesis derived from {detail.questions?.length ?? 0} dynamically generated competence probes, evaluating factual depth, communication clarity, and problem-solving patterns.
                   </p>
                 </div>
               </div>
@@ -261,15 +261,15 @@ export function InterviewResultPage() {
             </div>
 
             {/* Strengths & Weaknesses Grid */}
-            {(evalReport.strengths.length > 0 || evalReport.weaknesses.length > 0) && (
+            {((evalReport.strengths?.length ?? 0) > 0 || (evalReport.weaknesses?.length ?? 0) > 0) && (
               <div className="mt-6 grid gap-4 md:grid-cols-2">
-                {evalReport.strengths.length > 0 && (
+                {(evalReport.strengths?.length ?? 0) > 0 && (
                   <div className="rounded-xl border border-success/20 bg-success/5 p-4 space-y-2">
                     <p className="text-xs font-bold uppercase tracking-wider text-success flex items-center gap-1.5">
                       <CheckCircle className="h-4 w-4" weight="fill" /> Key Strengths
                     </p>
                     <ul className="space-y-1 text-xs text-foreground/90 pl-1">
-                      {evalReport.strengths.map((s, idx) => (
+                      {evalReport.strengths?.map((s, idx) => (
                         <li key={idx} className="flex items-start gap-1.5">
                           <span className="text-success font-bold">•</span>
                           <span>{s}</span>
@@ -278,13 +278,13 @@ export function InterviewResultPage() {
                     </ul>
                   </div>
                 )}
-                {evalReport.weaknesses.length > 0 && (
+                {(evalReport.weaknesses?.length ?? 0) > 0 && (
                   <div className="rounded-xl border border-warning/20 bg-warning/5 p-4 space-y-2">
                     <p className="text-xs font-bold uppercase tracking-wider text-warning flex items-center gap-1.5">
                       <WarningCircle className="h-4 w-4" weight="fill" /> Areas to Watch / Growth
                     </p>
                     <ul className="space-y-1 text-xs text-foreground/90 pl-1">
-                      {evalReport.weaknesses.map((w, idx) => (
+                      {evalReport.weaknesses?.map((w, idx) => (
                         <li key={idx} className="flex items-start gap-1.5">
                           <span className="text-warning font-bold">•</span>
                           <span>{w}</span>
@@ -456,14 +456,14 @@ export function InterviewResultPage() {
           )}
         </div>
 
-        {detail.answers.length === 0 ? (
+        {(!detail.answers || detail.answers.length === 0) ? (
           <div className="rounded-xl border border-dashed border-border p-8 text-center text-xs text-muted-foreground">
             No responses recorded for this interview session.
           </div>
         ) : (
           <div className="space-y-3">
             {detail.answers.map((answer) => {
-              const question = detail.questions.find((q) => q.idx === answer.idx)
+              const question = detail.questions?.find((q) => q.idx === answer.idx)
               const perQ = evalReport?.per_question.find((p) => p.question_idx === answer.idx)
               return (
                 <Card key={answer.idx} id={`q-analysis-${answer.idx}`} className="border-border overflow-hidden shadow-sm">

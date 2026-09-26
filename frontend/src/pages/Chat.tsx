@@ -39,6 +39,7 @@ export function ChatPage() {
 
   const [input, setInput] = useState("")
   const [showSandbox, setShowSandbox] = useState(false)
+  const [mobileTab, setMobileTab] = useState<"chat" | "sandbox">("chat")
   const [isInterrupting, setIsInterrupting] = useState(false)
   const pastedFlagRef = useRef(false)
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -155,11 +156,13 @@ export function ChatPage() {
 
   const sendWithAction = (action: "reply" | "advance") => {
     const trimmed = input.trim()
-    if (!trimmed || streaming || pendingAnswer || !!evaluation || expired || disconnected) return
+    if (streaming || pendingAnswer || !!evaluation || expired || disconnected) return
+    if (!trimmed && (action === "reply" || topicTurn <= 1)) return
+    const textToSend = trimmed.length > 0 ? trimmed : "[Topic concluded by candidate]"
     // G11: the pending debounced code-change goes out BEFORE the answer so
     // the server snapshots the latest editor state for this question.
     debouncedCodeChangeRef.current.flush()
-    const sent = session.submitAnswer(trimmed, action, collectPacingTelemetry())
+    const sent = session.submitAnswer(textToSend, action, collectPacingTelemetry())
     setInput("")
     if (!sent) {
       toast.error("Connection lost: your answer was not sent. Please try again.")
@@ -256,7 +259,11 @@ export function ChatPage() {
           <Button
             variant={showSandbox ? "secondary" : "outline"}
             size="sm"
-            onClick={() => setShowSandbox(!showSandbox)}
+            onClick={() => {
+              const next = !showSandbox
+              setShowSandbox(next)
+              if (next) setMobileTab("sandbox")
+            }}
             className="text-xs h-8 gap-1.5 border-border/70 shadow-sm"
           >
             <Code2 className="w-3.5 h-3.5 text-indigo-400" />
@@ -329,6 +336,38 @@ export function ChatPage() {
         </div>
       )}
 
+      {/* Mobile Tab Switcher (when sandbox is open on < lg) */}
+      {showSandbox && (
+        <div className="flex lg:hidden items-center justify-center p-2 border-b border-border bg-card shrink-0">
+          <div className="flex rounded-lg bg-muted p-1 w-full max-w-xs text-xs font-semibold">
+            <button
+              type="button"
+              onClick={() => setMobileTab("chat")}
+              className={cn(
+                "flex-1 py-1.5 rounded-md transition-all text-center",
+                mobileTab === "chat"
+                  ? "bg-background text-foreground shadow-xs font-bold"
+                  : "text-muted-foreground hover:text-foreground"
+              )}
+            >
+              Interview Chat
+            </button>
+            <button
+              type="button"
+              onClick={() => setMobileTab("sandbox")}
+              className={cn(
+                "flex-1 py-1.5 rounded-md transition-all text-center",
+                mobileTab === "sandbox"
+                  ? "bg-background text-foreground shadow-xs font-bold"
+                  : "text-muted-foreground hover:text-foreground"
+              )}
+            >
+              Code Sandbox
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Main Workspace Body: Single or Split View */}
       <div className={cn(
         "flex-1 flex min-h-0 overflow-hidden",
@@ -338,7 +377,11 @@ export function ChatPage() {
         <div
           className={cn(
             "relative flex flex-col h-full overflow-hidden transition-all duration-300",
-            showSandbox ? "lg:w-[45%] lg:border-r lg:border-border border-b lg:border-b-0" : "w-full max-w-4xl mx-auto"
+            showSandbox
+              ? mobileTab === "sandbox"
+                ? "hidden lg:flex lg:w-[45%] lg:border-r lg:border-border"
+                : "flex w-full lg:w-[45%] lg:border-r lg:border-border"
+              : "w-full max-w-4xl mx-auto"
           )}
         >
           {/* Active Question Context Pill (if active) */}
@@ -497,6 +540,19 @@ export function ChatPage() {
                 )}
               </div>
             ))}
+
+            {/* AI Evaluator Synthesis Indicator */}
+            {pendingAnswer && !streaming && (
+              <div className="flex gap-3 text-xs sm:text-sm leading-relaxed animate-in fade-in duration-300 justify-start">
+                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-muted text-foreground border border-border shadow-sm">
+                  <ChatCircleDots className="h-4 w-4 animate-pulse text-primary" weight="bold" />
+                </div>
+                <div className="rounded-2xl rounded-tl-sm bg-muted/40 border border-border/50 p-3.5 flex items-center gap-2.5 text-muted-foreground shadow-sm">
+                  <span className="inline-block h-2 w-2 rounded-full bg-primary/70 animate-ping" />
+                  <span className="text-xs font-medium">Interviewer is evaluating your response…</span>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Scroll-to-bottom FAB */}
@@ -642,9 +698,9 @@ export function ChatPage() {
                           title="Complete this topic & advance to next question"
                           aria-label="Complete topic and advance"
                           onClick={advanceTopic}
-                          disabled={!input.trim() || pendingAnswer || expired || disconnected}
+                          disabled={(!input.trim() && topicTurn <= 1) || pendingAnswer || expired || disconnected}
                         >
-                          Next Topic
+                          {input.trim() ? "Submit & Advance" : "Conclude Topic"}
                         </Button>
                       )}
                     </>
@@ -734,7 +790,13 @@ export function ChatPage() {
 
         {/* Right Split Column: Live Coding Sandbox */}
         {showSandbox && (
-          <div className="lg:w-[55%] h-[40vh] lg:h-full overflow-hidden flex flex-col bg-neutral-950">
+          <div
+            className={cn(
+              "overflow-hidden flex flex-col bg-neutral-950",
+              mobileTab === "chat" ? "hidden lg:flex" : "flex",
+              "w-full h-full lg:w-[55%]"
+            )}
+          >
             <CodingSandbox
               questionIdx={currentIdx}
               onExecute={handleExecuteSandbox}

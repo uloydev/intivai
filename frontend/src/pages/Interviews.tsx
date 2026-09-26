@@ -383,7 +383,7 @@ export function InterviewsPage() {
                 <div className="flex justify-between items-center pt-2">
                   <Button asChild variant="ghost" size="sm" className="text-xs text-primary gap-1">
                     <Link to={`/interviews/${created.interview_id}`}>
-                      View Scorecard →
+                      View Scorecard
                     </Link>
                   </Button>
                   <Button asChild variant="default" size="sm" className="text-xs">
