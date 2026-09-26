@@ -62,7 +62,7 @@ export function InterviewVoicePage() {
                 Candidates: reopen the invite link you received and choose the voice session there.
               </li>
               <li>
-                Recruiters: share the interview invitation from the Interviews workspace — the
+                Recruiters: share the interview invitation from the Interviews workspace; the
                 candidate launches the voice room from their own link.
               </li>
             </ul>
@@ -70,7 +70,7 @@ export function InterviewVoicePage() {
               to="/interviews"
               className="inline-block pt-1 text-primary hover:underline font-medium"
             >
-              ← Back to Interviews
+              Back to Interviews
             </Link>
           </CardContent>
         </Card>

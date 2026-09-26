@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { useNavigate, useParams, useSearchParams } from "react-router-dom"
 import {
-  ArrowRight,
   SpinnerGap,
   Clock,
   CheckCircle,
@@ -130,9 +129,7 @@ export function InvitePage() {
                   <SpinnerGap className="mr-2 h-4 w-4 animate-spin" /> Preparing AI Rails…
                 </>
               ) : (
-                <>
-                  Begin Interview Session <ArrowRight className="ml-2 h-4 w-4" weight="bold" />
-                </>
+                "Begin Interview Session"
               )}
             </Button>
 

@@ -163,7 +163,7 @@ export function DashboardPage() {
               ) : (
                 <div className="flex items-baseline justify-between">
                   <span className="font-display text-3xl font-bold text-success tabular-nums">
-                    {passRate !== null ? `${passRate}%` : "—"}
+                    {passRate !== null ? `${passRate}%` : "N/A"}
                   </span>
                   {passRate !== null && (
                     <span className="text-xs font-medium text-muted-foreground">{passedApps.length}/{totalApps} passed</span>
@@ -373,7 +373,7 @@ export function DashboardPage() {
               </div>
 
               <Button asChild size="sm" className="w-full text-xs mt-1">
-                <Link to="/interviews">Manage Interview Sessions →</Link>
+                <Link to="/interviews">Manage Interview Sessions</Link>
               </Button>
             </CardContent>
           </Card>
@@ -411,7 +411,7 @@ export function DashboardPage() {
                 )}
               </div>
               <p className="text-[11px] text-muted-foreground leading-relaxed">
-                Live readiness probe — Postgres (RLS), Redis, and MinIO are pinged every 10 seconds via /ready.
+                Live readiness probe: Postgres (RLS), Redis, and MinIO are pinged every 10 seconds via /ready.
               </p>
             </CardContent>
           </Card>

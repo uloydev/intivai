@@ -155,14 +155,14 @@ export function ChatPage() {
 
   const sendWithAction = (action: "reply" | "advance") => {
     const trimmed = input.trim()
-    if ((action === "reply" && !trimmed) || streaming || pendingAnswer || !!evaluation || expired || disconnected) return
+    if (!trimmed || streaming || pendingAnswer || !!evaluation || expired || disconnected) return
     // G11: the pending debounced code-change goes out BEFORE the answer so
     // the server snapshots the latest editor state for this question.
     debouncedCodeChangeRef.current.flush()
     const sent = session.submitAnswer(trimmed, action, collectPacingTelemetry())
     setInput("")
     if (!sent) {
-      toast.error("Connection lost — your answer was not sent. Please try again.")
+      toast.error("Connection lost: your answer was not sent. Please try again.")
     }
   }
 
@@ -179,14 +179,14 @@ export function ChatPage() {
       setQaInput("")
       setShowQaInput(false)
     } else {
-      toast.error("Connection lost — your question was not sent. Please try again.")
+      toast.error("Connection lost: your question was not sent. Please try again.")
     }
   }
 
   const handleTimerExpire = () => {
     if (streaming || pendingAnswer || !!evaluation || expired || disconnected) return
     const trimmed = input.trim()
-    const submissionText = trimmed.length > 0 ? trimmed : "My time for this question ran out — nothing was submitted."
+    const submissionText = trimmed.length > 0 ? trimmed : "My time for this question ran out: nothing was submitted."
     const action = isTopicComplete ? "advance" : "reply"
     // G11: honest toast — only claim auto-submission when it actually left.
     const sent = session.submitAnswer(submissionText, action, collectPacingTelemetry())
@@ -194,7 +194,7 @@ export function ChatPage() {
     if (sent) {
       toast.info("Stage time limit elapsed. Response auto-submitted.")
     } else {
-      toast.error("Stage time limit elapsed — but the connection is down, so nothing was submitted. Reconnect and try again.")
+      toast.error("Stage time limit elapsed, but connection is down. Nothing was submitted. Reconnect and try again.")
     }
   }
 
@@ -285,12 +285,12 @@ export function ChatPage() {
       {expired && (
         <div className="bg-destructive/10 border-b border-destructive/20 px-4 py-2.5 text-center text-xs font-medium text-destructive flex items-center justify-center gap-2">
           <WarningCircle className="h-4 w-4" weight="fill" />
-          Session ticket expired — please reopen your candidate invite link to resume.
+          Session ticket expired: please reopen your candidate invite link to resume.
         </div>
       )}
       {reconnecting && (
         <div className="bg-warning/10 border-b border-warning/20 px-4 py-2 text-center text-xs font-medium text-warning flex items-center justify-center gap-2 animate-pulse">
-          <ArrowClockwise className="h-4 w-4 animate-spin" /> Connection lost — resuming session…
+          <ArrowClockwise className="h-4 w-4 animate-spin" /> Connection lost: resuming session…
         </div>
       )}
       {disconnected && (
@@ -299,7 +299,7 @@ export function ChatPage() {
           className="bg-destructive/10 border-b border-destructive/20 px-4 py-2.5 text-center text-xs font-medium text-destructive flex flex-col sm:flex-row items-center justify-center gap-2"
         >
           <WarningCircle className="h-4 w-4" weight="fill" />
-          <span>Connection lost — answers are not being recorded.</span>
+          <span>Connection lost: answers are not being recorded.</span>
           <Button
             variant="outline"
             size="sm"
@@ -517,7 +517,7 @@ export function ChatPage() {
                 <span>Interview Complete</span>
               </div>
               <p className="text-xs text-muted-foreground leading-relaxed">
-                Your interview is complete — our team will review the results and reach out within a few business days.
+                Your interview is complete. Our team will review the results and reach out within a few business days.
               </p>
               {evaluation.overall !== undefined && evaluation.overall !== null && (
                 <div className="rounded-xl border border-border/50 bg-muted/30 p-3 text-xs text-muted-foreground flex items-center justify-between">
@@ -529,7 +529,7 @@ export function ChatPage() {
               )}
               <Button asChild size="sm" className="shadow-sm">
                 <Link to="/candidate/portal">
-                  Track your application in the Candidate Portal →
+                  Track your application in the Candidate Portal
                 </Link>
               </Button>
             </div>
@@ -539,7 +539,7 @@ export function ChatPage() {
               {!isTopicComplete && currentIdx > 0 && (
                 <div className="flex items-center justify-between mb-2 px-0.5">
                   <span className="text-[11px] text-muted-foreground font-medium">
-                    Topic Discussion — Turn {topicTurn} of {maxTopicTurns}
+                    Topic Discussion: Turn {topicTurn} of {maxTopicTurns}
                   </span>
                   <div className="flex gap-1">
                     {Array.from({ length: maxTopicTurns }).map((_, i) => (
@@ -637,14 +637,14 @@ export function ChatPage() {
                       {!isTopicComplete && currentIdx > 0 && (
                         <Button
                           variant="outline"
-                          size="icon"
-                          className="h-9 w-[48px] rounded-xl border-success/40 text-success hover:bg-success/10 text-[10px] leading-tight"
+                          size="sm"
+                          className="h-[48px] px-3 rounded-lg border-success/40 text-success hover:bg-success/10 text-xs font-semibold leading-tight shrink-0"
                           title="Complete this topic & advance to next question"
                           aria-label="Complete topic and advance"
                           onClick={advanceTopic}
-                          disabled={pendingAnswer || expired || disconnected}
+                          disabled={!input.trim() || pendingAnswer || expired || disconnected}
                         >
-                          <ArrowRight className="h-4 w-4" weight="bold" />
+                          Next Topic
                         </Button>
                       )}
                     </>
@@ -656,7 +656,7 @@ export function ChatPage() {
                 <p className="text-[10px] text-muted-foreground mt-1.5 px-0.5">
                   <span className="font-medium text-foreground/60">↵ Reply / Clarify</span>
                   {" · "}
-                  <span className="font-medium text-success/80">→ Complete topic &amp; next question</span>
+                  <span className="font-medium text-success/80">Next Topic: Complete &amp; advance</span>
                 </p>
               )}
               {/* Request Human Interviewer */}
@@ -671,7 +671,7 @@ export function ChatPage() {
               )}
               {humanRequested && (
                 <p className="text-[10px] text-success mt-1.5 px-0.5 flex items-center gap-1">
-                  <CheckCircle className="h-3 w-3" /> Human interviewer requested — a team member will follow up.
+                  <CheckCircle className="h-3 w-3" /> Human interviewer requested: a team member will follow up.
                 </p>
               )}
               {/* Ask a Question (J10) */}

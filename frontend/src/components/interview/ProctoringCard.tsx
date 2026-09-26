@@ -132,7 +132,7 @@ export function ProctoringCard({ summary, events }: ProctoringCardProps) {
         ) : (
           <div className="rounded-xl border border-border/40 bg-muted/30 p-3.5 flex items-center gap-2 text-xs text-muted-foreground">
             <Info className="h-4 w-4 shrink-0" weight="fill" />
-            <span>No telemetry recorded — integrity signals are unavailable for this session.</span>
+            <span>No telemetry recorded: integrity signals are unavailable for this session.</span>
           </div>
         )}
 

@@ -214,7 +214,7 @@ export function TimerGate({
         >
           <Warning className="h-4 w-4" />
           <span className="font-medium">
-            Only {formatTime(sessionClock)} of session time remains — wrap up your answer.
+            Only {formatTime(sessionClock)} of session time remains. Please wrap up your answer.
           </span>
         </div>
       ) : null}

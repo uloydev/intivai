@@ -320,7 +320,7 @@ export function Candidate360Drawer({
                         <span>AI Screening Recommendation</span>
                       </div>
                       <span className="text-xs text-muted-foreground">
-                        Overall = weighted sum of the dimensions below
+                        {application.scoring_weights ? "Role-specific weights applied" : "Standard baseline weights applied"}
                       </span>
                     </div>
                     {weightedTotal != null && (
@@ -333,7 +333,9 @@ export function Candidate360Drawer({
                       {SCREENING_DIMENSIONS.map(({ key, label }) => {
                         const value = application.score_breakdown?.[key]
                         if (value == null) return null
-                        const weight = SCREENING_WEIGHTS[key]
+                        const weight = (application.scoring_weights && application.scoring_weights[key] !== undefined)
+                          ? application.scoring_weights[key]
+                          : SCREENING_WEIGHTS[key]
                         return (
                           <div key={key} className="flex items-center justify-between gap-2 rounded-lg bg-background/60 border border-border/50 px-2.5 py-1.5">
                             <span className="text-xs text-muted-foreground">{label}</span>
@@ -394,7 +396,7 @@ export function Candidate360Drawer({
                     <Button asChild className="w-full gap-2 text-xs font-bold">
                       <Link to={`/interviews/${application.interview_id || ""}`}>
                         <Trophy className="h-4 w-4" weight="bold" />
-                        <span>Open Comprehensive Scorecard & Replay →</span>
+                        <span>Open Comprehensive Scorecard & Replay</span>
                       </Link>
                     </Button>
                   </div>
@@ -430,7 +432,7 @@ export function Candidate360Drawer({
                         <Label className="text-xs font-medium">Candidate Invitation</Label>
                         <div className="flex items-center justify-between gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2">
                           <span className="text-xs text-destructive line-through opacity-70">
-                            Invitation expired — regenerate
+                            Invitation expired: regenerate
                           </span>
                           <Button
                             size="sm"
@@ -474,7 +476,7 @@ export function Candidate360Drawer({
                   onValueChange={(v) => setCurrentStage(v as CandidateLifecycleStage)}
                 >
                   <SelectTrigger id="stage-select" className="w-full text-xs font-medium">
-                    <SelectValue placeholder="— Undecided —" />
+                    <SelectValue placeholder="Select hiring stage" />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="applied">Applied (Inbound)</SelectItem>

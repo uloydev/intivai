@@ -324,7 +324,7 @@ export function useChatSession({ id, ticket, onQuestion }: UseChatSessionOptions
           if (frame.code === "turn_in_progress") {
             // D19: the candidate answered while the interviewer was still
             // responding — a gentle, retryable notice, not a failure.
-            toast.info("Interviewer is still responding — hold on a moment")
+            toast.info("Interviewer is still responding: hold on a moment")
           } else {
             toast.error(frame.message || "An error occurred during the interview session.")
           }
@@ -400,7 +400,7 @@ export function useChatSession({ id, ticket, onQuestion }: UseChatSessionOptions
       setBubbles((prev) => {
         const last = prev[prev.length - 1]
         if (last && last.kind === "candidate_qa" && last.streaming) {
-          return [...prev.slice(0, -1), { ...last, streaming: false, content: "Could not send your question — connection lost." }]
+          return [...prev.slice(0, -1), { ...last, streaming: false, content: "Could not send your question: connection lost." }]
         }
         return prev
       })

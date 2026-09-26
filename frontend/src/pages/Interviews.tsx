@@ -84,7 +84,7 @@ export function InterviewsPage() {
     } else {
       setTab("eligible")
       setHighlightedAppId(app.id)
-      toast.info(`${app.candidate_name} has not passed screening yet — interview creation requires a passing CV score.`)
+      toast.info(`${app.candidate_name} has not passed screening yet: interview creation requires a passing CV score.`)
     }
   }, [inviteParam, apps, loadingApps])
 
@@ -242,7 +242,7 @@ export function InterviewsPage() {
                           </div>
                         </div>
                       </TableCell>
-                      <TableCell className="text-xs text-muted-foreground">{iv.job_title || "—"}</TableCell>
+                      <TableCell className="text-xs text-muted-foreground">{iv.job_title || "Not specified"}</TableCell>
                       <TableCell>
                         <Badge
                           variant={iv.status === "completed" ? "default" : "secondary"}
@@ -261,7 +261,7 @@ export function InterviewsPage() {
                             {iv.evaluation.overall_score} / 100
                           </span>
                         ) : (
-                          <span className="text-xs text-muted-foreground">—</span>
+                          <span className="text-xs text-muted-foreground">Pending</span>
                         )}
                       </TableCell>
                       <TableCell>

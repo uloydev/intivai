@@ -540,7 +540,7 @@ export function CandidatesPage() {
                   <TableCell>{scorePill(app)}</TableCell>
                   <TableCell>
                     <span className="text-xs text-muted-foreground">
-                      {app.applied_at ? new Date(app.applied_at).toLocaleDateString() : "—"}
+                      {app.applied_at ? new Date(app.applied_at).toLocaleDateString() : "-"}
                     </span>
                   </TableCell>
                   <TableCell>{stagePill(app)}</TableCell>
@@ -554,7 +554,7 @@ export function CandidatesPage() {
                         setDrawerOpen(true)
                       }}
                     >
-                      <Eye className="h-3.5 w-3.5" /> Candidate 360 →
+                      <Eye className="h-3.5 w-3.5" /> Candidate 360
                     </Button>
                   </TableCell>
                 </TableRow>
@@ -622,7 +622,7 @@ export function CandidatesPage() {
                   />
                 </div>
                 <div className="flex items-center justify-between text-xs">
-                  <span className="text-muted-foreground">{app.job_title || "—"}</span>
+                  <span className="text-muted-foreground">{app.job_title || "General Application"}</span>
                   {app.cv_score !== null && app.cv_score !== undefined && (
                     <Badge variant={app.cv_score >= 70 ? "success" : "secondary"} size="sm">{Math.round(app.cv_score)}%</Badge>
                   )}

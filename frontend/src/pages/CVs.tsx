@@ -133,7 +133,7 @@ export function CVsPage() {
       setEmail("")
       setSelectedFile(null)
       if (fileRef.current) fileRef.current.value = ""
-      toast.success("CV uploaded — OCR & extraction pipeline started")
+      toast.success("CV uploaded: OCR & extraction pipeline started")
     },
     onError: (e) => {
       setUploading(false)
@@ -156,7 +156,7 @@ export function CVsPage() {
       setUploading(false)
       setBulkFiles([])
       if (bulkFileRef.current) bulkFileRef.current.value = ""
-      toast.success("Bulk CVs uploaded — processing pipeline started")
+      toast.success("Bulk CVs uploaded: processing pipeline started")
     },
     onError: (e) => {
       setUploading(false)
@@ -260,7 +260,7 @@ export function CVsPage() {
                 <Label htmlFor="cv-name" className="text-xs font-semibold">Candidate Full Name (optional)</Label>
                 <Input
                   id="cv-name"
-                  placeholder="optional — extracted from CV"
+                  placeholder="optional, extracted from CV"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   className="bg-background/80"
@@ -271,7 +271,7 @@ export function CVsPage() {
                 <Input
                   id="cv-email"
                   type="email"
-                  placeholder="optional — extracted from CV"
+                  placeholder="optional, extracted from CV"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   className="bg-background/80"

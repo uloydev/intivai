@@ -544,7 +544,7 @@ export function JobsPage() {
 
                     {weightsLocked && (
                       <p className="text-[11px] text-amber-600">
-                        This job is published — weights are locked (D1) and cannot be changed.
+                        This job is published: weights are locked (D1) and cannot be changed.
                       </p>
                     )}
 

@@ -6,6 +6,6 @@ export async function copyText(text: string, label?: string): Promise<void> {
     toast.success(`${label ?? "Text"} copied to clipboard`)
   } catch (err) {
     console.error("Clipboard write failed", err)
-    toast.error("Failed to copy — please copy manually")
+    toast.error("Failed to copy. Please copy manually.")
   }
 }

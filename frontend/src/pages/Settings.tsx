@@ -89,7 +89,7 @@ export function SettingsPage() {
                 {isLoading
                   ? "Loading current limit…"
                   : isError
-                    ? "The current limit is not available — set a new value below."
+                    ? "The current limit is not available. Set a new value below."
                     : "Integers from 0 to 50. Leaving a blank field uses the default."}
               </p>
               {input.length > 0 && parsed === null && (

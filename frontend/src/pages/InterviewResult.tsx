@@ -160,7 +160,7 @@ export function InterviewResultPage() {
               navigator.clipboard
                 .writeText(url)
                 .then(() => toast.success("Link copied to clipboard"))
-                .catch(() => toast.error("Couldn't copy the link — please copy it from the address bar."))
+                .catch(() => toast.error("Couldn't copy link. Please copy it from address bar."))
             }}
           >
             Share
@@ -222,7 +222,7 @@ export function InterviewResultPage() {
                     </Button>
                   </div>
                   <p className="text-xs text-muted-foreground leading-relaxed max-w-xl">
-                    Weighted across {dimensionCount} dimensions — automated synthesis derived from {detail.questions.length} dynamically generated competence probes, evaluating factual depth, communication clarity, and problem-solving patterns.
+                    Weighted across {dimensionCount} dimensions: automated synthesis derived from {detail.questions.length} dynamically generated competence probes, evaluating factual depth, communication clarity, and problem-solving patterns.
                   </p>
                 </div>
               </div>
@@ -322,7 +322,7 @@ export function InterviewResultPage() {
                   className="text-xs text-primary border-primary/30 hover:bg-primary/10 font-bold gap-1"
                 >
                   <Link to={`/candidates?candidate_id=${detail.candidate?.id}`}>
-                    Candidate 360 Profile →
+                    Candidate 360 Profile
                   </Link>
                 </Button>
                 <Button
@@ -408,13 +408,13 @@ export function InterviewResultPage() {
                       <div className="text-center">
                         <div className="text-xs text-neutral-400">Time Complexity</div>
                         <div className="font-mono font-bold text-indigo-400 mt-0.5">
-                          {session.ai_code_review.time_complexity || "—"}
+                          {session.ai_code_review.time_complexity || "N/A"}
                         </div>
                       </div>
                       <div className="text-center">
                         <div className="text-xs text-neutral-400">Space Complexity</div>
                         <div className="font-mono font-bold text-emerald-400 mt-0.5">
-                          {session.ai_code_review.space_complexity || "—"}
+                          {session.ai_code_review.space_complexity || "N/A"}
                         </div>
                       </div>
                       <div className="text-center">
@@ -436,9 +436,25 @@ export function InterviewResultPage() {
 
       {/* Transcript & Per-Question Analysis */}
       <div className="space-y-4">
-        <h2 className="font-display text-xl font-bold tracking-tight flex items-center gap-2">
-          <ChatCircleText className="h-5 w-5 text-primary" weight="bold" /> Question & Answer Transcript Analysis
-        </h2>
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <h2 className="font-display text-xl font-bold tracking-tight flex items-center gap-2">
+            <ChatCircleText className="h-5 w-5 text-primary" weight="bold" /> Question & Answer Transcript Analysis
+          </h2>
+          {detail.questions && detail.questions.length > 1 && (
+            <div className="flex flex-wrap items-center gap-1.5">
+              {detail.questions.map((q) => (
+                <button
+                  key={q.idx}
+                  type="button"
+                  onClick={() => document.getElementById(`q-analysis-${q.idx}`)?.scrollIntoView({ behavior: "smooth" })}
+                  className="rounded-md border border-border/80 bg-background/80 px-2 py-0.5 text-[11px] font-mono font-medium hover:border-primary/50 hover:bg-muted transition-colors cursor-pointer"
+                >
+                  Q{q.idx}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
 
         {detail.answers.length === 0 ? (
           <div className="rounded-xl border border-dashed border-border p-8 text-center text-xs text-muted-foreground">
@@ -450,7 +466,7 @@ export function InterviewResultPage() {
               const question = detail.questions.find((q) => q.idx === answer.idx)
               const perQ = evalReport?.per_question.find((p) => p.question_idx === answer.idx)
               return (
-                <Card key={answer.idx} className="border-border overflow-hidden shadow-sm">
+                <Card key={answer.idx} id={`q-analysis-${answer.idx}`} className="border-border overflow-hidden shadow-sm">
                   <div className="border-b border-border/40 bg-muted/30 px-4 py-3 flex items-center justify-between">
                     <div className="flex items-center gap-2">
                       <span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary/10 text-primary font-bold text-xs">

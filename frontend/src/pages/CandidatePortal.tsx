@@ -257,7 +257,7 @@ export function CandidatePortal() {
   function handleVerifyOTP(e: React.FormEvent) {
     e.preventDefault()
     if (otpExpired) {
-      setError("Code expired — request a new one.")
+      setError("Code expired. Request a new one.")
       return
     }
     if (!otpCode.trim() || otpCode.length !== 6) {
@@ -330,12 +330,12 @@ export function CandidatePortal() {
                   <SubmitButton
                     loading={authBusy}
                     loadingLabel="Sending Security Code..."
-                    label="Send Verification Code →"
+                    label="Send Verification Code"
                   />
 
                   <div className="pt-4 border-t border-border/80 flex items-center justify-between text-xs text-muted-foreground">
                     <Link to="/careers" className="hover:text-primary transition-colors">
-                      ← Browse Open Positions
+                      Browse Open Positions
                     </Link>
                   </div>
                 </form>
@@ -368,7 +368,7 @@ export function CandidatePortal() {
                     {otpExpiresAt !== null ? (
                       otpExpired ? (
                         <p className="mt-2 text-xs text-destructive text-center">
-                          Code expired — request a new one.
+                          Code expired. Request a new one.
                         </p>
                       ) : (
                         <p className="mt-2 text-xs text-muted-foreground text-center">
@@ -385,7 +385,7 @@ export function CandidatePortal() {
                   <SubmitButton
                     loading={authBusy}
                     loadingLabel="Verifying..."
-                    label="Access Candidate Portal →"
+                    label="Access Candidate Portal"
                     disabled={otpCode.length !== 6 || otpExpired}
                   />
 
@@ -492,7 +492,7 @@ export function CandidatePortal() {
                 </div>
                 <Button asChild size="sm" className="shadow-sm">
                   <Link to="/careers">
-                    Explore Open Careers →
+                    Explore Open Careers
                   </Link>
                 </Button>
               </div>
@@ -540,7 +540,7 @@ export function CandidatePortal() {
                               to={`/invite/${app.interview_id}?t=${encodeURIComponent(app.invitation_token ?? "")}`}
                               className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold text-accent-foreground bg-accent hover:bg-accent/90 active:scale-[0.98] transition-all shadow-sm"
                             >
-                              <span>Launch Interview</span> →
+                              <span>Launch Interview</span>
                             </Link>
                           ) : isCompleted ? (
                             <div className="text-right">
@@ -678,7 +678,7 @@ export function CandidatePortal() {
                                 </h4>
                               </div>
                               <p className="text-xs text-muted-foreground mt-0.5">
-                                A summary of your interview results. Automated scores are approximations — a human recruiter makes the final decision.
+                                A summary of your interview results. Automated scores are approximations: a human recruiter makes the final decision.
                               </p>
                             </div>
                             {app.overall_score !== null && app.overall_score !== undefined && (

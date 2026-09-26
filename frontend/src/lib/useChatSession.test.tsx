@@ -267,7 +267,7 @@ describe("useChatSession", () => {
         })
       })
 
-      expect(toast.info).toHaveBeenCalledWith("Interviewer is still responding — hold on a moment")
+      expect(toast.info).toHaveBeenCalledWith("Interviewer is still responding: hold on a moment")
       expect(toast.error).not.toHaveBeenCalledWith("a turn is already in progress")
       // Input must recover so the candidate can retry after the turn ends.
       expect(result.current.pendingAnswer).toBe(false)
