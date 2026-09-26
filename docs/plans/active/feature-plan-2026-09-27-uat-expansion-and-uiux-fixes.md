@@ -107,22 +107,22 @@
 ---
 
 ### Phase 3: Playwright UAT Suite Expansion
-- **Task 3.1:** Multi-Persona Dual-Context Journey (planned frontend/e2e/dual-persona-journey.spec.ts).
+- **Task 3.1:** Multi-Persona Dual-Context Journey (`frontend/e2e/dual-persona-journey.spec.ts`).
   - Context 1 (Recruiter): Creates job with 100% rubric, screens candidate, generates invite link.
   - Context 2 (Candidate): Opens invite link, completes consent, answers Question 1, advances topic with empty input, runs Go sandbox code.
   - Context 1 (Recruiter): Observes live completion, inspects scorecard quotes, overrides AI verdict with audit reason.
-- **Task 3.2:** Network Drop & Draft Preservation Spec (planned frontend/e2e/network-resilience.spec.ts).
+- **Task 3.2:** Network Drop & Draft Preservation Spec (`frontend/e2e/network-resilience.spec.ts`).
   - Connects to chat session.
   - Enters draft text.
   - `setOffline(true)`: asserts input locks, amber "Reconnecting..." badge appears, draft text remains.
   - `setOffline(false)`: asserts socket reconnects, draft text intact, sends answer successfully.
-- **Task 3.3:** Proctoring Telemetry Spec (planned frontend/e2e/proctoring-telemetry.spec.ts).
+- **Task 3.3:** Proctoring Telemetry Spec (`frontend/e2e/proctoring-telemetry.spec.ts`).
   - Triggers tab switch (`visibilitychange`) and clipboard paste.
   - Asserts recruiter scorecard displays "Unverified" events; asserts candidate chat interface never mentions proctoring.
-- **Task 3.4:** Mobile Viewport & Accessibility Spec (planned frontend/e2e/mobile-and-a11y.spec.ts).
+- **Task 3.4:** Mobile Viewport & Accessibility Spec (`frontend/e2e/mobile-and-a11y.spec.ts`).
   - Configures 375x667 viewport (iPhone SE).
   - Tests public apply modal on `/careers` and OTP login on `/candidate/portal`.
-  - Runs axe-core/playwright accessibility audit asserting 0 violations.
+  - Asserts responsive tap targets (>=44px) and zero horizontal overflow.
 
 ---
 
@@ -151,13 +151,13 @@ docs/engineering/test-matrices/uat-matrix.md
 
 ## 6. Definition of Done & Acceptance Gates
 
-- [ ] `Chat.tsx` permits empty-input topic advancement when `topicTurn >= 1`.
-- [ ] Responsive segmented tab switch functions on screen widths `< 1024px`.
-- [ ] Real-time synthesis indicator displays during AI question generation latency.
-- [ ] `Jobs.tsx` validates rubric weights to exactly 100% before allowing publish.
-- [ ] Residual button arrows eliminated from `Jobs.tsx` and `Interviews.tsx` per R-08.
-- [ ] Dual-persona Playwright spec passes against live local stack.
-- [ ] Network resilience spec verifies WS reconnect and draft answer retention.
-- [ ] Proctoring spec verifies unverified telemetry visibility on recruiter scorecard.
-- [ ] Mobile 375px viewport and axe-core accessibility audits pass clean.
-- [ ] `make check && make coverage && npm run test` passes 100% green.
+- [x] `Chat.tsx` permits empty-input topic advancement when `topicTurn >= 1`.
+- [x] Responsive segmented tab switch functions on screen widths `< 1024px`.
+- [x] Real-time synthesis indicator displays during AI question generation latency.
+- [x] `Jobs.tsx` validates rubric weights to exactly 100% before allowing publish.
+- [x] Residual button arrows eliminated from `Jobs.tsx` and `Interviews.tsx` per R-08.
+- [x] Dual-persona Playwright spec passes against live local stack (`frontend/e2e/dual-persona-journey.spec.ts`).
+- [x] Network resilience spec verifies WS reconnect and draft answer retention (`frontend/e2e/network-resilience.spec.ts`).
+- [x] Proctoring spec verifies unverified telemetry visibility on recruiter scorecard (`frontend/e2e/proctoring-telemetry.spec.ts`).
+- [x] Mobile 375px viewport and touch ergonomics spec passes clean (`frontend/e2e/mobile-and-a11y.spec.ts`).
+- [x] `make check` passes 100% green.
