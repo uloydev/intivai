@@ -86,6 +86,7 @@ export function CandidatePortal() {
   const emptyAutoRefetchRef = useRef(false)
 
   const handleLogout = useCallback(() => {
+    api.post("/public/candidate/auth/logout").catch(() => null)
     localStorage.removeItem(TOKEN_KEY)
     localStorage.removeItem(EMAIL_KEY)
     setStep("email")

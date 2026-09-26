@@ -65,3 +65,19 @@ func (r *PostgresTokenRepo) MarkUsed(ctx context.Context, token string) error {
 	return q.WithContext(ctx).Exec(
 		`UPDATE interview_tokens SET used_at = NOW() WHERE token = $1 AND used_at IS NULL`, token).Error
 }
+
+// GetPreview is pre-auth: uses security-definer get_invite_preview — returns
+// safe branding metadata (org_name, job_title, question_count) without exposing candidate PII.
+func (r *PostgresTokenRepo) GetPreview(ctx context.Context, token string) (*ivdomain.InvitePreview, error) {
+	row := r.pool.WithContext(ctx).Raw(
+		`SELECT valid, status, org_name, job_title, question_count, estimated_duration_min
+		 FROM get_invite_preview($1)`, token).Row()
+	var p ivdomain.InvitePreview
+	if err := row.Scan(&p.Valid, &p.Status, &p.OrgName, &p.JobTitle, &p.QuestionCount, &p.EstimatedDurationMin); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return &ivdomain.InvitePreview{Valid: false, Status: "not_found"}, nil
+		}
+		return nil, err
+	}
+	return &p, nil
+}

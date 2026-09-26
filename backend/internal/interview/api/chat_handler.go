@@ -623,6 +623,22 @@ func (h *ChatHandler) Create(c *fiber.Ctx) error {
 	return httpapi.Created(c, result)
 }
 
+// InvitePreview — GET /api/v1/public/invite-preview?token=<token> (public, pre-flight).
+func (h *ChatHandler) InvitePreview(c *fiber.Ctx) error {
+	token := strings.TrimSpace(c.Query("token"))
+	if token == "" {
+		token = strings.TrimSpace(c.Query("t"))
+	}
+	if token == "" {
+		return httpapi.Error(c, sharederrors.NewDomainError("BAD_REQUEST", "invitation token is required"))
+	}
+	preview, err := h.svc.GetInvitePreview(c.UserContext(), token)
+	if err != nil {
+		return httpapi.Error(c, err)
+	}
+	return httpapi.OK(c, preview)
+}
+
 // Consent — POST /candidate/interviews/:id/consent (candidate, invitation
 // token). Records GDPR consent; the chat refuses to start without it.
 func (h *ChatHandler) Consent(c *fiber.Ctx) error {

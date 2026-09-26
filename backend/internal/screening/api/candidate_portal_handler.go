@@ -190,6 +190,16 @@ func (h *CandidatePortalHandler) VerifyOTP(c *fiber.Ctx) error {
 		return httpapi.Error(c, sharederr.NewDomainError("INTERNAL_ERROR", "failed to issue candidate token"))
 	}
 
+	c.Cookie(&fiber.Cookie{
+		Name:     "intivai_candidate_jwt",
+		Value:    jwtToken,
+		Path:     "/",
+		Expires:  time.Now().Add(candidateTokenTTL),
+		HTTPOnly: true,
+		Secure:   c.Protocol() == "https",
+		SameSite: "Lax",
+	})
+
 	return httpapi.OK(c, fiber.Map{
 		"token":      jwtToken,
 		"email":      otp.Email,
@@ -197,13 +207,18 @@ func (h *CandidatePortalHandler) VerifyOTP(c *fiber.Ctx) error {
 	})
 }
 
-// RequireCandidateAuth middleware validates candidate JWTs
+// RequireCandidateAuth middleware validates candidate JWTs via HttpOnly cookie or Authorization Bearer header.
 func (h *CandidatePortalHandler) RequireCandidateAuth(c *fiber.Ctx) error {
-	header := c.Get("Authorization")
-	if !strings.HasPrefix(header, "Bearer ") {
-		return httpapi.Error(c, sharederr.NewDomainError("UNAUTHORIZED", "missing candidate authorization header"))
+	token := c.Cookies("intivai_candidate_jwt")
+	if token == "" {
+		header := c.Get("Authorization")
+		if strings.HasPrefix(header, "Bearer ") {
+			token = strings.TrimPrefix(header, "Bearer ")
+		}
 	}
-	token := strings.TrimPrefix(header, "Bearer ")
+	if token == "" {
+		return httpapi.Error(c, sharederr.NewDomainError("UNAUTHORIZED", "missing candidate authorization"))
+	}
 	claims, err := h.tokens.Parse(token)
 	if err != nil || claims.Type != iamapp.TokenTypeCandidate {
 		return httpapi.Error(c, sharederr.NewDomainError("UNAUTHORIZED", "invalid candidate authorization token"))
@@ -216,6 +231,20 @@ func (h *CandidatePortalHandler) RequireCandidateAuth(c *fiber.Ctx) error {
 
 	c.Locals("candidate_email", email)
 	return c.Next()
+}
+
+// Logout handles POST /api/v1/public/candidate/auth/logout
+func (h *CandidatePortalHandler) Logout(c *fiber.Ctx) error {
+	c.Cookie(&fiber.Cookie{
+		Name:     "intivai_candidate_jwt",
+		Value:    "",
+		Path:     "/",
+		Expires:  time.Now().Add(-24 * time.Hour),
+		HTTPOnly: true,
+		Secure:   c.Protocol() == "https",
+		SameSite: "Lax",
+	})
+	return httpapi.OK(c, fiber.Map{"message": "logged out successfully"})
 }
 
 // ListApplications handles GET /api/v1/candidate/portal/applications
@@ -268,5 +297,14 @@ func (h *CandidatePortalHandler) DeleteMe(c *fiber.Ctx) error {
 		log.Warn().Err(err).Str("email", email).Msg("candidate erase failed")
 		return httpapi.Error(c, sharederr.NewDomainError("INTERNAL_ERROR", "failed to erase candidate data"))
 	}
+	c.Cookie(&fiber.Cookie{
+		Name:     "intivai_candidate_jwt",
+		Value:    "",
+		Path:     "/",
+		Expires:  time.Now().Add(-24 * time.Hour),
+		HTTPOnly: true,
+		Secure:   c.Protocol() == "https",
+		SameSite: "Lax",
+	})
 	return httpapi.OK(c, fiber.Map{"message": "your data has been erased"})
 }

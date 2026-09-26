@@ -7,7 +7,7 @@ import {
 } from "@phosphor-icons/react"
 import { api } from "@/lib/api"
 import { storeInvitationToken } from "@/lib/interview-ticket"
-import type { ConsentResult } from "@/types/api"
+import type { ConsentResult, InvitePreview } from "@/types/api"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -30,6 +30,24 @@ export function InvitePage() {
   // not a transient toast: the page must tell the candidate what happened and
   // how to get a fresh link, and must not re-enable the button.
   const [failed, setFailed] = useState(false)
+  const [preview, setPreview] = useState<InvitePreview | null>(null)
+
+  useEffect(() => {
+    if (!token) return
+    let active = true
+    api.get<InvitePreview>(`/public/invite-preview?token=${encodeURIComponent(token)}`)
+      .then((data) => {
+        if (!active || !data) return
+        setPreview(data)
+        if (!data.valid && (data.status === "expired" || data.status === "revoked")) {
+          setFailed(true)
+        }
+      })
+      .catch(() => {
+        // fail-soft: fallback to generic invite if preview fails
+      })
+    return () => { active = false }
+  }, [token])
 
   const start = useCallback(async () => {
     if (!id || !token) return
@@ -68,11 +86,15 @@ export function InvitePage() {
         <Card className="border-border bg-card shadow-sm overflow-hidden relative">
           <CardHeader className="text-center pb-2">
             <div className="mx-auto mb-2 flex h-12 w-12 items-center justify-center rounded-xl bg-primary text-primary-foreground font-bold font-display text-xl shadow-sm">
-              I
+              {preview?.org_name ? preview.org_name.charAt(0).toUpperCase() : "I"}
             </div>
-            <CardTitle className="font-display text-2xl font-bold tracking-tight">Interview Invitation</CardTitle>
+            <CardTitle className="font-display text-2xl font-bold tracking-tight">
+              {preview?.job_title ? preview.job_title : "Interview Invitation"}
+            </CardTitle>
             <CardDescription className="text-xs">
-              Welcome! You've been invited to complete a technical screening interview.
+              {preview?.org_name
+                ? `You have been invited by ${preview.org_name} to complete a technical screening interview.`
+                : "Welcome! You've been invited to complete a technical screening interview."}
             </CardDescription>
           </CardHeader>
 
@@ -85,11 +107,17 @@ export function InvitePage() {
               <ul className="space-y-1.5 pl-1">
                 <li className="flex items-start gap-2">
                   <CheckCircle className="h-4 w-4 text-primary shrink-0 mt-0.5" weight="fill" />
-                  <span>Answer dynamic technical questions one at a time via keyboard.</span>
+                  <span>
+                    {preview?.question_count && preview.question_count > 0
+                      ? `Answer ${preview.question_count} dynamic technical questions one at a time via keyboard.`
+                      : "Answer dynamic technical questions one at a time via keyboard."}
+                  </span>
                 </li>
                 <li className="flex items-start gap-2">
                   <CheckCircle className="h-4 w-4 text-primary shrink-0 mt-0.5" weight="fill" />
-                  <span>Session takes approximately 15-20 minutes with automatic save & resume support.</span>
+                  <span>
+                    Session takes approximately {preview?.estimated_duration_min ?? 20} minutes with automatic save & resume support.
+                  </span>
                 </li>
                 <li className="flex items-start gap-2">
                   <CheckCircle className="h-4 w-4 text-primary shrink-0 mt-0.5" weight="fill" />

@@ -56,7 +56,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
   // Dead backend must not spin spinners forever.
   const signal = init?.signal ?? AbortSignal.timeout(15_000)
-  const res = await fetch(`${API_BASE}${path}`, { ...init, headers, signal })
+  const res = await fetch(`${API_BASE}${path}`, { ...init, headers, signal, credentials: "same-origin" })
   // 204 No Content (e.g. successful DELETE) has no body to parse.
   if (res.status === 204) {
     return undefined as T
