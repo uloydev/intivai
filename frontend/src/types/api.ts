@@ -179,6 +179,37 @@ export interface Application {
   applied_at?: string
 }
 
+export interface InvitePreview {
+  valid: boolean
+  status: string
+  org_name: string
+  job_title: string
+  question_count: number
+  estimated_duration_min: number
+}
+
+export interface BillingSummary {
+  plan: string
+  plan_status: string
+  monthly_limit: number
+  monthly_usage: number
+  interview_credits: number
+  current_period_start?: string
+  current_period_end?: string
+  has_customer_account: boolean
+}
+
+export interface RecruiterNotification {
+  id: string
+  org_id: string
+  event_type: "interview.completed" | "interview.human_requested" | "candidate.screening_passed" | string
+  title: string
+  message: string
+  action_url: string
+  read: boolean
+  created_at: string
+}
+
 export interface CreateInterviewResult {
   interview_id: string
   invitation_token: string
