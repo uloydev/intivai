@@ -20,6 +20,7 @@ BEGIN
             'marcus.vance@example.com'
         );
         DELETE FROM audit_logs WHERE org_id = v_demo_id;
+        DELETE FROM recruiter_notifications WHERE org_id = v_demo_id;
         DELETE FROM mnemosyne_memories WHERE org_id = v_demo_id;
         DELETE FROM interview_tokens WHERE org_id = v_demo_id;
         DELETE FROM interviews WHERE application_id IN (SELECT id FROM applications WHERE org_id = v_demo_id);
@@ -34,12 +35,16 @@ BEGIN
     END IF;
 END $$;
 
-INSERT INTO orgs (id, name, slug, plan, scoring_weights, min_score_to_proceed, created_at)
+INSERT INTO orgs (id, name, slug, plan, plan_status, current_period_start, current_period_end, interview_credits, scoring_weights, min_score_to_proceed, created_at)
 VALUES (
     '968f66ef-91c6-4db3-8764-ceeffb753b1f',
     'Demo Corp',
     'demo',
     'enterprise',
+    'active',
+    NOW() - INTERVAL '15 days',
+    NOW() + INTERVAL '15 days',
+    500,
     '{"skills_match": 0.35, "experience_years": 0.20, "semantic_match": 0.25, "education": 0.10, "certifications": 0.10}'::jsonb,
     60.0,
     NOW() - INTERVAL '30 days'

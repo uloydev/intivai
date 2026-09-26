@@ -41,8 +41,8 @@ BEGIN
         RETURN;
     END IF;
 
-    IF iv.questions IS NOT NULL AND jsonb_typeof(iv.questions) = 'array' THEN
-        q_count := jsonb_array_length(iv.questions);
+    IF iv.transcript IS NOT NULL AND jsonb_typeof(iv.transcript->'questions') = 'array' THEN
+        q_count := jsonb_array_length(iv.transcript->'questions');
     END IF;
 
     SELECT j_tbl.* INTO j FROM jobs j_tbl
