@@ -28,7 +28,9 @@ type Config struct {
 		MigrateURL string
 	}
 	Redis struct {
-		Addr string
+		Addr     string
+		Password string
+		URL      string
 	}
 	MinIO struct {
 		Endpoint  string
@@ -125,6 +127,8 @@ func Load() (*Config, error) {
 	cfg.Database.MigrateURL = v.GetString("MIGRATE_URL")
 
 	cfg.Redis.Addr = getString("REDIS_ADDR", "localhost:6379")
+	cfg.Redis.Password = v.GetString("REDIS_PASSWORD")
+	cfg.Redis.URL = v.GetString("REDIS_URL")
 
 	cfg.MinIO.Endpoint = getString("MINIO_ENDPOINT", "localhost:9000")
 	cfg.MinIO.AccessKey = v.GetString("MINIO_ACCESS_KEY")

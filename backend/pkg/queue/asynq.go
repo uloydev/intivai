@@ -16,12 +16,51 @@ const (
 	TaskEvaluateInterview = "evaluate_interview"
 )
 
+// RedisConfig encapsulates connection parameters for Redis and Asynq.
+type RedisConfig struct {
+	Addr     string
+	Password string
+	URL      string
+}
+
+// ParseRedisConnOpt parses connection parameters into Asynq and Go-Redis options.
+func ParseRedisConnOpt(cfg RedisConfig) (asynq.RedisConnOpt, *redis.Options, error) {
+	if cfg.URL != "" {
+		asynqOpt, err := asynq.ParseRedisURI(cfg.URL)
+		if err != nil {
+			return nil, nil, fmt.Errorf("parse redis uri for asynq: %w", err)
+		}
+		redisOpt, err := redis.ParseURL(cfg.URL)
+		if err != nil {
+			return nil, nil, fmt.Errorf("parse redis uri for redis: %w", err)
+		}
+		return asynqOpt, redisOpt, nil
+	}
+	addr := cfg.Addr
+	if addr == "" {
+		addr = "localhost:6379"
+	}
+	clientOpt := asynq.RedisClientOpt{
+		Addr:     addr,
+		Password: cfg.Password,
+	}
+	redisOpt := &redis.Options{
+		Addr:     addr,
+		Password: cfg.Password,
+	}
+	return clientOpt, redisOpt, nil
+}
+
 type Client struct {
 	client *asynq.Client
 }
 
 func NewClient(redisAddr string) *Client {
-	return &Client{client: asynq.NewClient(asynq.RedisClientOpt{Addr: redisAddr})}
+	return NewClientWithOpt(asynq.RedisClientOpt{Addr: redisAddr})
+}
+
+func NewClientWithOpt(opt asynq.RedisConnOpt) *Client {
+	return &Client{client: asynq.NewClient(opt)}
 }
 
 func (c *Client) Close() error {
@@ -48,11 +87,15 @@ type Server struct {
 }
 
 func NewServer(redisAddr string, concurrency int, log zerolog.Logger) *Server {
+	return NewServerWithOpt(asynq.RedisClientOpt{Addr: redisAddr}, concurrency, log)
+}
+
+func NewServerWithOpt(opt asynq.RedisConnOpt, concurrency int, log zerolog.Logger) *Server {
 	if concurrency <= 0 {
 		concurrency = 10
 	}
 	srv := asynq.NewServer(
-		asynq.RedisClientOpt{Addr: redisAddr},
+		opt,
 		asynq.Config{
 			Concurrency: concurrency,
 			Logger:      asynqLogger{log: log},
@@ -94,6 +137,10 @@ func (s *Server) Shutdown(ctx context.Context) error {
 
 func NewRedis(addr string) *redis.Client {
 	return redis.NewClient(&redis.Options{Addr: addr})
+}
+
+func NewRedisClient(opt *redis.Options) *redis.Client {
+	return redis.NewClient(opt)
 }
 
 type asynqLogger struct {
