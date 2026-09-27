@@ -62,8 +62,7 @@ func (r *PostgresBillingRepo) UpdateSubscription(ctx context.Context, billing *b
 	return q.WithContext(ctx).Exec(
 		`UPDATE orgs
 		 SET plan = $1, plan_status = $2, stripe_customer_id = $3, stripe_subscription_id = $4,
-		     current_period_start = $5, current_period_end = $6, interview_credits = $7,
-		     updated_at = NOW()
+		     current_period_start = $5, current_period_end = $6, interview_credits = $7
 		 WHERE id = $8`,
 		string(billing.Plan), billing.PlanStatus, billing.StripeCustomerID, billing.StripeSubscriptionID,
 		billing.CurrentPeriodStart, billing.CurrentPeriodEnd, billing.InterviewCredits, billing.OrgID).Error
@@ -91,7 +90,7 @@ func (r *PostgresBillingRepo) DeductCredit(ctx context.Context, orgID uuid.UUID)
 	}
 	res := q.WithContext(ctx).Exec(
 		`UPDATE orgs
-		 SET interview_credits = interview_credits - 1, updated_at = NOW()
+		 SET interview_credits = interview_credits - 1
 		 WHERE id = $1 AND interview_credits > 0`, orgID)
 	if res.Error != nil {
 		return false, res.Error

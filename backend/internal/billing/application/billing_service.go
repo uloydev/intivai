@@ -121,7 +121,7 @@ func (s *BillingService) CreateCheckout(ctx context.Context, orgID uuid.UUID, pl
 
 func (s *BillingService) CreatePortal(ctx context.Context, orgID uuid.UUID, returnURL string) (string, error) {
 	var customerID string
-	err := db.RunInTx(ctx, s.pool, orgID.String(), func(tctx context.Context) error {
+	err := s.runInTx(ctx, orgID.String(), func(tctx context.Context) error {
 		b, err := s.repo.GetOrgBilling(tctx, orgID)
 		if err != nil {
 			return err
