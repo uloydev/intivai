@@ -3,7 +3,6 @@ package native
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -118,44 +117,6 @@ func (m *NativeMemory) Recall(ctx context.Context, query string, budget string) 
 	}
 	defer func() { _ = rows.Close() }()
 	return scanHits(rows)
-}
-
-func (m *NativeMemory) QueryGraph(ctx context.Context, entityType, filter string) ([]memdomain.MemoryHit, error) {
-	if err := m.open(); err != nil {
-		return nil, err
-	}
-	rows, err := m.db.QueryContext(ctx,
-		`SELECT id, content, importance FROM memories WHERE entity_type = ? AND (filter = ? OR filter IS NULL) ORDER BY importance DESC LIMIT 50`,
-		entityType, filter)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = rows.Close() }()
-	return scanHits(rows)
-}
-
-func (m *NativeMemory) Reflect(ctx context.Context, question string) (string, error) {
-	// M2: aggregate recall + LLM synthesis. Needs the LLM provider wired in.
-	return "", errors.New("reflect not implemented until LLM provider is wired (M2)")
-}
-
-func (m *NativeMemory) Forget(ctx context.Context, memoryID string) error {
-	if err := m.open(); err != nil {
-		return err
-	}
-	_, err := m.db.ExecContext(ctx, `DELETE FROM memories WHERE id = ?`, memoryID)
-	return err
-}
-
-func (m *NativeMemory) Stats(ctx context.Context) (memdomain.MemoryStats, error) {
-	if err := m.open(); err != nil {
-		return memdomain.MemoryStats{}, err
-	}
-	var n int
-	if err := m.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM memories`).Scan(&n); err != nil {
-		return memdomain.MemoryStats{}, err
-	}
-	return memdomain.MemoryStats{Banks: 1, Memories: n, Embedding: "bge-small-en-v1.5 (384d, M2)"}, nil
 }
 
 func (m *NativeMemory) Close() error {

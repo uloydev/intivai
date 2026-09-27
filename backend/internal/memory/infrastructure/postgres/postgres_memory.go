@@ -2,8 +2,6 @@ package postgres
 
 import (
 	"context"
-	"database/sql"
-	"errors"
 
 	"github.com/intivai/backend/internal/embedding"
 	memdomain "github.com/intivai/backend/internal/memory/domain"
@@ -125,13 +123,6 @@ func (b *PostgresBank) cosineRecall(ctx context.Context, queryVec []float32) ([]
 	return hits, err
 }
 
-func (b *PostgresBank) QueryGraph(ctx context.Context, entityType, filter string) ([]memdomain.MemoryHit, error) {
-	return b.query(ctx,
-		`SELECT id, content, importance FROM mnemosyne_memories
-		 WHERE entity_type = $1 AND (filter = $2 OR filter IS NULL) ORDER BY importance DESC LIMIT 50`,
-		entityType, filter)
-}
-
 func (b *PostgresBank) query(ctx context.Context, sql string, args ...any) ([]memdomain.MemoryHit, error) {
 	var hits []memdomain.MemoryHit
 	err := b.withTenant(ctx, func(tx *gorm.DB) error {
@@ -154,32 +145,7 @@ func (b *PostgresBank) query(ctx context.Context, sql string, args ...any) ([]me
 	return hits, err
 }
 
-func (b *PostgresBank) Reflect(ctx context.Context, question string) (string, error) {
-	// M2: aggregate recall + LLM synthesis. Needs the LLM provider wired in.
-	return "", errors.New("reflect not implemented until LLM provider is wired (M2)")
-}
-
-func (b *PostgresBank) Forget(ctx context.Context, memoryID string) error {
-	return b.withTenant(ctx, func(tx *gorm.DB) error {
-		return tx.Exec(`DELETE FROM mnemosyne_memories WHERE id = $1`, memoryID).Error
-	})
-}
-
-func (b *PostgresBank) Stats(ctx context.Context) (memdomain.MemoryStats, error) {
-	stats := memdomain.MemoryStats{
-		Banks:     1,
-		Embedding: "bge-small-en-v1.5 (384d, M2)",
-	}
-	err := b.withTenant(ctx, func(tx *gorm.DB) error {
-		return tx.Raw(`SELECT COUNT(*) FROM mnemosyne_memories`).Row().Scan(&stats.Memories)
-	})
-	if errors.Is(err, sql.ErrNoRows) {
-		return stats, nil
-	}
-	return stats, err
-}
-
 func (b *PostgresBank) Close() error { return nil }
 
-var _ memdomain.MemoryBank = (*PostgresBank)(nil)
+var _ memdomain.GroundingBank = (*PostgresBank)(nil)
 var _ memdomain.BankFactory = (*PostgresFactory)(nil)
