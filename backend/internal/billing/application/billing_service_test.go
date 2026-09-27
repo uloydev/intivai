@@ -53,14 +53,47 @@ func TestBillingService_CheckQuota(t *testing.T) {
 			usage: 5,
 		}
 		svc := billingapp.NewBillingService(nil, repo, gw)
-		// Unit test direct repo logic without pool
+		allowed, err := svc.CheckAndConsumeQuota(context.Background(), orgID)
+		require.NoError(t, err)
+		require.True(t, allowed)
+
 		summary, err := svc.GetSummary(context.Background(), orgID)
-		// GetSummary without pool will skip RunInTx if pool is nil, but RunInTx needs pool.
-		// So let's test domain calculations directly:
-		require.Equal(t, 10, repo.billing.Plan.MonthlyInterviewLimit())
-		require.True(t, repo.usage < repo.billing.Plan.MonthlyInterviewLimit())
-		_ = summary
-		_ = err
+		require.NoError(t, err)
+		require.Equal(t, 10, summary.MonthlyLimit)
+		require.Equal(t, 5, summary.MonthlyUsage)
+	})
+
+	t.Run("quota exceeded without credits", func(t *testing.T) {
+		repo := &mockBillingRepo{
+			billing: &billingdomain.OrgBilling{
+				OrgID:            orgID,
+				Plan:             billingdomain.PlanFree,
+				PlanStatus:       "active",
+				InterviewCredits: 0,
+			},
+			usage: 10,
+		}
+		svc := billingapp.NewBillingService(nil, repo, gw)
+		allowed, err := svc.CheckAndConsumeQuota(context.Background(), orgID)
+		require.Error(t, err)
+		require.False(t, allowed)
+	})
+
+	t.Run("quota exceeded with credits succeeds", func(t *testing.T) {
+		repo := &mockBillingRepo{
+			billing: &billingdomain.OrgBilling{
+				OrgID:            orgID,
+				Plan:             billingdomain.PlanFree,
+				PlanStatus:       "active",
+				InterviewCredits: 2,
+			},
+			usage: 10,
+		}
+		svc := billingapp.NewBillingService(nil, repo, gw)
+		allowed, err := svc.CheckAndConsumeQuota(context.Background(), orgID)
+		require.NoError(t, err)
+		require.True(t, allowed)
+		require.Equal(t, 1, repo.billing.InterviewCredits)
 	})
 
 	t.Run("plan limit calculations", func(t *testing.T) {

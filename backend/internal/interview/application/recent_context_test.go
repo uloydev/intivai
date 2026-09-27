@@ -65,7 +65,7 @@ func TestRecentContextFromTranscript(t *testing.T) {
 		jobrepo.NewPostgresCandidateContextRepo(pool),
 		ctxrepo.NewPostgresContextRepo(pool), minio, auth.NewJWTProvider("test-secret"), ivdomain.SystemClock(), nil, nil, zerolog.Nop())
 
-	actor := iamActor(orgID, "admin")
+	actor := iamActor(orgID)
 	res, err := svc.CreateInterview(ctx, actor, CreateInterviewCommand{ApplicationID: appID, QuestionCount: 3})
 	if err != nil {
 		t.Fatal(err)

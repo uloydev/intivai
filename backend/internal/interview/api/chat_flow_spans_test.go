@@ -138,6 +138,9 @@ func TestChatFlowEmitsTurnSpans(t *testing.T) {
 	dialer := websocket.Dialer{HandshakeTimeout: 3 * time.Second}
 	headers := map[string][]string{"Authorization": {"Bearer " + ticket.Ticket}}
 	conn, resp, err := dialer.Dial("ws://"+ln.Addr().String()+"/candidate/interviews/"+created.InterviewID.String(), headers)
+	if resp != nil && resp.Body != nil {
+		defer resp.Body.Close()
+	}
 	if err != nil {
 		t.Fatalf("ws dial: %v (%d)", err, resp.StatusCode)
 	}

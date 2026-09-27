@@ -65,7 +65,7 @@ func TestContextVersionPinnedAtCreation(t *testing.T) {
 		scrrepo.NewPostgresApplicationRepo(pool), cvrepo.NewPostgresCandidateRepo(pool), jobrepo.NewPostgresJobRepo(pool),
 		jobrepo.NewPostgresCandidateContextRepo(pool),
 		contextRepo, minio, auth.NewJWTProvider("test-secret"), ivdomain.SystemClock(), nil, nil, zerolog.Nop())
-	actor := iamActor(orgID, "admin")
+	actor := iamActor(orgID)
 
 	// Version 1 context → interview 1 pins version 1.
 	if err := db.RunInTx(ctx, pool, orgID, func(tctx context.Context) error {

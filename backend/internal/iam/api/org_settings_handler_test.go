@@ -52,19 +52,19 @@ func newOrgSettingsApp(repo iamdomain.IAMRepository, role string, orgID uuid.UUI
 	return app
 }
 
-func doPutQALimit(app *fiber.App, orgID uuid.UUID, body string) (*http.Response, map[string]any) {
+func doPutQALimit(app *fiber.App, orgID uuid.UUID, body string) (int, map[string]any) {
 	req := httptest.NewRequest(http.MethodPut, "/api/v1/orgs/"+orgID.String()+"/settings/candidate-qa-limit", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer x")
 	resp, err := app.Test(req, -1)
 	if err != nil {
-		return nil, nil
+		return 0, nil
 	}
+	defer resp.Body.Close()
 	raw, _ := io.ReadAll(resp.Body)
-	_ = resp.Body.Close()
 	var payload map[string]any
 	_ = json.Unmarshal(raw, &payload)
-	return resp, payload
+	return resp.StatusCode, payload
 }
 
 func TestOrgSettingsHandlerSetsQALimit(t *testing.T) {
@@ -72,9 +72,9 @@ func TestOrgSettingsHandlerSetsQALimit(t *testing.T) {
 	repo := &stubOrgRepo{org: &iamdomain.Org{}}
 	app := newOrgSettingsApp(repo, string(iamdomain.RoleAdmin), orgID)
 
-	resp, payload := doPutQALimit(app, orgID, `{"candidate_qa_limit":25}`)
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d, want 200 (body %v)", resp.StatusCode, payload)
+	status, payload := doPutQALimit(app, orgID, `{"candidate_qa_limit":25}`)
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body %v)", status, payload)
 	}
 	if repo.updateLimit != 25 {
 		t.Fatalf("repo received limit %d, want 25", repo.updateLimit)
@@ -107,9 +107,9 @@ func TestOrgSettingsHandlerQALimitBounds(t *testing.T) {
 		{`{}`, http.StatusBadRequest},
 		{`{"candidate_qa_limit":"10"}`, http.StatusBadRequest},
 	} {
-		resp, payload := doPutQALimit(app, orgID, tc.body)
-		if resp.StatusCode != tc.status {
-			t.Fatalf("body %s: status = %d, want %d (body %v)", tc.body, resp.StatusCode, tc.status, payload)
+		status, payload := doPutQALimit(app, orgID, tc.body)
+		if status != tc.status {
+			t.Fatalf("body %s: status = %d, want %d (body %v)", tc.body, status, tc.status, payload)
 		}
 	}
 }
@@ -118,18 +118,18 @@ func TestOrgSettingsHandlerRejectsNonAdmin(t *testing.T) {
 	orgID := uuid.New()
 	app := newOrgSettingsApp(&stubOrgRepo{}, string(iamdomain.RoleRecruiter), orgID)
 
-	resp, _ := doPutQALimit(app, orgID, `{"candidate_qa_limit":10}`)
-	if resp.StatusCode != http.StatusForbidden {
-		t.Fatalf("recruiter: status = %d, want 403", resp.StatusCode)
+	status, _ := doPutQALimit(app, orgID, `{"candidate_qa_limit":10}`)
+	if status != http.StatusForbidden {
+		t.Fatalf("recruiter: status = %d, want 403", status)
 	}
 }
 
 func TestOrgSettingsHandlerRejectsOrgMismatch(t *testing.T) {
 	app := newOrgSettingsApp(&stubOrgRepo{}, string(iamdomain.RoleAdmin), uuid.New())
 
-	resp, _ := doPutQALimit(app, uuid.New(), `{"candidate_qa_limit":10}`)
-	if resp.StatusCode != http.StatusForbidden {
-		t.Fatalf("org mismatch: status = %d, want 403", resp.StatusCode)
+	status, _ := doPutQALimit(app, uuid.New(), `{"candidate_qa_limit":10}`)
+	if status != http.StatusForbidden {
+		t.Fatalf("org mismatch: status = %d, want 403", status)
 	}
 }
 
@@ -138,8 +138,8 @@ func TestOrgSettingsHandlerNotFound(t *testing.T) {
 	repo := &stubOrgRepo{updateErr: iamdomain.ErrNotFound}
 	app := newOrgSettingsApp(repo, string(iamdomain.RoleAdmin), orgID)
 
-	resp, _ := doPutQALimit(app, orgID, `{"candidate_qa_limit":10}`)
-	if resp.StatusCode != http.StatusNotFound {
-		t.Fatalf("missing org: status = %d, want 404", resp.StatusCode)
+	status, _ := doPutQALimit(app, orgID, `{"candidate_qa_limit":10}`)
+	if status != http.StatusNotFound {
+		t.Fatalf("missing org: status = %d, want 404", status)
 	}
 }

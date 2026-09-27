@@ -71,7 +71,7 @@ func TestCreateInterviewRejectsArchivedJob(t *testing.T) {
 		jobrepo.NewPostgresCandidateContextRepo(pool),
 		ctxrepo.NewPostgresContextRepo(pool), minio, auth.NewJWTProvider("test-secret"), ivdomain.SystemClock(), nil, nil, zerolog.Nop())
 
-	actor := iamActor(orgID, "admin")
+	actor := iamActor(orgID)
 	_, err = svc.CreateInterview(ctx, actor, CreateInterviewCommand{ApplicationID: appID, QuestionCount: 3})
 	if err == nil || err.Error() != "job is not active" {
 		t.Fatalf("archived job accepted: %v", err)
@@ -168,7 +168,7 @@ func TestCreateInterviewDispatchesInvitationEmail(t *testing.T) {
 		jobrepo.NewPostgresCandidateContextRepo(pool),
 		ctxrepo.NewPostgresContextRepo(pool), minio, auth.NewJWTProvider("test-secret"), ivdomain.SystemClock(), spy, nil, zerolog.Nop())
 
-	actor := iamActor(orgID, "admin")
+	actor := iamActor(orgID)
 	res, err := svc.CreateInterview(ctx, actor, CreateInterviewCommand{ApplicationID: appID, QuestionCount: 3})
 	if err != nil {
 		t.Fatalf("CreateInterview failed: %v", err)
@@ -191,6 +191,6 @@ func TestCreateInterviewDispatchesInvitationEmail(t *testing.T) {
 	}
 }
 
-func iamActor(orgID, role string) iamapp.AuthContext {
-	return iamapp.AuthContext{OrgID: uuid.MustParse(orgID), Role: role}
+func iamActor(orgID string) iamapp.AuthContext {
+	return iamapp.AuthContext{OrgID: uuid.MustParse(orgID), Role: "admin"}
 }

@@ -155,6 +155,9 @@ func TestChatFlowEndToEnd(t *testing.T) {
 	dialer := websocket.Dialer{HandshakeTimeout: 3 * time.Second}
 	headers := map[string][]string{"Authorization": {"Bearer " + ticket.Ticket}}
 	conn, resp, err := dialer.Dial("ws://"+ln.Addr().String()+"/candidate/interviews/"+created.InterviewID.String(), headers)
+	if resp != nil && resp.Body != nil {
+		defer resp.Body.Close()
+	}
 	if err != nil {
 		t.Fatalf("ws dial: %v (%d)", err, resp.StatusCode)
 	}
@@ -305,12 +308,16 @@ evaluated:
 
 	// 8. Wrong ticket rejected (401, no upgrade).
 	dialer2 := websocket.Dialer{HandshakeTimeout: 2 * time.Second}
-	_, _, err = dialer2.Dial("ws://"+ln.Addr().String()+"/candidate/interviews/"+created.InterviewID.String(), map[string][]string{"Authorization": {"Bearer not-a-ticket"}})
+	_, d2Resp, err := dialer2.Dial("ws://"+ln.Addr().String()+"/candidate/interviews/"+created.InterviewID.String(), map[string][]string{"Authorization": {"Bearer not-a-ticket"}})
+	if d2Resp != nil && d2Resp.Body != nil {
+		_ = d2Resp.Body.Close()
+	}
 	if err == nil {
 		t.Fatal("invalid ticket accepted")
 	}
 }
 
+//nolint:unparam // test helper seam
 func actorWith(orgID uuid.UUID, role string) iamapp.AuthContext {
 	return iamapp.AuthContext{OrgID: orgID, Role: role}
 }

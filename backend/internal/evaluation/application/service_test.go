@@ -21,7 +21,7 @@ import (
 	"github.com/intivai/backend/pkg/db"
 )
 
-func seedEvalScenario(t *testing.T) (*EvaluationService, string, uuid.UUID, uuid.UUID, uuid.UUID) {
+func seedEvalScenario(t *testing.T) (*EvaluationService, string, uuid.UUID, uuid.UUID) {
 	t.Helper()
 	url := os.Getenv("TEST_DATABASE_URL")
 	if url == "" {
@@ -104,11 +104,11 @@ func seedEvalScenario(t *testing.T) (*EvaluationService, string, uuid.UUID, uuid
 	svc := NewEvaluationService(pool,
 		ivrepo.NewPostgresInterviewRepo(pool), scrrepo.NewPostgresApplicationRepo(pool),
 		cvrepo.NewPostgresCandidateRepo(pool), jobrepo.NewPostgresJobRepo(pool), nil)
-	return svc, orgID, ivID, candID, appID
+	return svc, orgID, ivID, candID
 }
 
 func TestInterviewDetail(t *testing.T) {
-	svc, orgID, ivID, _, _ := seedEvalScenario(t)
+	svc, orgID, ivID, _ := seedEvalScenario(t)
 	actor := evalActor(orgID, "admin")
 
 	d, err := svc.InterviewDetail(context.Background(), actor, ivID)
@@ -130,7 +130,7 @@ func TestInterviewDetail(t *testing.T) {
 }
 
 func TestInterviewDetailCrossOrgForbidden(t *testing.T) {
-	svc, _, ivID, _, _ := seedEvalScenario(t)
+	svc, _, ivID, _ := seedEvalScenario(t)
 	other := evalActor(uuid.NewString(), "admin")
 
 	if _, err := svc.InterviewDetail(context.Background(), other, ivID); err == nil {
@@ -139,7 +139,7 @@ func TestInterviewDetailCrossOrgForbidden(t *testing.T) {
 }
 
 func TestCandidateReport(t *testing.T) {
-	svc, orgID, _, candID, _ := seedEvalScenario(t)
+	svc, orgID, _, candID := seedEvalScenario(t)
 	actor := evalActor(orgID, "recruiter")
 
 	r, err := svc.CandidateReport(context.Background(), actor, candID)
@@ -159,7 +159,7 @@ func evalActor(orgID, role string) iamapp.AuthContext {
 }
 
 func TestListInterviews(t *testing.T) {
-	svc, orgID, ivID, candID, _ := seedEvalScenario(t)
+	svc, orgID, ivID, candID := seedEvalScenario(t)
 	actor := evalActor(orgID, "admin")
 
 	list, err := svc.ListInterviews(context.Background(), actor)
@@ -182,7 +182,7 @@ func TestListInterviews(t *testing.T) {
 }
 
 func TestListInterviewsCrossOrgEmpty(t *testing.T) {
-	svc, _, _, _, _ := seedEvalScenario(t)
+	svc, _, _, _ := seedEvalScenario(t)
 	other := evalActor(uuid.NewString(), "admin")
 
 	list, err := svc.ListInterviews(context.Background(), other)
@@ -247,7 +247,7 @@ func assertNotFound(t *testing.T, err error) {
 // fast path historically streamed interviews/{id}/report.pdf without any
 // ownership check — any recruiter knowing the UUID read foreign reports.
 func TestInterviewPDFCrossOrgForbiddenOnColdAndWarmCache(t *testing.T) {
-	svcB, _, ivB, _, _ := seedEvalScenario(t)
+	svcB, _, ivB, _ := seedEvalScenario(t)
 	actorA := evalActor(uuid.NewString(), "recruiter") // org A: no relation to ivB
 
 	store := newFakeFileStore()
@@ -276,7 +276,7 @@ func TestInterviewPDFCrossOrgForbiddenOnColdAndWarmCache(t *testing.T) {
 
 // Regression guard: the authz-first fix must not break the owner's warm-cache hit.
 func TestInterviewPDFOwnOrgWarmCacheServed(t *testing.T) {
-	svcB, orgB, ivB, _, _ := seedEvalScenario(t)
+	svcB, orgB, ivB, _ := seedEvalScenario(t)
 	actor := evalActor(orgB, "admin")
 
 	store := newFakeFileStore()

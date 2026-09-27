@@ -50,6 +50,9 @@ func TestCandidateContextRoutesAreRegisteredOnAuthedGroup(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s %s: %v", tc.method, tc.path, err)
 		}
+		if resp != nil && resp.Body != nil {
+			_ = resp.Body.Close()
+		}
 		if resp.StatusCode == fiber.StatusNotFound {
 			t.Fatalf("%s %s returned 404 — route not wired on the authed group", tc.method, tc.path)
 		}
@@ -72,6 +75,9 @@ func TestCandidateContextRoutesRequireAuth(t *testing.T) {
 	resp, err := app.Test(req, -1)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if resp != nil && resp.Body != nil {
+		_ = resp.Body.Close()
 	}
 	if resp.StatusCode != fiber.StatusUnauthorized {
 		t.Fatalf("unauthenticated PUT got %d, want 401", resp.StatusCode)
@@ -171,6 +177,7 @@ func TestCandidateContextRoutesFullChain(t *testing.T) {
 	if saveResp.StatusCode != fiber.StatusOK {
 		t.Fatalf("save got %d, want 200", saveResp.StatusCode)
 	}
+	defer saveResp.Body.Close()
 	var saved struct {
 		Data struct {
 			JobID   string `json:"job_id"`
@@ -191,6 +198,7 @@ func TestCandidateContextRoutesFullChain(t *testing.T) {
 	if getResp.StatusCode != fiber.StatusOK {
 		t.Fatalf("get got %d, want 200", getResp.StatusCode)
 	}
+	defer getResp.Body.Close()
 	var fetched struct {
 		Data struct {
 			Content string `json:"content"`
@@ -209,6 +217,7 @@ func TestCandidateContextRoutesFullChain(t *testing.T) {
 	if sugResp.StatusCode != fiber.StatusOK {
 		t.Fatalf("suggest got %d, want 200", sugResp.StatusCode)
 	}
+	defer sugResp.Body.Close()
 	var suggested struct {
 		Data struct {
 			Draft string `json:"draft"`
@@ -228,4 +237,5 @@ func TestCandidateContextRoutesFullChain(t *testing.T) {
 	if memberResp.StatusCode != fiber.StatusForbidden {
 		t.Fatalf("interviewer PUT got %d, want 403", memberResp.StatusCode)
 	}
+	defer memberResp.Body.Close()
 }
