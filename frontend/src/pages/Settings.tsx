@@ -48,7 +48,7 @@ export function SettingsPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Settings</h1>
+          <h1 className="font-display text-2xl font-bold tracking-tight text-foreground">Settings</h1>
           <p className="text-sm text-muted-foreground">
             Configure workspace-level options.
           </p>
@@ -84,12 +84,13 @@ export function SettingsPage() {
                 onChange={(e) => setInput(e.target.value)}
                 placeholder="10"
                 disabled={isLoading || updateMutation.isPending}
+                className="font-mono text-sm max-w-xs"
               />
               <p className="text-xs text-muted-foreground">
                 {isLoading
                   ? "Loading current limit…"
                   : isError
-                    ? "The current limit is not available — set a new value below."
+                    ? "The current limit is not available. Set a new value below."
                     : "Integers from 0 to 50. Leaving a blank field uses the default."}
               </p>
               {input.length > 0 && parsed === null && (
@@ -99,7 +100,6 @@ export function SettingsPage() {
               )}
             </div>
             <Button
-              variant="gradient"
               onClick={() => parsed !== null && updateMutation.mutate(parsed)}
               disabled={parsed === null || isLoading || updateMutation.isPending}
             >

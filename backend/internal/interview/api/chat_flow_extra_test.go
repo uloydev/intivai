@@ -165,6 +165,8 @@ func createInterviewAndTicket(t *testing.T, svc *ivapp.InterviewService, orgID, 
 }
 
 // chatApp — fiber app with the real chat route for a given service + llm.
+//
+//nolint:unparam // test helper seam
 func chatApp(svc *ivapp.InterviewService, llmClient llm.Provider, origins []string) *fiber.App {
 	app := fiber.New()
 	handler := NewChatHandler(svc, llmClient, auth.NewJWTProvider("test-secret-for-chat-flow"), zerolog.Nop())
@@ -172,6 +174,7 @@ func chatApp(svc *ivapp.InterviewService, llmClient llm.Provider, origins []stri
 	return app
 }
 
+//nolint:unparam // test helper seam
 func dialChatWS(t *testing.T, addr, interviewID, ticket, origin string) (*websocket.Conn, int) {
 	t.Helper()
 	dialer := websocket.Dialer{HandshakeTimeout: 3 * time.Second}
@@ -180,6 +183,9 @@ func dialChatWS(t *testing.T, addr, interviewID, ticket, origin string) (*websoc
 		headers["Origin"] = []string{origin}
 	}
 	conn, resp, err := dialer.Dial("ws://"+addr+"/candidate/interviews/"+interviewID+"/chat", headers)
+	if resp != nil && resp.Body != nil {
+		defer resp.Body.Close()
+	}
 	if err != nil {
 		code := 0
 		if resp != nil {

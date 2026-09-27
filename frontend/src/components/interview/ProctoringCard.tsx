@@ -22,7 +22,7 @@ export function ProctoringCard({ summary, events }: ProctoringCardProps) {
   const isMed = (resolved?.integrity_score ?? 0) >= 60 && (resolved?.integrity_score ?? 0) < 85
 
   return (
-    <Card className="glass border-border/60 overflow-hidden shadow-sm">
+    <Card className="border-border overflow-hidden shadow-sm">
       <div className="p-6 space-y-5">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-border/50 pb-4">
           <div className="flex items-center gap-3">
@@ -97,7 +97,7 @@ export function ProctoringCard({ summary, events }: ProctoringCardProps) {
               <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider block">
                 Tab Switches
               </span>
-              <span className="font-display text-lg font-bold text-foreground mt-0.5 block">
+              <span className="font-mono text-lg font-bold text-foreground mt-0.5 block tabular-nums">
                 {resolved.tab_switch_count}
               </span>
             </div>
@@ -105,7 +105,7 @@ export function ProctoringCard({ summary, events }: ProctoringCardProps) {
               <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider block">
                 Time Out of Focus
               </span>
-              <span className="font-display text-lg font-bold text-foreground mt-0.5 block">
+              <span className="font-mono text-lg font-bold text-foreground mt-0.5 block tabular-nums">
                 {resolved.total_away_duration_sec}s
               </span>
             </div>
@@ -113,7 +113,7 @@ export function ProctoringCard({ summary, events }: ProctoringCardProps) {
               <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider block">
                 Clipboard Pastes
               </span>
-              <span className="font-display text-lg font-bold text-foreground mt-0.5 block">
+              <span className="font-mono text-lg font-bold text-foreground mt-0.5 block tabular-nums">
                 {resolved.paste_event_count}{" "}
                 <span className="text-xs font-normal text-muted-foreground">
                   ({resolved.suspicious_paste_count} large)
@@ -124,7 +124,7 @@ export function ProctoringCard({ summary, events }: ProctoringCardProps) {
               <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider block">
                 Audio Anomalies
               </span>
-              <span className="font-display text-lg font-bold text-foreground mt-0.5 block">
+              <span className="font-mono text-lg font-bold text-foreground mt-0.5 block tabular-nums">
                 {resolved.audio_anomaly_count}
               </span>
             </div>
@@ -132,7 +132,7 @@ export function ProctoringCard({ summary, events }: ProctoringCardProps) {
         ) : (
           <div className="rounded-xl border border-border/40 bg-muted/30 p-3.5 flex items-center gap-2 text-xs text-muted-foreground">
             <Info className="h-4 w-4 shrink-0" weight="fill" />
-            <span>No telemetry recorded — integrity signals are unavailable for this session.</span>
+            <span>No telemetry recorded: integrity signals are unavailable for this session.</span>
           </div>
         )}
 

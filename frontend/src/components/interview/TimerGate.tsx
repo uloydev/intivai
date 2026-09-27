@@ -189,7 +189,7 @@ export function TimerGate({
       {graceClock !== null && (
         <div className="flex items-center justify-between rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-1.5 text-xs text-rose-300 animate-in fade-in slide-in-from-top-1 duration-300">
           <div className="flex items-center gap-2 font-medium">
-            <Warning className="h-4 w-4 text-rose-400 animate-bounce" />
+            <Warning className="h-4 w-4 text-rose-400" />
             <span>Stage time expired. Auto-submitting response in:</span>
           </div>
           <span className="font-mono font-bold text-rose-200 text-sm">
@@ -214,7 +214,7 @@ export function TimerGate({
         >
           <Warning className="h-4 w-4" />
           <span className="font-medium">
-            Only {formatTime(sessionClock)} of session time remains — wrap up your answer.
+            Only {formatTime(sessionClock)} of session time remains. Please wrap up your answer.
           </span>
         </div>
       ) : null}

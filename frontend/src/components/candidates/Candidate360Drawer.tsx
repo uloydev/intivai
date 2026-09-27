@@ -9,7 +9,9 @@ import {
   XCircle,
   FileText,
   Copy,
-  Sparkle,
+  ChatCircleText,
+  Scales,
+  Plus,
   NotePencil,
   Trophy,
 } from "@phosphor-icons/react"
@@ -155,7 +157,7 @@ export function Candidate360Drawer({
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
       <DialogContent
         showCloseButton={false}
-        className="fixed inset-y-0 right-0 top-0 left-auto flex h-full w-full max-w-full translate-x-0 translate-y-0 flex-col gap-0 rounded-none border-l border-border bg-card p-0 shadow-2xl ring-0 data-open:animate-in data-open:fade-in-0 data-open:slide-in-from-right data-closed:animate-out data-closed:slide-out-to-right sm:max-w-2xl lg:max-w-3xl xl:max-w-4xl"
+        className="fixed inset-y-0 right-0 top-0 left-auto flex h-full w-full max-w-full translate-x-0 translate-y-0 flex-col gap-0 rounded-none border-l border-border bg-card p-0 shadow-lg ring-0 data-open:animate-in data-open:fade-in-0 data-open:slide-in-from-right data-closed:animate-out data-closed:slide-out-to-right sm:max-w-2xl lg:max-w-3xl xl:max-w-4xl"
         aria-label="Candidate 360 profile drawer"
       >
         {/* Drawer Header */}
@@ -176,7 +178,7 @@ export function Candidate360Drawer({
               <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground mt-1">
                 <span className="flex items-center gap-1">
                   <EnvelopeSimple className="h-3.5 w-3.5" />
-                  {application.candidate_email || "No email provided"}
+                  {application.candidate_email || "-"}
                 </span>
                 <span>•</span>
                 <span className="flex items-center gap-1 font-medium text-foreground">
@@ -228,7 +230,7 @@ export function Candidate360Drawer({
                 : "border-transparent text-muted-foreground hover:text-foreground"
             )}
           >
-            <Sparkle className="h-4 w-4" />
+            <ChatCircleText className="h-4 w-4" />
             <span>AI Assessment & Telemetry</span>
           </button>
 
@@ -261,7 +263,7 @@ export function Candidate360Drawer({
                     AI Resume Screening Match
                   </p>
                   <div className="flex items-center gap-2 mt-1">
-                    <span className="font-display text-3xl font-bold text-foreground">
+                    <span className="font-mono text-3xl font-bold text-foreground tabular-nums">
                       {application.cv_score != null ? `${application.cv_score}%` : "Pending"}
                     </span>
                     {application.passed_screening ? (
@@ -314,24 +316,26 @@ export function Candidate360Drawer({
                   <div className="space-y-3 rounded-xl border border-border/70 bg-muted/20 p-4">
                     <div className="flex items-center justify-between gap-1.5">
                       <div className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
-                        <Sparkle className="h-4 w-4 text-primary" weight="fill" />
+                        <Scales className="h-4 w-4 text-primary" weight="fill" />
                         <span>AI Screening Recommendation</span>
                       </div>
                       <span className="text-xs text-muted-foreground">
-                        Overall = weighted sum of the dimensions below
+                        {application.scoring_weights ? "Role-specific weights applied" : "Standard baseline weights applied"}
                       </span>
                     </div>
                     {weightedTotal != null && (
                       <div className="flex items-center justify-between rounded-lg border border-border/50 bg-background/60 px-3 py-2">
                         <span className="text-xs font-medium text-muted-foreground">Weighted Overall</span>
-                        <span className="font-display text-base font-bold text-foreground">{weightedTotal}%</span>
+                        <span className="font-mono text-base font-bold text-foreground tabular-nums">{weightedTotal}%</span>
                       </div>
                     )}
                     <div className="grid grid-cols-2 gap-2">
                       {SCREENING_DIMENSIONS.map(({ key, label }) => {
                         const value = application.score_breakdown?.[key]
                         if (value == null) return null
-                        const weight = SCREENING_WEIGHTS[key]
+                        const weight = (application.scoring_weights && application.scoring_weights[key] !== undefined)
+                          ? application.scoring_weights[key]
+                          : SCREENING_WEIGHTS[key]
                         return (
                           <div key={key} className="flex items-center justify-between gap-2 rounded-lg bg-background/60 border border-border/50 px-2.5 py-1.5">
                             <span className="text-xs text-muted-foreground">{label}</span>
@@ -379,7 +383,7 @@ export function Candidate360Drawer({
                     <div className="flex items-center justify-between border-b border-border/50 pb-3">
                       <div>
                         <p className="text-xs text-muted-foreground">Overall Assessment Score</p>
-                        <p className="font-display text-3xl font-bold text-foreground">
+                        <p className="font-mono text-3xl font-bold text-foreground tabular-nums">
                           {application.interview_score} / 100
                         </p>
                       </div>
@@ -389,10 +393,10 @@ export function Candidate360Drawer({
                       </div>
                     </div>
 
-                    <Button asChild variant="gradient" className="w-full gap-2 text-xs font-bold">
+                    <Button asChild className="w-full gap-2 text-xs font-bold">
                       <Link to={`/interviews/${application.interview_id || ""}`}>
                         <Trophy className="h-4 w-4" weight="bold" />
-                        <span>Open Comprehensive Scorecard & Replay →</span>
+                        <span>Open Comprehensive Scorecard & Replay</span>
                       </Link>
                     </Button>
                   </div>
@@ -428,7 +432,7 @@ export function Candidate360Drawer({
                         <Label className="text-xs font-medium">Candidate Invitation</Label>
                         <div className="flex items-center justify-between gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2">
                           <span className="text-xs text-destructive line-through opacity-70">
-                            Invitation expired — regenerate
+                            Invitation expired: regenerate
                           </span>
                           <Button
                             size="sm"
@@ -437,7 +441,7 @@ export function Candidate360Drawer({
                             disabled={createInterview.isPending}
                             className="gap-1.5 text-xs shrink-0"
                           >
-                            <Sparkle className="h-3.5 w-3.5" weight="fill" />
+                            <Plus className="h-3.5 w-3.5" weight="bold" />
                             {createInterview.isPending ? "Generating..." : "Regenerate invitation"}
                           </Button>
                         </div>
@@ -446,11 +450,10 @@ export function Candidate360Drawer({
                       <Button
                         onClick={() => createInterview.mutate()}
                         disabled={createInterview.isPending}
-                        variant="gradient"
                         size="sm"
                         className="w-full gap-2 font-semibold"
                       >
-                        <Sparkle className="h-4 w-4" weight="fill" />
+                        <Plus className="h-4 w-4" weight="bold" />
                         {createInterview.isPending ? "Generating..." : "Generate AI Interview Session"}
                       </Button>
                     )}
@@ -473,7 +476,7 @@ export function Candidate360Drawer({
                   onValueChange={(v) => setCurrentStage(v as CandidateLifecycleStage)}
                 >
                   <SelectTrigger id="stage-select" className="w-full text-xs font-medium">
-                    <SelectValue placeholder="— Undecided —" />
+                    <SelectValue placeholder="Select hiring stage" />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="applied">Applied (Inbound)</SelectItem>
@@ -506,7 +509,6 @@ export function Candidate360Drawer({
               <Button
                 onClick={handleSaveDecision}
                 disabled={saveDecision.isPending || currentStage === ""}
-                variant="gradient"
                 className="w-full text-xs font-bold"
               >
                 {saveDecision.isPending ? "Saving..." : "Save Candidate Decision & Notes"}

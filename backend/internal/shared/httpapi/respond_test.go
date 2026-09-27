@@ -32,6 +32,7 @@ func TestErrorRendersWrappedInternalAs500(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want 500", resp.StatusCode)
 	}
@@ -53,6 +54,7 @@ func TestErrorStillMapsUniqueViolationTo400Sentinel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", resp.StatusCode)
 	}
@@ -78,16 +80,34 @@ func TestErrorKnownShapesUnchanged(t *testing.T) {
 		return Error(c, errors.New("totally unexpected"))
 	})
 
-	resp, _ := app.Test(httptest.NewRequest(http.MethodGet, "/nf", nil), -1)
+	resp, err := app.Test(httptest.NewRequest(http.MethodGet, "/nf", nil), -1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp != nil && resp.Body != nil {
+		defer resp.Body.Close()
+	}
 	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("not-found status = %d, want 404", resp.StatusCode)
 	}
-	resp, _ = app.Test(httptest.NewRequest(http.MethodGet, "/dom", nil), -1)
-	if resp.StatusCode != http.StatusForbidden {
-		t.Fatalf("forbidden status = %d, want 403", resp.StatusCode)
+	respDom, err := app.Test(httptest.NewRequest(http.MethodGet, "/dom", nil), -1)
+	if err != nil {
+		t.Fatal(err)
 	}
-	resp, _ = app.Test(httptest.NewRequest(http.MethodGet, "/raw", nil), -1)
-	if resp.StatusCode != http.StatusInternalServerError {
-		t.Fatalf("raw error status = %d, want 500", resp.StatusCode)
+	if respDom != nil && respDom.Body != nil {
+		defer respDom.Body.Close()
+	}
+	if respDom.StatusCode != http.StatusForbidden {
+		t.Fatalf("forbidden status = %d, want 403", respDom.StatusCode)
+	}
+	respRaw, err := app.Test(httptest.NewRequest(http.MethodGet, "/raw", nil), -1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if respRaw != nil && respRaw.Body != nil {
+		defer respRaw.Body.Close()
+	}
+	if respRaw.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("raw error status = %d, want 500", respRaw.StatusCode)
 	}
 }

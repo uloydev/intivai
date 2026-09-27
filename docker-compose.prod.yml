@@ -30,6 +30,8 @@ services:
       INTIVAI_ENV: ${INTIVAI_ENV:-prod}
       INTIVAI_DATABASE_URL: ${INTIVAI_DATABASE_URL:?set in .env.prod}
       INTIVAI_REDIS_ADDR: ${INTIVAI_REDIS_ADDR:-redis:6379}
+      INTIVAI_REDIS_PASSWORD: ${INTIVAI_REDIS_PASSWORD:-}
+      INTIVAI_REDIS_URL: ${INTIVAI_REDIS_URL:-}
       INTIVAI_MINIO_ENDPOINT: ${INTIVAI_MINIO_ENDPOINT:-minio:9000}
       INTIVAI_MINIO_ACCESS_KEY: ${INTIVAI_MINIO_ACCESS_KEY:?set in .env.prod}
       INTIVAI_MINIO_SECRET_KEY: ${INTIVAI_MINIO_SECRET_KEY:?set in .env.prod}
@@ -150,18 +152,14 @@ services:
   redis:
     ports: !override []
     restart: always
-    command: redis-server --appendonly yes
-    # A15: requirepass is DELIBERATELY NOT enabled yet. Verdict 2026-08-24:
-    # the app has no Redis auth support — backend/pkg/config/config.go defines
-    # Redis{Addr string} only, and pkg/queue/asynq.go builds
-    # redis.NewClient(&redis.Options{Addr}) with no Password / ParseURL.
-    # Enabling --requirepass ${REDIS_PASSWORD:?} today would brick the queue
-    # and WS session registry (auth errors on every command). Follow-up
-    # (needs a Go change): accept INTIVAI_REDIS_ADDR in redis://user:pass@host
-    # form via go-redis ParseURL, then uncomment the line below and set
-    # REDIS_PASSWORD in .env.prod. The compose network is not host-exposed
-    # (ports !override []), which is the current compensating control.
-    # command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-}
+    command: >
+      sh -c 'if [ -n "$${INTIVAI_REDIS_PASSWORD:-}" ]; then
+        exec redis-server --appendonly yes --requirepass "$${INTIVAI_REDIS_PASSWORD}"
+      else
+        exec redis-server --appendonly yes
+      fi'
+    environment:
+      INTIVAI_REDIS_PASSWORD: ${INTIVAI_REDIS_PASSWORD:-}
     volumes:
       - redisdata:/data
     mem_limit: 512m

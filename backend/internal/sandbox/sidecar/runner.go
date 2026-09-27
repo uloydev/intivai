@@ -138,7 +138,9 @@ func (execDocker) Run(ctx context.Context, args []string, stdin string, stdout, 
 }
 
 func (execDocker) Kill(containerID string) error {
-	cmd := exec.Command("docker", "kill", strings.TrimSpace(containerID))
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "docker", "kill", strings.TrimSpace(containerID))
 	return cmd.Run()
 }
 

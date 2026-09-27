@@ -19,6 +19,7 @@
     ".kilo/**",
     ".kilocode/**",
     ".opencode/**",
+    ".agents/**",
     "docs/plans/archive/**",
     "docs/reviews/**"
   ]

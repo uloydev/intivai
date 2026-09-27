@@ -9,8 +9,9 @@ const cardVariants = cva(
   {
     variants: {
       variant: {
-        default: "bg-card border border-border shadow-[--shadow-card] hover:shadow-[--shadow-elevated] hover:border-border/80 dark:border-white/10 dark:shadow-none dark:hover:border-white/20",
-        glass: "bg-card/80 backdrop-blur-md border border-border/60 shadow-[--shadow-card] hover:shadow-[--shadow-elevated] hover:border-border/80 dark:bg-background/60 dark:border-white/10 dark:shadow-none dark:hover:border-white/20",
+        default: "bg-card border border-border/80 shadow-[--shadow-card] hover:border-border hover:shadow-[--shadow-elevated] dark:border-border/60 dark:hover:border-border",
+        subtle: "bg-muted/30 border border-border/60 shadow-none",
+        flat: "bg-card border border-border/70 shadow-none",
       }
     },
     defaultVariants: {
@@ -53,7 +54,7 @@ function CardTitle({ className, ...props }: React.ComponentProps<"div">) {
     <div
       data-slot="card-title"
       className={cn(
-        "font-heading text-base leading-snug font-medium group-data-[size=sm]/card:text-sm",
+        "font-display text-base leading-snug font-semibold tracking-tight text-foreground group-data-[size=sm]/card:text-sm",
         className
       )}
       {...props}

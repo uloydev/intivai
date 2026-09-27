@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -22,6 +23,13 @@ import (
 )
 
 func main() {
+	if err := run(); err != nil {
+		log.Error().Err(err).Msg("sandboxd fatal error")
+		os.Exit(1)
+	}
+}
+
+func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -35,7 +43,7 @@ func main() {
 		SampleRatio:  sampleRatio(),
 	})
 	if err != nil {
-		log.Fatal().Err(err).Msg("telemetry")
+		return fmt.Errorf("telemetry: %w", err)
 	}
 	defer func() { _ = shutdownTracing(context.Background()) }()
 
@@ -44,17 +52,17 @@ func main() {
 	certFile := os.Getenv("SANDBOXD_CERT")
 	keyFile := os.Getenv("SANDBOXD_KEY")
 	if caFile == "" || certFile == "" || keyFile == "" {
-		log.Fatal().Msg("SANDBOXD_CA / SANDBOXD_CERT / SANDBOXD_KEY required (mTLS)")
+		return errors.New("SANDBOXD_CA / SANDBOXD_CERT / SANDBOXD_KEY required (mTLS)")
 	}
 
 	tlsConfig, err := loadServerTLS(caFile, certFile, keyFile)
 	if err != nil {
-		log.Fatal().Err(err).Msg("load mTLS material")
+		return fmt.Errorf("load mTLS material: %w", err)
 	}
 
 	lis, err := net.Listen("tcp", addr)
 	if err != nil {
-		log.Fatal().Err(err).Msg("listen")
+		return fmt.Errorf("listen: %w", err)
 	}
 
 	srv := grpc.NewServer(grpc.Creds(credentials.NewTLS(tlsConfig)))
@@ -67,9 +75,10 @@ func main() {
 	}()
 
 	log.Info().Str("addr", addr).Msg("sandboxd serving mTLS gRPC")
-	if err := srv.Serve(lis); err != nil {
-		log.Fatal().Err(err).Msg("serve")
+	if err := srv.Serve(lis); err != nil && !errors.Is(err, grpc.ErrServerStopped) {
+		return fmt.Errorf("serve: %w", err)
 	}
+	return nil
 }
 
 func loadServerTLS(caFile, certFile, keyFile string) (*tls.Config, error) {

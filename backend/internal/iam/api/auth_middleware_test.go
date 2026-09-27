@@ -31,6 +31,7 @@ func doAuthedRequest(app *fiber.App) int {
 	if err != nil {
 		return -1
 	}
+	defer resp.Body.Close()
 	return resp.StatusCode
 }
 

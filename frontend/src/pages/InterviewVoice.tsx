@@ -16,7 +16,7 @@ export function InterviewVoicePage() {
 
   return (
     <div className="flex flex-col h-screen bg-background text-foreground overflow-hidden">
-      <header className="flex h-14 items-center justify-between border-b border-border/80 bg-card/60 backdrop-blur-md px-5 shrink-0">
+      <header className="flex h-14 items-center justify-between border-b border-border bg-card px-5 shrink-0">
         <div className="flex items-center gap-3">
           <Link
             to="/interviews"
@@ -31,9 +31,9 @@ export function InterviewVoicePage() {
       </header>
 
       <div className="flex-1 flex items-center justify-center p-6 overflow-y-auto">
-        <Card className="w-full max-w-md glass border-border/60 shadow-xl">
+        <Card className="w-full max-w-md border-border shadow-sm">
           <CardHeader className="text-center pb-2">
-            <div className="mx-auto mb-2 flex h-12 w-12 items-center justify-center rounded-2xl bg-muted text-muted-foreground border border-border">
+            <div className="mx-auto mb-2 flex h-12 w-12 items-center justify-center rounded-xl bg-muted text-muted-foreground border border-border">
               <MicrophoneSlash size={24} />
             </div>
             <Badge variant="outline" className="mx-auto gap-1 border-warning/30 bg-warning/10 text-warning text-xs py-0.5">
@@ -62,7 +62,7 @@ export function InterviewVoicePage() {
                 Candidates: reopen the invite link you received and choose the voice session there.
               </li>
               <li>
-                Recruiters: share the interview invitation from the Interviews workspace — the
+                Recruiters: share the interview invitation from the Interviews workspace; the
                 candidate launches the voice room from their own link.
               </li>
             </ul>
@@ -70,7 +70,7 @@ export function InterviewVoicePage() {
               to="/interviews"
               className="inline-block pt-1 text-primary hover:underline font-medium"
             >
-              ← Back to Interviews
+              Back to Interviews
             </Link>
           </CardContent>
         </Card>

@@ -20,6 +20,11 @@ import (
 	fiberRecover "github.com/gofiber/fiber/v2/middleware/recover"
 	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
+	billingapi "github.com/intivai/backend/internal/billing/api"
+	billingapp "github.com/intivai/backend/internal/billing/application"
+	billingdomain "github.com/intivai/backend/internal/billing/domain"
+	billinggateway "github.com/intivai/backend/internal/billing/infrastructure/gateway"
+	billingrepo "github.com/intivai/backend/internal/billing/infrastructure/persistence"
 	ctxapi "github.com/intivai/backend/internal/context/api"
 	ctxapp "github.com/intivai/backend/internal/context/application"
 	ctxrepo "github.com/intivai/backend/internal/context/infrastructure/persistence"
@@ -50,7 +55,10 @@ import (
 	memdomain "github.com/intivai/backend/internal/memory/domain"
 	"github.com/intivai/backend/internal/memory/infrastructure/native"
 	pgmem "github.com/intivai/backend/internal/memory/infrastructure/postgres"
+	notifapi "github.com/intivai/backend/internal/notification/api"
 	notifapp "github.com/intivai/backend/internal/notification/application"
+	notifdomain "github.com/intivai/backend/internal/notification/domain"
+	notifrepo "github.com/intivai/backend/internal/notification/infrastructure/persistence"
 	sbapi "github.com/intivai/backend/internal/sandbox/api"
 	sbapp "github.com/intivai/backend/internal/sandbox/application"
 	"github.com/intivai/backend/internal/sandbox/infrastructure/sidecarclient"
@@ -181,7 +189,16 @@ func main() {
 	}
 	defer func() { _ = sqlDB.Close() }()
 
-	rdb := queue.NewRedis(cfg.Redis.Addr)
+	asynqOpt, redisOpt, err := queue.ParseRedisConnOpt(queue.RedisConfig{
+		Addr:     cfg.Redis.Addr,
+		Password: cfg.Redis.Password,
+		URL:      cfg.Redis.URL,
+	})
+	if err != nil {
+		logger.Fatal().Err(err).Msg("redis config")
+	}
+
+	rdb := queue.NewRedisClient(redisOpt)
 	defer func() { _ = rdb.Close() }()
 
 	store, err := storage.New(cfg.MinIO.Endpoint, cfg.MinIO.AccessKey, cfg.MinIO.SecretKey, cfg.MinIO.Bucket, cfg.MinIO.UseSSL)
@@ -220,7 +237,7 @@ func main() {
 	}
 	syncWorker := memapp.NewSyncWorker(memoryFactory)
 
-	queueClient := queue.NewClient(cfg.Redis.Addr)
+	queueClient := queue.NewClientWithOpt(asynqOpt)
 	defer func() { _ = queueClient.Close() }()
 
 	// --- IAM ---
@@ -256,6 +273,11 @@ func main() {
 	contextService := ctxapp.NewContextService(pool, contextRepo, store, queueClient, logger)
 	contextHandler := ctxapi.NewContextHandler(contextService)
 
+	// --- Notifications ---
+	notifRepo := notifrepo.NewPostgresNotificationRepo(pool)
+	notifService := notifapp.NewNotificationService(pool, notifRepo)
+	notifHandler := notifapi.NewNotificationHandler(notifService)
+
 	// --- M3: interviews ---
 	ivRepo := ivrepo.NewPostgresInterviewRepo(pool)
 	tokenRepo := ivrepo.NewPostgresTokenRepo(pool)
@@ -270,6 +292,12 @@ func main() {
 			return
 		}
 		if err := db.RunInTx(ctx, pool, orgID.String(), func(tctx context.Context) error {
+			if event == intdomain.EventInterviewCompleted {
+				_ = notifService.Create(tctx, orgID, notifdomain.EventInterviewCompleted,
+					"Interview Completed",
+					"An interview assessment finished and is ready for review.",
+					"/interviews")
+			}
 			var configs []struct {
 				ID  uuid.UUID
 				URL string
@@ -340,6 +368,12 @@ func main() {
 	webhookService := intapp.NewWebhookService(webhookRepo)
 	webhookHandler := intapi.NewWebhookHandler(webhookService, logger)
 	webhookWorker := intapp.NewWebhookWorker(webhookRepo, pool, logger)
+
+	// --- Billing & Payment Gateway ---
+	var paymentGateway billingdomain.PaymentGateway = billinggateway.NewNoopPaymentGateway()
+	billingRepo := billingrepo.NewPostgresBillingRepo(pool)
+	billingService := billingapp.NewBillingService(pool, billingRepo, paymentGateway)
+	billingHandler := billingapi.NewBillingHandler(billingService)
 
 	// --- Workers ---
 	parseWorker := cvapp.NewParseWorker(pool, candidateRepo, store, queueClient, logger)
@@ -456,8 +490,10 @@ func main() {
 	publicRoutes.Post("/jobs/:id/apply", publicApplyRateLimit, publicJobHandler.Apply)
 	publicRoutes.Post("/candidate/auth/otp", authRateLimit, candidatePortalHandler.RequestOTP)
 	publicRoutes.Post("/candidate/auth/verify", authRateLimit, candidatePortalHandler.VerifyOTP)
+	publicRoutes.Post("/candidate/auth/logout", authRateLimit, candidatePortalHandler.Logout)
 	publicRoutes.Get("/candidate-review/:token", cvHandler.ReviewProfile)
 	publicRoutes.Post("/candidate-review/:token/confirm", cvHandler.ConfirmProfile)
+	publicRoutes.Get("/invite-preview", publicRateLimit, chatHandler.InvitePreview)
 
 	authRoutes := v1.Group("/auth")
 	authRoutes.Post("/register", authRateLimit, authHandler.Register)
@@ -522,8 +558,17 @@ func main() {
 	authed.Delete("/webhooks/:id", webhookHandler.Delete)
 	authed.Get("/webhooks/:id/deliveries", webhookHandler.ListDeliveries)
 
+	// --- Billing & Notifications ---
+	authed.Get("/billing/summary", billingHandler.GetSummary)
+	authed.Post("/billing/checkout", billingHandler.CreateCheckout)
+	authed.Post("/billing/portal", billingHandler.CreatePortal)
+
+	authed.Get("/notifications", notifHandler.List)
+	authed.Patch("/notifications/:id/read", notifHandler.MarkRead)
+	authed.Post("/notifications/read-all", notifHandler.MarkAllRead)
+
 	// --- Worker (asynq) ---
-	worker := queue.NewServer(cfg.Redis.Addr, 10, logger)
+	worker := queue.NewServerWithOpt(asynqOpt, 10, logger)
 	go func() {
 		if err := worker.Start(workerMux); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			logger.Fatal().Err(err).Msg("worker")

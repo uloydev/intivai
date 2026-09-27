@@ -71,11 +71,21 @@ type InvitationToken struct {
 	CreatedAt   time.Time
 }
 
+type InvitePreview struct {
+	Valid                bool   `json:"valid"`
+	Status               string `json:"status"`
+	OrgName              string `json:"org_name"`
+	JobTitle             string `json:"job_title"`
+	QuestionCount        int    `json:"question_count"`
+	EstimatedDurationMin int    `json:"estimated_duration_min"`
+}
+
 type TokenRepository interface {
 	Create(ctx context.Context, t *InvitationToken) error
 	// Validate is pre-auth: security-definer, no tenant context required.
 	Validate(ctx context.Context, token string) (*InvitationToken, TokenStatus)
 	MarkUsed(ctx context.Context, token string) error
+	GetPreview(ctx context.Context, token string) (*InvitePreview, error)
 }
 
 // QuestionBank — generated questions persisted for reuse + audit.

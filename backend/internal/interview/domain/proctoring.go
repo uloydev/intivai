@@ -134,11 +134,12 @@ func CalculateProctoringSummary(events []ProctoringEvent) ProctoringSummary {
 	}
 	summary.IntegrityScore = score
 
-	if score >= 85 {
+	switch {
+	case score >= 85:
 		summary.RiskLevel = RiskLow
-	} else if score >= 60 {
+	case score >= 60:
 		summary.RiskLevel = RiskMedium
-	} else {
+	default:
 		summary.RiskLevel = RiskHigh
 	}
 

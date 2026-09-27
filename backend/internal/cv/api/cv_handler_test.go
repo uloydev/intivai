@@ -67,7 +67,7 @@ func (s *stubConfirmEnq) Enqueue(ctx context.Context, task string, payload any, 
 	return &asynq.TaskInfo{ID: "t1"}, nil
 }
 
-func newConfirmApp(repo *stubConfirmRepo, apps []*scrdomain.Application) *fiber.App {
+func newConfirmApp(repo *stubConfirmRepo) *fiber.App {
 	app := fiber.New()
 	// The confirm service fan-out runs RunInTx against the service pool; a
 	// pre-attached in-context tx makes RunInTx reuse it (nil pool untouched).
@@ -75,7 +75,7 @@ func newConfirmApp(repo *stubConfirmRepo, apps []*scrdomain.Application) *fiber.
 		c.SetUserContext(db.WithTx(context.Background(), &gorm.DB{}))
 		return c.Next()
 	})
-	h := NewCVHandler(cvapp.NewCVService(repo, &stubConfirmAppRepo{apps: apps}, &stubConfirmStore{}, &stubConfirmEnq{}, nil), 10)
+	h := NewCVHandler(cvapp.NewCVService(repo, &stubConfirmAppRepo{}, &stubConfirmStore{}, &stubConfirmEnq{}, nil), 10)
 	app.Post("/api/v1/public/candidate-review/:token/confirm", h.ConfirmProfile)
 	return app
 }
@@ -93,13 +93,14 @@ func doConfirm(app *fiber.App, token, body string) *http.Response {
 func TestConfirmProfileHandlerAcceptsSevenFieldPayload(t *testing.T) {
 	orgID, candID := uuid.New(), uuid.New()
 	repo := &stubConfirmRepo{orgID: orgID, candID: candID}
-	app := newConfirmApp(repo, nil)
+	app := newConfirmApp(repo)
 
 	body := `{"name":"Jane Doe","email":"jane@x.io","skills":["Go","SQL"],"experience_years":5,"education":"MSc","certifications":["AWS"],"summary":"backend engineer"}`
 	resp := doConfirm(app, "tok-ok", body)
 	if resp == nil || resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %v, want 200", resp.StatusCode)
 	}
+	defer resp.Body.Close()
 	var payload map[string]any
 	_ = json.NewDecoder(resp.Body).Decode(&payload)
 	if payload["data"].(map[string]any)["status"] != "confirmed" {
@@ -130,15 +131,16 @@ func TestConfirmProfileHandlerAcceptsSevenFieldPayload(t *testing.T) {
 }
 
 func TestConfirmProfileHandlerBadJSON(t *testing.T) {
-	app := newConfirmApp(&stubConfirmRepo{orgID: uuid.New(), candID: uuid.New()}, nil)
+	app := newConfirmApp(&stubConfirmRepo{orgID: uuid.New(), candID: uuid.New()})
 	resp := doConfirm(app, "tok", `{"name":`)
 	if resp == nil || resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("status = %v, want 400", resp.StatusCode)
 	}
+	defer resp.Body.Close()
 }
 
 func TestConfirmProfileHandlerValidation(t *testing.T) {
-	app := newConfirmApp(&stubConfirmRepo{orgID: uuid.New(), candID: uuid.New()}, nil)
+	app := newConfirmApp(&stubConfirmRepo{orgID: uuid.New(), candID: uuid.New()})
 
 	cases := []struct {
 		name string
@@ -154,6 +156,7 @@ func TestConfirmProfileHandlerValidation(t *testing.T) {
 			if resp == nil || resp.StatusCode != http.StatusBadRequest {
 				t.Fatalf("status = %v, want 400", resp.StatusCode)
 			}
+			defer resp.Body.Close()
 			var payload map[string]any
 			_ = json.NewDecoder(resp.Body).Decode(&payload)
 			if payload["code"] != "CANDIDATE_PROFILE_INVALID" {
@@ -165,10 +168,11 @@ func TestConfirmProfileHandlerValidation(t *testing.T) {
 
 func TestConfirmProfileHandlerNotFound(t *testing.T) {
 	// uuid.Nil org (stub default) → service maps to NotFoundError → 404.
-	app := newConfirmApp(&stubConfirmRepo{}, nil)
+	app := newConfirmApp(&stubConfirmRepo{})
 	body := `{"name":"Jane","email":"j@x.io","skills":[],"experience_years":0,"education":"","certifications":[],"summary":""}`
 	resp := doConfirm(app, "tok-bad", body)
 	if resp == nil || resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("status = %v, want 404", resp.StatusCode)
 	}
+	defer resp.Body.Close()
 }

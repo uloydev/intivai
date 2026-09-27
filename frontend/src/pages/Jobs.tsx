@@ -4,7 +4,6 @@ import {
   Briefcase,
   Plus,
   MagnifyingGlass,
-  Sparkle,
   UsersThree,
   CheckCircle,
 } from "@phosphor-icons/react"
@@ -136,6 +135,12 @@ export function JobsPage() {
     },
   })
 
+  const canPublish =
+    title.trim().length > 0 &&
+    minExpValid &&
+    !create.isPending &&
+    (useDefaultWeights || isWeightSumValid(weightSum(weights)))
+
 	const patchStatus = useMutation({
 		mutationFn: ({ id, status }: { id: string; status: string }) =>
 			api.patch<Job>(`/jobs/${id}`, { status }),
@@ -227,7 +232,7 @@ export function JobsPage() {
             Configure target competencies, experience gates, and automated CV screening rails.
           </p>
         </div>
-        <Button onClick={() => setOpen(true)} variant="gradient" className="shadow-md shadow-primary/20">
+        <Button onClick={() => setOpen(true)} className="shadow-sm">
           <Plus className="mr-1.5 h-4 w-4" weight="bold" /> Post New Job
         </Button>
       </div>
@@ -298,7 +303,7 @@ export function JobsPage() {
             return (
               <div
                 key={job.id}
-                className="glass rounded-xl border border-border/60 p-5 shadow-sm transition-all hover:border-primary/40 hover:shadow-md flex flex-col justify-between"
+                className="rounded-xl border border-border bg-card p-5 shadow-sm transition-all hover:border-primary/40 flex flex-col justify-between"
               >
                 <div>
                   <div className="flex items-start justify-between gap-3">
@@ -323,18 +328,18 @@ export function JobsPage() {
                       <Badge
                         className={
                           job.status === "active"
-                            ? "bg-success/10 text-success border-success/20"
-                            : "bg-muted text-muted-foreground"
+                            ? "bg-success/10 text-success border-success/20 font-mono text-[11px] uppercase"
+                            : "bg-muted text-muted-foreground font-mono text-[11px] uppercase"
                         }
                       >
                         {job.status}
                       </Badge>
                       {job.is_published ? (
-                        <Badge variant="outline" title="Published = visible on the careers board; Active = accepting applicants" className="text-xs bg-info/10 text-info border-info/20">
+                        <Badge variant="outline" title="Published = visible on the careers board; Active = accepting applicants" className="text-[11px] font-mono bg-info/10 text-info border-info/20">
                           Published
                         </Badge>
                       ) : (
-                        <Badge variant="outline" title="Published = visible on the careers board; Active = accepting applicants" className="text-xs text-muted-foreground">
+                        <Badge variant="outline" title="Published = visible on the careers board; Active = accepting applicants" className="text-[11px] font-mono text-muted-foreground">
                           Internal
                         </Badge>
                       )}
@@ -344,10 +349,10 @@ export function JobsPage() {
                   {/* Relational Pipeline Badges */}
                   <div className="mt-3 flex items-center gap-2">
                     <span className="inline-flex items-center gap-1 rounded-md bg-secondary/80 px-2 py-0.5 text-[11px] font-medium text-foreground">
-                      <UsersThree className="h-3 w-3 text-muted-foreground" /> {applicantCount} Applied
+                      <UsersThree className="h-3 w-3 text-muted-foreground" /> <span className="font-mono tabular-nums">{applicantCount}</span> Applied
                     </span>
                     <span className="inline-flex items-center gap-1 rounded-md bg-success/10 border border-success/20 px-2 py-0.5 text-[11px] font-semibold text-success">
-                      <CheckCircle className="h-3 w-3" weight="fill" /> {passedApps.length} Qualified
+                      <CheckCircle className="h-3 w-3" weight="fill" /> <span className="font-mono tabular-nums">{passedApps.length}</span> Qualified
                     </span>
                   </div>
 
@@ -357,7 +362,7 @@ export function JobsPage() {
                     {(job.required_skills ?? []).map((s) => (
                       <span
                         key={s}
-                        className="rounded-lg bg-primary/5 border border-primary/15 px-2 py-0.5 text-[11px] font-medium text-foreground"
+                        className="rounded-md bg-muted/60 border border-border/60 px-2 py-0.5 text-[11px] font-mono font-medium text-muted-foreground"
                       >
                         {s}
                       </span>
@@ -368,7 +373,7 @@ export function JobsPage() {
                 <div className="mt-5 flex items-center justify-between border-t border-border/40 pt-3">
                   <Button asChild variant="ghost" size="sm" className="h-8 text-xs text-primary gap-1 font-semibold">
                     <Link to={`/candidates?job_id=${job.id}`}>
-                      View Applicants ({applicantCount}) →
+                      View Applicants ({applicantCount})
                     </Link>
                   </Button>
                   <div className="flex gap-2">
@@ -413,9 +418,9 @@ export function JobsPage() {
       <Dialog open={open} onOpenChange={(o) => { if (!o) closeModal() }}>
         <DialogContent className="sm:max-w-2xl lg:max-w-3xl max-h-[90vh] flex flex-col p-0 overflow-hidden">
           <div className="flex flex-col h-full max-h-[90vh]">
-            <DialogHeader className="p-6 pb-3 border-b border-border/80 bg-card/90 backdrop-blur-sm shrink-0">
+            <DialogHeader className="p-6 pb-3 border-b border-border bg-card shrink-0">
               <DialogTitle className="font-display text-xl font-bold flex items-center gap-2">
-                <Sparkle className="h-5 w-5 text-primary" weight="fill" /> Create Job & Assessment Pipeline
+                <Plus className="h-5 w-5 text-primary" weight="bold" /> Create Job & Assessment Pipeline
               </DialogTitle>
               <DialogDescription className="text-xs">
                 Configure role requirements, CV screening cutoff thresholds, and AI assessment stages.
@@ -545,7 +550,7 @@ export function JobsPage() {
 
                     {weightsLocked && (
                       <p className="text-[11px] text-amber-600">
-                        This job is published — weights are locked (D1) and cannot be changed.
+                        This job is published: weights are locked (D1) and cannot be changed.
                       </p>
                     )}
 
@@ -681,7 +686,7 @@ export function JobsPage() {
               )}
             </div>
 
-            <DialogFooter className="p-4 px-6 border-t border-border/80 bg-card/90 backdrop-blur-sm shrink-0 flex items-center justify-between sm:justify-between">
+            <DialogFooter className="p-4 px-6 border-t border-border bg-card shrink-0 flex items-center justify-between sm:justify-between">
               {modalTab === "details" ? (
                 <>
                   <Button variant="secondary" onClick={closeModal}>
@@ -693,21 +698,20 @@ export function JobsPage() {
                     disabled={!title.trim() || !minExpValid}
                     className="gap-1 text-xs font-bold"
                   >
-                    Next: Configure Stages →
+                    Next: Configure Stages
                   </Button>
                 </>
               ) : (
                 <>
                   <Button variant="secondary" onClick={() => setModalTab("details")}>
-                    ← Back to Details
+                    Back to Details
                   </Button>
                   <Button
-                    variant="gradient"
                     onClick={() => create.mutate()}
-                    disabled={!title.trim() || !minExpValid || create.isPending}
-                    className="gap-1 text-xs font-bold shadow-md shadow-primary/20"
+                    disabled={!canPublish}
+                    className="gap-1 text-xs font-bold shadow-sm"
                   >
-                    <Sparkle className="h-4 w-4" weight="fill" />
+                    <Plus className="h-4 w-4" weight="bold" />
                     {create.isPending
                       ? isEditing
                         ? "Saving..."

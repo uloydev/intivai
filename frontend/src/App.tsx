@@ -43,7 +43,7 @@ function NotFoundPage() {
 function RouteFallback() {
   return (
     <div className="flex min-h-screen w-full items-center justify-center bg-background p-4">
-      <Card className="glass w-80 space-y-4 p-6 text-center">
+      <Card className="w-80 space-y-4 p-6 text-center border-border shadow-sm">
         <CardContent className="space-y-3 p-0">
           <Skeleton className="mx-auto h-8 w-8 rounded-full" />
           <Skeleton className="mx-auto h-5 w-2/3" />

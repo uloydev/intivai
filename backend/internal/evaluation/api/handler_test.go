@@ -110,6 +110,7 @@ func TestGetInterviewHandler(t *testing.T) {
 	if resp == nil || resp.StatusCode != 200 {
 		t.Fatalf("status = %v, want 200", resp.StatusCode)
 	}
+	defer resp.Body.Close()
 	var out struct {
 		Data struct {
 			InterviewID uuid.UUID       `json:"interview_id"`
@@ -134,9 +135,16 @@ func TestGetInterviewHandlerRejectsBadIDAndAnon(t *testing.T) {
 
 	if resp := doAuthed(app, token, "/interviews/not-a-uuid"); resp == nil || resp.StatusCode != 400 {
 		t.Fatalf("bad id status = %v, want 400", resp.StatusCode)
+	} else {
+		_ = resp.Body.Close()
 	}
 	r := httptest.NewRequest(http.MethodGet, "/interviews/"+uuid.NewString(), nil)
-	if resp, _ := app.Test(r, -1); resp.StatusCode != 401 {
+	resp, err := app.Test(r, -1)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 401 {
 		t.Fatalf("anonymous status = %v, want 401", resp.StatusCode)
 	}
 }
@@ -148,6 +156,7 @@ func TestGetCandidateReportHandler(t *testing.T) {
 	if resp == nil || resp.StatusCode != 200 {
 		t.Fatalf("status = %v, want 200", resp.StatusCode)
 	}
+	defer resp.Body.Close()
 	var out struct {
 		Data struct {
 			Candidate struct {

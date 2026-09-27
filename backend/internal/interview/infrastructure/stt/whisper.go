@@ -75,7 +75,7 @@ func (c *WhisperClient) Transcribe(ctx context.Context, pcmData []byte, sampleRa
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		respBody, err := io.ReadAll(resp.Body)
+		respBody, err := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		if err != nil {
 			return "", fmt.Errorf("whisper server returned status %d; read error body: %w", resp.StatusCode, err)
 		}

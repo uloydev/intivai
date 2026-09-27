@@ -61,7 +61,10 @@ func startHarness(t *testing.T) (string, func()) {
 func dialWS(t *testing.T, addr, path string) *websocket.Conn {
 	t.Helper()
 	dialer := websocket.Dialer{HandshakeTimeout: 3 * time.Second}
-	conn, _, err := dialer.Dial("ws://"+addr+path, nil)
+	conn, resp, err := dialer.Dial("ws://"+addr+path, nil)
+	if resp != nil && resp.Body != nil {
+		defer resp.Body.Close()
+	}
 	if err != nil {
 		t.Fatalf("dial %s: %v", path, err)
 	}
@@ -111,6 +114,7 @@ func TestWSRejectsNonUpgrade(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusUpgradeRequired {
 		t.Fatalf("status = %d, want 426", resp.StatusCode)
 	}

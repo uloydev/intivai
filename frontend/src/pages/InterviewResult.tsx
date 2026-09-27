@@ -5,7 +5,7 @@ import {
   CheckCircle,
   XCircle,
   WarningCircle,
-  Sparkle,
+  Scales,
   ArrowLeft,
   DownloadSimple,
   ChatCircleText,
@@ -89,7 +89,7 @@ export function InterviewResultPage() {
       <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-8 text-center space-y-3">
         <p className="text-destructive font-medium">{error instanceof Error ? error.message : "Interview not found"}</p>
         <Button asChild variant="outline" size="sm">
-          <Link to="/interviews">← Back to Interviews</Link>
+          <Link to="/interviews">Back to Interviews</Link>
         </Button>
       </div>
     )
@@ -160,7 +160,7 @@ export function InterviewResultPage() {
               navigator.clipboard
                 .writeText(url)
                 .then(() => toast.success("Link copied to clipboard"))
-                .catch(() => toast.error("Couldn't copy the link — please copy it from the address bar."))
+                .catch(() => toast.error("Couldn't copy link. Please copy it from address bar."))
             }}
           >
             Share
@@ -197,16 +197,16 @@ export function InterviewResultPage() {
       {/* Executive Scorecard Header */}
       {evalReport ? (
         <Card
-          className="glass border-primary/20 bg-gradient-to-br from-card via-card to-primary/5 shadow-md"
+          className="border-border bg-card shadow-sm"
           aria-live="polite"
         >
           <CardContent className="p-6">
             <div className="flex flex-col gap-6 md:flex-row md:items-center md:justify-between border-b border-border/50 pb-6">
               <div className="flex items-center gap-5">
                 <div className="flex h-20 w-20 shrink-0 flex-col items-center justify-center rounded-2xl bg-primary/10 border border-primary/20 text-primary">
-                  <span className="text-xs uppercase font-bold tracking-wider">Score</span>
-                  <span className="font-display text-3xl font-extrabold">{evalReport.overall_score}</span>
-                  <span className="text-xs text-muted-foreground">/ 100</span>
+                  <span className="text-[10px] uppercase font-mono font-bold tracking-wider">Score</span>
+                  <span className="font-mono text-3xl font-extrabold tabular-nums">{evalReport.overall_score}</span>
+                  <span className="text-[11px] font-mono text-muted-foreground">/ 100</span>
                 </div>
                 <div className="space-y-1.5">
                   <div className="flex items-center gap-2">
@@ -222,7 +222,7 @@ export function InterviewResultPage() {
                     </Button>
                   </div>
                   <p className="text-xs text-muted-foreground leading-relaxed max-w-xl">
-                    Weighted across {dimensionCount} dimensions — automated synthesis derived from {detail.questions.length} dynamically generated competence probes, evaluating factual depth, communication clarity, and problem-solving patterns.
+                    Weighted across {dimensionCount} dimensions: automated synthesis derived from {detail.questions?.length ?? 0} dynamically generated competence probes, evaluating factual depth, communication clarity, and problem-solving patterns.
                   </p>
                 </div>
               </div>
@@ -240,7 +240,7 @@ export function InterviewResultPage() {
                       <span className="text-xs font-semibold capitalize text-muted-foreground">
                         {name.replace(/_/g, " ")}
                       </span>
-                      <span className="font-display text-sm font-bold">{score}%</span>
+                      <span className="font-mono text-sm font-bold text-foreground tabular-nums">{score}%</span>
                     </div>
                     {/* Progress Bar */}
                     <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
@@ -261,15 +261,15 @@ export function InterviewResultPage() {
             </div>
 
             {/* Strengths & Weaknesses Grid */}
-            {(evalReport.strengths.length > 0 || evalReport.weaknesses.length > 0) && (
+            {((evalReport.strengths?.length ?? 0) > 0 || (evalReport.weaknesses?.length ?? 0) > 0) && (
               <div className="mt-6 grid gap-4 md:grid-cols-2">
-                {evalReport.strengths.length > 0 && (
+                {(evalReport.strengths?.length ?? 0) > 0 && (
                   <div className="rounded-xl border border-success/20 bg-success/5 p-4 space-y-2">
                     <p className="text-xs font-bold uppercase tracking-wider text-success flex items-center gap-1.5">
                       <CheckCircle className="h-4 w-4" weight="fill" /> Key Strengths
                     </p>
                     <ul className="space-y-1 text-xs text-foreground/90 pl-1">
-                      {evalReport.strengths.map((s, idx) => (
+                      {evalReport.strengths?.map((s, idx) => (
                         <li key={idx} className="flex items-start gap-1.5">
                           <span className="text-success font-bold">•</span>
                           <span>{s}</span>
@@ -278,13 +278,13 @@ export function InterviewResultPage() {
                     </ul>
                   </div>
                 )}
-                {evalReport.weaknesses.length > 0 && (
+                {(evalReport.weaknesses?.length ?? 0) > 0 && (
                   <div className="rounded-xl border border-warning/20 bg-warning/5 p-4 space-y-2">
                     <p className="text-xs font-bold uppercase tracking-wider text-warning flex items-center gap-1.5">
                       <WarningCircle className="h-4 w-4" weight="fill" /> Areas to Watch / Growth
                     </p>
                     <ul className="space-y-1 text-xs text-foreground/90 pl-1">
-                      {evalReport.weaknesses.map((w, idx) => (
+                      {evalReport.weaknesses?.map((w, idx) => (
                         <li key={idx} className="flex items-start gap-1.5">
                           <span className="text-warning font-bold">•</span>
                           <span>{w}</span>
@@ -322,7 +322,7 @@ export function InterviewResultPage() {
                   className="text-xs text-primary border-primary/30 hover:bg-primary/10 font-bold gap-1"
                 >
                   <Link to={`/candidates?candidate_id=${detail.candidate?.id}`}>
-                    Candidate 360 Profile →
+                    Candidate 360 Profile
                   </Link>
                 </Button>
                 <Button
@@ -339,11 +339,11 @@ export function InterviewResultPage() {
           </CardContent>
         </Card>
       ) : (
-        <Card className="glass border-border/60 p-8 text-center space-y-2">
-          <Sparkle className="mx-auto h-8 w-8 text-primary" />
+        <Card className="border-border p-8 text-center space-y-2 shadow-sm">
+          <Scales className="mx-auto h-8 w-8 text-primary" />
           <p className="font-display font-semibold text-base">Evaluation Synthesis Pending</p>
           <p className="text-xs text-muted-foreground max-w-md mx-auto">
-            The interview has concluded. The LLM evaluation worker is currently processing transcripts against the grading rubric.
+            The interview has concluded. The evaluation worker is currently processing transcripts against the grading rubric.
           </p>
         </Card>
       )}
@@ -353,7 +353,7 @@ export function InterviewResultPage() {
 
       {/* Coding Sessions & Sandbox Submissions */}
       {detail.coding_sessions && detail.coding_sessions.length > 0 && (
-        <Card className="glass border-border/60 overflow-hidden shadow-sm">
+        <Card className="border-border overflow-hidden shadow-sm">
           <div className="p-6 space-y-4">
             <div className="flex items-center justify-between border-b border-border/50 pb-3">
               <div className="flex items-center gap-3">
@@ -408,13 +408,13 @@ export function InterviewResultPage() {
                       <div className="text-center">
                         <div className="text-xs text-neutral-400">Time Complexity</div>
                         <div className="font-mono font-bold text-indigo-400 mt-0.5">
-                          {session.ai_code_review.time_complexity || "—"}
+                          {session.ai_code_review.time_complexity || "N/A"}
                         </div>
                       </div>
                       <div className="text-center">
                         <div className="text-xs text-neutral-400">Space Complexity</div>
                         <div className="font-mono font-bold text-emerald-400 mt-0.5">
-                          {session.ai_code_review.space_complexity || "—"}
+                          {session.ai_code_review.space_complexity || "N/A"}
                         </div>
                       </div>
                       <div className="text-center">
@@ -436,21 +436,37 @@ export function InterviewResultPage() {
 
       {/* Transcript & Per-Question Analysis */}
       <div className="space-y-4">
-        <h2 className="font-display text-xl font-bold tracking-tight flex items-center gap-2">
-          <ChatCircleText className="h-5 w-5 text-primary" weight="bold" /> Question & Answer Transcript Analysis
-        </h2>
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <h2 className="font-display text-xl font-bold tracking-tight flex items-center gap-2">
+            <ChatCircleText className="h-5 w-5 text-primary" weight="bold" /> Question & Answer Transcript Analysis
+          </h2>
+          {detail.questions && detail.questions.length > 1 && (
+            <div className="flex flex-wrap items-center gap-1.5">
+              {detail.questions.map((q) => (
+                <button
+                  key={q.idx}
+                  type="button"
+                  onClick={() => document.getElementById(`q-analysis-${q.idx}`)?.scrollIntoView({ behavior: "smooth" })}
+                  className="rounded-md border border-border/80 bg-background/80 px-2 py-0.5 text-[11px] font-mono font-medium hover:border-primary/50 hover:bg-muted transition-colors cursor-pointer"
+                >
+                  Q{q.idx}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
 
-        {detail.answers.length === 0 ? (
+        {(!detail.answers || detail.answers.length === 0) ? (
           <div className="rounded-xl border border-dashed border-border p-8 text-center text-xs text-muted-foreground">
             No responses recorded for this interview session.
           </div>
         ) : (
           <div className="space-y-3">
             {detail.answers.map((answer) => {
-              const question = detail.questions.find((q) => q.idx === answer.idx)
+              const question = detail.questions?.find((q) => q.idx === answer.idx)
               const perQ = evalReport?.per_question.find((p) => p.question_idx === answer.idx)
               return (
-                <Card key={answer.idx} className="glass border-border/60 overflow-hidden">
+                <Card key={answer.idx} id={`q-analysis-${answer.idx}`} className="border-border overflow-hidden shadow-sm">
                   <div className="border-b border-border/40 bg-muted/30 px-4 py-3 flex items-center justify-between">
                     <div className="flex items-center gap-2">
                       <span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary/10 text-primary font-bold text-xs">
@@ -461,7 +477,7 @@ export function InterviewResultPage() {
                       </span>
                     </div>
                     {perQ && (
-                      <Badge className="bg-primary/10 text-primary border-primary/20 text-xs font-bold">
+                      <Badge className="bg-primary/10 text-primary border-primary/20 text-xs font-mono font-bold">
                         Score: {perQ.score} / 100
                       </Badge>
                     )}
@@ -469,7 +485,7 @@ export function InterviewResultPage() {
 
                   <CardContent className="p-4 space-y-3">
                     {/* Candidate Answer */}
-                    <div className="rounded-xl bg-background/80 border border-border/40 p-3 text-xs leading-relaxed space-y-1">
+                    <div className="rounded-xl bg-background/80 border-l-2 border-primary/50 border-r border-t border-b border-border/40 p-3 text-xs leading-relaxed space-y-1">
                       <div className="flex items-center gap-1.5 text-muted-foreground font-semibold text-xs">
                         <User className="h-3.5 w-3.5" /> Candidate Response:
                       </div>
@@ -478,9 +494,9 @@ export function InterviewResultPage() {
 
                     {/* AI Evaluator Rationale */}
                     {perQ?.rationale && (
-                      <div className="rounded-xl bg-primary/5 border border-primary/15 p-3 text-xs space-y-1">
-                        <div className="flex items-center gap-1.5 text-primary font-semibold text-xs">
-                          <Sparkle className="h-3.5 w-3.5" weight="fill" /> AI Evaluator Rationale:
+                      <div className="rounded-xl bg-muted/40 border border-border/60 p-3 text-xs space-y-1">
+                        <div className="flex items-center gap-1.5 text-foreground font-semibold text-xs">
+                          <Scales className="h-3.5 w-3.5 text-primary" weight="fill" /> Evaluation Rationale:
                         </div>
                         <p className="text-muted-foreground pl-5">{perQ.rationale}</p>
                       </div>
@@ -495,7 +511,7 @@ export function InterviewResultPage() {
 
       {/* Full Transcript */}
       {detail.questions && detail.questions.length > 0 && (
-        <Card className="glass border-border/60 overflow-hidden shadow-sm">
+        <Card className="border-border overflow-hidden shadow-sm">
           <div className="p-6 space-y-4">
             <div className="flex items-center gap-3 border-b border-border/50 pb-3">
               <ChatCircleText className="h-5 w-5 text-primary" />
@@ -529,7 +545,7 @@ export function InterviewResultPage() {
       )}
 
       {/* Candidate Free-Form Q&A (B4) */}
-      <Card className="glass border-border/60 overflow-hidden shadow-sm">
+      <Card className="border-border overflow-hidden shadow-sm">
         <div className="p-6 space-y-4">
           <div className="flex items-center gap-3 border-b border-border/50 pb-3">
             <ChatCircleDots className="h-5 w-5 text-primary" weight="fill" />

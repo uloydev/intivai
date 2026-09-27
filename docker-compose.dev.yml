@@ -11,6 +11,7 @@ services:
   redis:
     ports: !override ["6380:6379"]
   minio:
+    image: intivai-minio:latest
     ports: !override ["9002:9000", "9003:9001"]
   mailpit:
     ports: !override ["1026:1025", "8026:8025"]
@@ -19,6 +20,7 @@ services:
     environment:
       INTIVAI_OTEL_ENABLE: "true"
       INTIVAI_OTEL_TRACES_SAMPLER_ARG: "1"
+      INTIVAI_DEMO_TOKENS: "1"
   # Jaeger UI on localhost for waterfall inspection (plan §10 step 2).
   jaeger:
     ports: ["16686:16686"]

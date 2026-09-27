@@ -31,7 +31,7 @@ type seededInterview struct {
 	ivID   uuid.UUID
 }
 
-func seedInterviewApp(t *testing.T, jobStatus string) *seededInterview {
+func seedInterviewApp(t *testing.T) *seededInterview {
 	t.Helper()
 	url := os.Getenv("TEST_DATABASE_URL")
 	if url == "" {
@@ -52,7 +52,7 @@ func seedInterviewApp(t *testing.T, jobStatus string) *seededInterview {
 			args []any
 		}{
 			{`INSERT INTO orgs (id, name, slug) VALUES ($1,$2,$3)`, []any{orgID, "t", "fx" + uuid.NewString()[:8]}},
-			{`INSERT INTO jobs (id, org_id, title, description, status, created_at) VALUES ($1,$2,$3,$4,$5,NOW())`, []any{jobID, orgID, "Go Engineer", "Go backend work", jobStatus}},
+			{`INSERT INTO jobs (id, org_id, title, description, status, created_at) VALUES ($1,$2,$3,$4,'active',NOW())`, []any{jobID, orgID, "Go Engineer", "Go backend work"}},
 			{`INSERT INTO candidates (id, org_id, name, email, status, created_at) VALUES ($1,$2,$3,$4,'extracted',NOW())`, []any{candID, orgID, "Jane", "j@x.io"}},
 			{`INSERT INTO applications (id, org_id, candidate_id, job_id, status, cv_score, passed_screening, created_at) VALUES ($1,$2,$3,$4,'passed',80,true,NOW())`, []any{appID, orgID, candID, jobID}},
 		} {
@@ -86,7 +86,7 @@ func seedInterviewApp(t *testing.T, jobStatus string) *seededInterview {
 
 func (s *seededInterview) create(t *testing.T) {
 	t.Helper()
-	created, err := s.svc.CreateInterview(context.Background(), iamActor(s.orgID.String(), "admin"), CreateInterviewCommand{ApplicationID: s.appID, QuestionCount: 3})
+	created, err := s.svc.CreateInterview(context.Background(), iamActor(s.orgID.String()), CreateInterviewCommand{ApplicationID: s.appID, QuestionCount: 3})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,7 +99,7 @@ func (s *seededInterview) create(t *testing.T) {
 }
 
 func TestIssueTicketStateMachine(t *testing.T) {
-	s := seedInterviewApp(t, "active")
+	s := seedInterviewApp(t)
 	s.create(t)
 
 	// valid → ticket issued, token now used.
@@ -122,7 +122,7 @@ func TestIssueTicketStateMachine(t *testing.T) {
 }
 
 func TestIssueTicketExpiredAndRevoked(t *testing.T) {
-	s := seedInterviewApp(t, "active")
+	s := seedInterviewApp(t)
 	s.create(t)
 
 	// Expire the token in place.
@@ -138,7 +138,7 @@ func TestIssueTicketExpiredAndRevoked(t *testing.T) {
 	}
 
 	// Revoked → rejected even when valid.
-	s2 := seedInterviewApp(t, "active")
+	s2 := seedInterviewApp(t)
 	s2.create(t)
 	err = db.RunInTx(context.Background(), s2.pool, s2.orgID.String(), func(tctx context.Context) error {
 		tx, _ := db.TxFrom(tctx)
@@ -153,7 +153,7 @@ func TestIssueTicketExpiredAndRevoked(t *testing.T) {
 }
 
 func TestAnswerAndAdvanceFlow(t *testing.T) {
-	s := seedInterviewApp(t, "active")
+	s := seedInterviewApp(t)
 	s.create(t)
 
 	ctx := context.Background()
@@ -194,7 +194,7 @@ func TestAnswerAndAdvanceFlow(t *testing.T) {
 }
 
 func TestComposeConnectContextsIncludesTenantAndRails(t *testing.T) {
-	s := seedInterviewApp(t, "active")
+	s := seedInterviewApp(t)
 	ctx := context.Background()
 	err := db.RunInTx(ctx, s.pool, s.orgID.String(), func(tctx context.Context) error {
 		return ctxrepo.NewPostgresContextRepo(s.pool).SetPrompt(tctx, &ctxdomain.TenantPrompt{OrgID: s.orgID, SystemPrompt: "Interview for fintech Go roles", Version: 1})
@@ -215,7 +215,7 @@ func TestComposeConnectContextsIncludesTenantAndRails(t *testing.T) {
 }
 
 func TestCreateInterviewRequiresPassedApplication(t *testing.T) {
-	s := seedInterviewApp(t, "active")
+	s := seedInterviewApp(t)
 	// Reject the application in place.
 	err := db.RunInTx(context.Background(), s.pool, s.orgID.String(), func(tctx context.Context) error {
 		tx, _ := db.TxFrom(tctx)
@@ -224,7 +224,7 @@ func TestCreateInterviewRequiresPassedApplication(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.svc.CreateInterview(context.Background(), iamActor(s.orgID.String(), "admin"), CreateInterviewCommand{ApplicationID: s.appID, QuestionCount: 3}); err == nil {
+	if _, err := s.svc.CreateInterview(context.Background(), iamActor(s.orgID.String()), CreateInterviewCommand{ApplicationID: s.appID, QuestionCount: 3}); err == nil {
 		t.Fatal("unpassed application accepted")
 	}
 }

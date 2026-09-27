@@ -8,7 +8,6 @@ import {
   ArrowClockwise,
   CheckCircle,
   XCircle,
-  Sparkle,
   Briefcase,
   Trash,
   Files,
@@ -56,34 +55,34 @@ function statusBadge(status: string) {
     // Transient pipeline work — static amber badge; the query refetchInterval
     // polls, so an infinite pulsing spinner would be misleading.
     return (
-      <Badge variant="secondary" className="bg-warning/10 text-warning border-warning/20 gap-1">
+      <Badge variant="secondary" className="bg-warning/10 text-warning border-warning/20 font-mono text-[11px] gap-1">
         <ArrowClockwise className="h-3 w-3 animate-spin motion-reduce:animate-none" /> Processing
       </Badge>
     )
   }
   if (status === "new") {
     return (
-      <Badge variant="secondary" className="bg-sky-500/10 text-sky-600 dark:text-sky-400 border-sky-500/20 gap-1">
+      <Badge variant="secondary" className="bg-sky-500/10 text-sky-600 dark:text-sky-400 border-sky-500/20 font-mono text-[11px] gap-1">
         <Clock className="h-3 w-3" /> In queue
       </Badge>
     )
   }
   if (status === "extracted" || status === "parsed" || status === "pending_review") {
     return (
-      <Badge className="bg-success/10 text-success border-success/20 gap-1">
+      <Badge className="bg-success/10 text-success border-success/20 font-mono text-[11px] gap-1">
         <CheckCircle className="h-3 w-3" weight="fill" /> Profile ready
       </Badge>
     )
   }
   if (status === "failed_ocr" || status === "failed_extract" || status === "failed_parse") {
     return (
-      <Badge variant="destructive" className="gap-1">
+      <Badge variant="destructive" className="font-mono text-[11px] gap-1">
         <XCircle className="h-3 w-3" weight="fill" /> Needs attention
       </Badge>
     )
   }
   return (
-    <Badge variant="secondary" className="text-xs">{status}</Badge>
+    <Badge variant="secondary" className="font-mono text-[11px]">{status}</Badge>
   )
 }
 
@@ -134,7 +133,7 @@ export function CVsPage() {
       setEmail("")
       setSelectedFile(null)
       if (fileRef.current) fileRef.current.value = ""
-      toast.success("CV uploaded — OCR & extraction pipeline started")
+      toast.success("CV uploaded: OCR & extraction pipeline started")
     },
     onError: (e) => {
       setUploading(false)
@@ -157,7 +156,7 @@ export function CVsPage() {
       setUploading(false)
       setBulkFiles([])
       if (bulkFileRef.current) bulkFileRef.current.value = ""
-      toast.success("Bulk CVs uploaded — processing pipeline started")
+      toast.success("Bulk CVs uploaded: processing pipeline started")
     },
     onError: (e) => {
       setUploading(false)
@@ -221,7 +220,7 @@ export function CVsPage() {
       </div>
 
       {/* Upload Card */}
-      <Card className="glass border-primary/20 bg-gradient-to-b from-card via-card to-primary/5 shadow-md">
+      <Card className="border-border bg-card shadow-sm">
         <CardHeader className="pb-3 border-b border-border/50 mb-4">
           <div className="flex items-center justify-between">
             <div>
@@ -261,7 +260,7 @@ export function CVsPage() {
                 <Label htmlFor="cv-name" className="text-xs font-semibold">Candidate Full Name (optional)</Label>
                 <Input
                   id="cv-name"
-                  placeholder="optional — extracted from CV"
+                  placeholder="optional, extracted from CV"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   className="bg-background/80"
@@ -272,7 +271,7 @@ export function CVsPage() {
                 <Input
                   id="cv-email"
                   type="email"
-                  placeholder="optional — extracted from CV"
+                  placeholder="optional, extracted from CV"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   className="bg-background/80"
@@ -318,7 +317,6 @@ export function CVsPage() {
               <div className="flex items-end md:col-span-2">
                 <Button
                   className="w-full shadow-sm"
-                  variant="gradient"
                   onClick={() => {
                     setUploading(true)
                     upload.mutate()
@@ -346,7 +344,6 @@ export function CVsPage() {
                   />
                   <Button
                     className="shadow-sm shrink-0"
-                    variant="gradient"
                     onClick={() => {
                       setUploading(true)
                       bulkUpload.mutate()
@@ -442,7 +439,7 @@ export function CVsPage() {
                         className="h-8 text-xs text-muted-foreground hover:text-foreground gap-1"
                       >
                         <Link to={`/candidates?candidate_id=${cv.id}`}>
-                          Candidate 360 →
+                          Candidate 360
                         </Link>
                       </Button>
                     </>
@@ -483,7 +480,7 @@ export function CVsPage() {
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
             <DialogTitle className="font-display text-lg flex items-center gap-2">
-              <Sparkle className="h-5 w-5 text-primary" weight="fill" /> Screen Candidate against Role
+              <MagnifyingGlass className="h-5 w-5 text-primary" weight="bold" /> Screen Candidate against Role
             </DialogTitle>
             <DialogDescription>
               Select an active job role to run AI semantic matching and CV scoring for {screenCandidate?.name}.
@@ -513,7 +510,6 @@ export function CVsPage() {
               Cancel
             </Button>
             <Button
-              variant="gradient"
               onClick={() => screenMutation.mutate()}
               disabled={!selectedJobId || screenMutation.isPending}
             >

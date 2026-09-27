@@ -87,17 +87,26 @@ function scorePill(app: Application) {
         )
     }
   }
-  if (app.passed_screening) {
-    return (
-      <Badge className="bg-success/10 text-success border-success/20 font-bold text-xs gap-1">
-        <CheckCircle className="h-3 w-3" weight="fill" /> {app.cv_score}% Match
-      </Badge>
-    )
-  }
+  const bd = app.score_breakdown
   return (
-    <Badge variant="destructive" className="font-semibold text-xs gap-1">
-      <XCircle className="h-3 w-3" weight="fill" /> {app.cv_score}% Match
-    </Badge>
+    <div className="space-y-1">
+      {app.passed_screening ? (
+        <Badge className="bg-success/10 text-success border-success/20 font-bold text-xs gap-1">
+          <CheckCircle className="h-3 w-3" weight="fill" /> <span className="font-mono tabular-nums">{app.cv_score}%</span> Match
+        </Badge>
+      ) : (
+        <Badge variant="destructive" className="font-semibold text-xs gap-1">
+          <XCircle className="h-3 w-3" weight="fill" /> <span className="font-mono tabular-nums">{app.cv_score}%</span> Match
+        </Badge>
+      )}
+      {bd && (bd.skills_match != null || bd.experience_years != null || bd.semantic_match != null) && (
+        <div className="flex items-center gap-1 text-[10px] font-mono text-muted-foreground" title="Skills · Experience · Semantic breakdown">
+          {bd.skills_match != null && <span>S:{(bd.skills_match * 100).toFixed(0)}%</span>}
+          {bd.experience_years != null && <span>· E:{(bd.experience_years * 100).toFixed(0)}%</span>}
+          {bd.semantic_match != null && <span>· V:{(bd.semantic_match * 100).toFixed(0)}%</span>}
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -106,9 +115,9 @@ function stagePill(app: Application) {
   const meta = stageMeta(app.stage ?? "")
   const isCompleted = app.stage === "interview_completed"
   return (
-    <Badge className={cn("text-xs", meta.color)}>
+    <Badge className={cn("text-xs font-medium", meta.color)}>
       {meta.label}
-      {isCompleted ? ` (${app.interview_score ?? "-"}/100)` : ""}
+      {isCompleted ? <span className="ml-1 font-mono text-[11px] tabular-nums">({app.interview_score ?? "-"}/100)</span> : ""}
     </Badge>
   )
 }
@@ -527,7 +536,7 @@ export function CandidatesPage() {
                       </div>
                       <div>
                         <p className="font-display font-semibold text-sm">{app.candidate_name || "Candidate"}</p>
-                        <p className="text-xs text-muted-foreground">{app.candidate_email || "No email"}</p>
+                        <p className="text-xs text-muted-foreground">{app.candidate_email || "-"}</p>
                       </div>
                     </div>
                   </TableCell>
@@ -539,8 +548,8 @@ export function CandidatesPage() {
                   </TableCell>
                   <TableCell>{scorePill(app)}</TableCell>
                   <TableCell>
-                    <span className="text-xs text-muted-foreground">
-                      {app.applied_at ? new Date(app.applied_at).toLocaleDateString() : "—"}
+                    <span className="text-xs font-mono text-muted-foreground tabular-nums">
+                      {app.applied_at ? new Date(app.applied_at).toLocaleDateString() : "-"}
                     </span>
                   </TableCell>
                   <TableCell>{stagePill(app)}</TableCell>
@@ -554,7 +563,7 @@ export function CandidatesPage() {
                         setDrawerOpen(true)
                       }}
                     >
-                      <Eye className="h-3.5 w-3.5" /> Candidate 360 →
+                      <Eye className="h-3.5 w-3.5" /> Candidate 360
                     </Button>
                   </TableCell>
                 </TableRow>
@@ -577,7 +586,7 @@ export function CandidatesPage() {
                 disabled={safePage <= 1}
                 onClick={() => setPage(safePage - 1)}
               >
-                ← Prev
+                Previous
               </Button>
               <span className="text-xs text-muted-foreground">
                 Page {safePage} of {pageCount}
@@ -589,7 +598,7 @@ export function CandidatesPage() {
                 disabled={safePage >= pageCount}
                 onClick={() => setPage(safePage + 1)}
               >
-                Next →
+                Next
               </Button>
             </div>
           </div>
@@ -610,7 +619,7 @@ export function CandidatesPage() {
                     </div>
                     <div>
                       <p className="font-display font-semibold text-sm">{app.candidate_name || "Candidate"}</p>
-                      <p className="text-xs text-muted-foreground">{app.candidate_email || "No email"}</p>
+                      <p className="text-xs text-muted-foreground">{app.candidate_email || "-"}</p>
                     </div>
                   </div>
                   <input
@@ -622,7 +631,7 @@ export function CandidatesPage() {
                   />
                 </div>
                 <div className="flex items-center justify-between text-xs">
-                  <span className="text-muted-foreground">{app.job_title || "—"}</span>
+                  <span className="text-muted-foreground">{app.job_title || "General Application"}</span>
                   {app.cv_score !== null && app.cv_score !== undefined && (
                     <Badge variant={app.cv_score >= 70 ? "success" : "secondary"} size="sm">{Math.round(app.cv_score)}%</Badge>
                   )}
@@ -635,7 +644,7 @@ export function CandidatesPage() {
 
       {/* Floating Bulk Actions Bar */}
       {selectedAppIds.size > 0 && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 bg-card/95 border border-primary/40 rounded-2xl shadow-2xl backdrop-blur-xl p-3 sm:px-6 flex flex-wrap items-center gap-3 sm:gap-4 animate-in slide-in-from-bottom-5">
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 bg-card border border-border rounded-xl shadow-lg p-3 sm:px-6 flex flex-wrap items-center gap-3 sm:gap-4 animate-in slide-in-from-bottom-5">
           <div className="flex items-center gap-2">
             <span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary text-primary-foreground font-bold text-xs">
               {selectedAppIds.size}

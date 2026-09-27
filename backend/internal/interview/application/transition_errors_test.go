@@ -102,7 +102,7 @@ func newTransitionService(pool *gorm.DB, bank ivdomain.QuestionBank, logBuf *byt
 // ProcessTopicDialogue can drive the in_progress state machine directly.
 func createStartedInterview(t *testing.T, svc *InterviewService, orgIDStr string, appID uuid.UUID, questionCount int) *CreateInterviewResult {
 	t.Helper()
-	created, err := svc.CreateInterview(context.Background(), iamActor(orgIDStr, "admin"), CreateInterviewCommand{ApplicationID: appID, QuestionCount: questionCount})
+	created, err := svc.CreateInterview(context.Background(), iamActor(orgIDStr), CreateInterviewCommand{ApplicationID: appID, QuestionCount: questionCount})
 	if err != nil {
 		t.Fatalf("create interview: %v", err)
 	}

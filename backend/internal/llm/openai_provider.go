@@ -149,7 +149,7 @@ func (p *OpenAIProvider) ChatStream(ctx context.Context, req ChatRequest) (<-cha
 	p.setHeaders(hreq)
 
 	res, err := p.cb.Execute(func() (any, error) {
-		r, err := p.http.Do(hreq)
+		r, err := p.http.Do(hreq) //nolint:bodyclose // closed by reader goroutine or statusError
 		if err != nil {
 			if errors.Is(err, context.Canceled) {
 				return nil, nil
@@ -164,6 +164,9 @@ func (p *OpenAIProvider) ChatStream(ctx context.Context, req ChatRequest) (<-cha
 		return nil, context.Canceled
 	}
 	if err != nil {
+		if r, ok := res.(*http.Response); ok && r != nil && r.Body != nil {
+			_ = r.Body.Close()
+		}
 		if errors.Is(err, gobreaker.ErrOpenState) || errors.Is(err, gobreaker.ErrTooManyRequests) {
 			return nil, fmt.Errorf("%w: circuit breaker open", ErrUpstream)
 		}
@@ -275,7 +278,7 @@ func (p *OpenAIProvider) do(ctx context.Context, body chatRequest) (*http.Respon
 	}
 	p.setHeaders(hreq)
 	res, err := p.cb.Execute(func() (any, error) {
-		r, err := p.http.Do(hreq)
+		r, err := p.http.Do(hreq) //nolint:bodyclose // closed by caller in Chat
 		if err != nil {
 			if errors.Is(err, context.Canceled) {
 				return nil, nil
@@ -288,6 +291,9 @@ func (p *OpenAIProvider) do(ctx context.Context, body chatRequest) (*http.Respon
 		return nil, context.Canceled
 	}
 	if err != nil {
+		if r, ok := res.(*http.Response); ok && r != nil && r.Body != nil {
+			_ = r.Body.Close()
+		}
 		if errors.Is(err, gobreaker.ErrOpenState) || errors.Is(err, gobreaker.ErrTooManyRequests) {
 			return nil, fmt.Errorf("%w: circuit breaker open", ErrUpstream)
 		}

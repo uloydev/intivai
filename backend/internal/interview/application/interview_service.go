@@ -573,6 +573,11 @@ func (s *InterviewService) SessionRemaining(ctx context.Context, orgID string, i
 	return remaining
 }
 
+// GetInvitePreview returns candidate-safe metadata for the invite page pre-flight check.
+func (s *InterviewService) GetInvitePreview(ctx context.Context, token string) (*ivdomain.InvitePreview, error) {
+	return s.tokenRepo.GetPreview(ctx, token)
+}
+
 // GiveConsent records GDPR consent for the interview (invitation token
 // auth, same validation as ticket issuance). Idempotent.
 func (s *InterviewService) GiveConsent(ctx context.Context, interviewID uuid.UUID, invitationToken string) error {

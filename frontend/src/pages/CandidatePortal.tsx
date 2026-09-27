@@ -11,7 +11,7 @@ import type {
   CandidateVerifyResponse,
 } from "@/types/api"
 import { toast } from "sonner"
-import { Download, Trash } from "@phosphor-icons/react"
+import { Download, Trash, CheckCircle, WarningCircle, FileText, Info, XCircle } from "@phosphor-icons/react"
 
 const TOKEN_KEY = "intivai_candidate_token"
 const EMAIL_KEY = "intivai_candidate_email"
@@ -55,8 +55,7 @@ function SubmitButton({
   return (
     <Button
       type="submit"
-      variant="gradient"
-      className="w-full h-12 rounded-xl font-semibold shadow-lg shadow-primary/25 disabled:opacity-50 flex items-center justify-center gap-2"
+      className="w-full h-11 rounded-lg font-semibold shadow-sm disabled:opacity-50 flex items-center justify-center gap-2"
       disabled={loading || disabled}
     >
       {loading ? (
@@ -87,6 +86,7 @@ export function CandidatePortal() {
   const emptyAutoRefetchRef = useRef(false)
 
   const handleLogout = useCallback(() => {
+    api.post("/public/candidate/auth/logout").catch(() => null)
     localStorage.removeItem(TOKEN_KEY)
     localStorage.removeItem(EMAIL_KEY)
     setStep("email")
@@ -258,7 +258,7 @@ export function CandidatePortal() {
   function handleVerifyOTP(e: React.FormEvent) {
     e.preventDefault()
     if (otpExpired) {
-      setError("Code expired — request a new one.")
+      setError("Code expired. Request a new one.")
       return
     }
     if (!otpCode.trim() || otpCode.length !== 6) {
@@ -273,37 +273,33 @@ export function CandidatePortal() {
 
   return (
     <div className="min-h-[calc(100vh-4rem)] bg-background text-foreground py-12 px-4 sm:px-6 lg:px-8 relative overflow-hidden">
-      {/* Background glow effects */}
-      <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[350px] bg-indigo-600/10 rounded-full blur-3xl pointer-events-none" />
-      <div className="absolute bottom-10 right-10 w-[400px] h-[250px] bg-cyan-600/10 rounded-full blur-3xl pointer-events-none" />
-
       <div className="max-w-4xl mx-auto relative z-10">
         {step !== "dashboard" ? (
           /* Authentication Screen */
           <div className="max-w-md mx-auto">
             <div className="text-center mb-8">
-              <div className="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-gradient-to-tr from-primary to-blue-500 text-primary-foreground font-bold text-xl shadow-lg shadow-primary/25 mb-4">
-                ✦
+              <div className="inline-flex items-center justify-center w-12 h-12 rounded-lg bg-primary text-primary-foreground font-bold text-xl shadow-sm mb-4">
+                I
               </div>
               <h1 className="text-3xl font-extrabold tracking-tight text-foreground sm:text-4xl">
                 Candidate Portal
               </h1>
               <p className="mt-2 text-sm text-muted-foreground">
-                Track your job applications, screening scores, and launch your AI assessment sessions.
+                Track your job applications, screening scores, and launch your assessment sessions.
               </p>
             </div>
 
-            <div className="bg-card/80 border border-border rounded-2xl p-8 backdrop-blur-xl shadow-2xl">
+            <div className="bg-card border border-border rounded-xl p-8 shadow-sm">
               {error && (
                 <div className="mb-6 p-4 rounded-xl bg-destructive/10 border border-destructive/30 text-destructive text-sm flex items-start gap-3">
-                  <span className="text-destructive font-bold">✕</span>
+                  <XCircle className="h-5 w-5 text-destructive shrink-0 mt-0.5" weight="fill" />
                   <span>{error}</span>
                 </div>
               )}
 
               {infoMsg && (
                 <div className="mb-6 p-4 rounded-xl bg-primary/10 border border-primary/20 text-primary text-sm flex items-start gap-3">
-                  <span className="text-primary font-bold">ℹ</span>
+                  <Info className="h-5 w-5 text-primary shrink-0 mt-0.5" weight="fill" />
                   <span>{infoMsg}</span>
                 </div>
               )}
@@ -331,12 +327,12 @@ export function CandidatePortal() {
                   <SubmitButton
                     loading={authBusy}
                     loadingLabel="Sending Security Code..."
-                    label="Send Verification Code →"
+                    label="Send Verification Code"
                   />
 
                   <div className="pt-4 border-t border-border/80 flex items-center justify-between text-xs text-muted-foreground">
                     <Link to="/careers" className="hover:text-primary transition-colors">
-                      ← Browse Open Positions
+                      Browse Open Positions
                     </Link>
                   </div>
                 </form>
@@ -369,7 +365,7 @@ export function CandidatePortal() {
                     {otpExpiresAt !== null ? (
                       otpExpired ? (
                         <p className="mt-2 text-xs text-destructive text-center">
-                          Code expired — request a new one.
+                          Code expired. Request a new one.
                         </p>
                       ) : (
                         <p className="mt-2 text-xs text-muted-foreground text-center">
@@ -386,7 +382,7 @@ export function CandidatePortal() {
                   <SubmitButton
                     loading={authBusy}
                     loadingLabel="Verifying..."
-                    label="Access Candidate Portal →"
+                    label="Access Candidate Portal"
                     disabled={otpCode.length !== 6 || otpExpired}
                   />
 
@@ -410,10 +406,10 @@ export function CandidatePortal() {
           /* Authenticated Candidate Dashboard */
           <div className="space-y-8">
             {/* Header bar */}
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 p-6 bg-card/80 border border-border rounded-2xl backdrop-blur-xl">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 p-6 bg-card border border-border rounded-xl shadow-sm">
               <div>
                 <div className="flex items-center gap-2 mb-1">
-                  <span className="inline-block w-2.5 h-2.5 rounded-full bg-success animate-pulse" />
+                  <span className="inline-block w-2 h-2 rounded-full bg-success" />
                   <h2 className="text-xl font-bold text-foreground">Applicant Tracking Dashboard</h2>
                 </div>
                 <p className="text-sm text-muted-foreground">
@@ -470,8 +466,8 @@ export function CandidatePortal() {
               </div>
             ) : appsQuery.error ? (
               <div className="p-12 text-center bg-card/60 border border-destructive/30 rounded-2xl space-y-3">
-                <div className="w-16 h-16 rounded-full bg-destructive/10 text-destructive flex items-center justify-center text-2xl mx-auto">
-                  ⚠
+                <div className="w-16 h-16 rounded-full bg-destructive/10 text-destructive flex items-center justify-center mx-auto">
+                  <WarningCircle className="h-8 w-8 text-destructive" weight="fill" />
                 </div>
                 <p className="text-sm text-destructive">
                   Unable to load applications at this time. Please refresh or try again later.
@@ -479,8 +475,8 @@ export function CandidatePortal() {
               </div>
             ) : applications.length === 0 ? (
               <div className="p-12 text-center bg-card/60 border border-border rounded-2xl space-y-4">
-                <div className="w-16 h-16 rounded-full bg-muted text-muted-foreground flex items-center justify-center text-2xl mx-auto">
-                  📋
+                <div className="w-16 h-16 rounded-full bg-muted text-muted-foreground flex items-center justify-center mx-auto">
+                  <FileText className="h-8 w-8 text-muted-foreground/60" weight="bold" />
                 </div>
                 <div>
                   <h3 className="text-lg font-semibold text-foreground">No Applications Found</h3>
@@ -491,16 +487,16 @@ export function CandidatePortal() {
                     You haven't submitted any job applications under this email address yet.
                   </p>
                 </div>
-                <Button asChild variant="gradient" size="sm" className="shadow-md shadow-primary/20">
+                <Button asChild size="sm" className="shadow-sm">
                   <Link to="/careers">
-                    Explore Open Careers →
+                    Explore Open Careers
                   </Link>
                 </Button>
               </div>
             ) : (
               <div className="space-y-6">
                 {appsQuery.isFetching && (
-                  <p className="text-xs text-muted-foreground text-center animate-pulse">
+                  <p className="text-xs text-muted-foreground text-center">
                     Refreshing…
                   </p>
                 )}
@@ -512,7 +508,7 @@ export function CandidatePortal() {
                   return (
                     <div
                       key={app.application_id}
-                      className="p-6 bg-card border border-border rounded-2xl shadow-xl transition-all hover:border-primary/40"
+                      className="p-6 bg-card border border-border rounded-xl shadow-sm transition-all hover:border-primary/40"
                     >
                       {/* Top Job Info Header */}
                       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 pb-6 border-b border-border/80">
@@ -539,23 +535,23 @@ export function CandidatePortal() {
                           {isInterviewReady ? (
                             <Link
                               to={`/invite/${app.interview_id}?t=${encodeURIComponent(app.invitation_token ?? "")}`}
-                              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold text-white bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 active:scale-[0.98] transition-all shadow-lg shadow-emerald-600/25 animate-pulse"
+                              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold text-accent-foreground bg-accent hover:bg-accent/90 active:scale-[0.98] transition-all shadow-sm"
                             >
-                              <span>Launch AI Interview</span> →
+                              <span>Launch Interview</span>
                             </Link>
                           ) : isCompleted ? (
                             <div className="text-right">
-                              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-success/10 text-success border border-success/30">
-                                ✓ Assessment Complete
+                              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md text-xs font-semibold bg-success/10 text-success border border-success/30">
+                                <CheckCircle className="h-3.5 w-3.5" weight="fill" /> Assessment Complete
                               </span>
                               {app.overall_score !== null && app.overall_score !== undefined && (
                                 <p className="text-xs text-muted-foreground mt-1">
-                                  Score: <strong className="text-foreground">{Math.round(app.overall_score)}/100</strong>
+                                  Score: <strong className="text-foreground font-mono tabular-nums">{Math.round(app.overall_score)}/100</strong>
                                 </p>
                               )}
                             </div>
                           ) : (
-                            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-muted text-muted-foreground border border-border">
+                            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md text-xs font-medium bg-muted text-muted-foreground border border-border">
                               Status: {applicationStatusLabel(app.application_status)}
                             </span>
                           )}
@@ -571,8 +567,8 @@ export function CandidatePortal() {
                         <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
                           {/* Stage 1: Submitted */}
                           <div className="p-3.5 rounded-xl bg-muted/40 border border-success/30">
-                            <div className="flex items-center gap-2 text-xs font-semibold text-success mb-1">
-                              <span>✓</span> Stage 1: Submitted
+                            <div className="flex items-center gap-1.5 text-xs font-semibold text-success mb-1">
+                              <CheckCircle className="h-3.5 w-3.5" weight="fill" /> Stage 1: Submitted
                             </div>
                             <p className="text-xs text-muted-foreground">Application & CV received</p>
                           </div>
@@ -589,8 +585,8 @@ export function CandidatePortal() {
                             )}
                           >
                             <div className="flex items-center justify-between text-xs font-semibold mb-1">
-                              <span className={app.passed_screening ? "text-success" : "text-muted-foreground"}>
-                                {app.passed_screening ? "✓" : "•"} Stage 2: CV Screen
+                              <span className={cn("flex items-center gap-1.5", app.passed_screening ? "text-success" : "text-muted-foreground")}>
+                                {app.passed_screening ? <CheckCircle className="h-3.5 w-3.5" weight="fill" /> : <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground" />} Stage 2: CV Screen
                               </span>
                               {app.cv_score !== null && app.cv_score !== undefined && (
                                 <span className="text-xs font-mono font-bold text-primary">
@@ -618,17 +614,18 @@ export function CandidatePortal() {
                                 : "border-border"
                             )}
                           >
-                            <div className="flex items-center gap-2 text-xs font-semibold mb-1">
+                            <div className="flex items-center gap-1.5 text-xs font-semibold mb-1">
                               <span
-                                className={
+                                className={cn(
+                                  "flex items-center gap-1.5",
                                   isCompleted
                                     ? "text-success"
                                     : isInterviewReady
                                     ? "text-primary"
                                     : "text-muted-foreground"
-                                }
+                                )}
                               >
-                                {isCompleted ? "✓" : isInterviewReady ? "⚡" : "•"} Stage 3: AI Interview
+                                {isCompleted ? <CheckCircle className="h-3.5 w-3.5" weight="fill" /> : <span className={cn("h-1.5 w-1.5 rounded-full", isInterviewReady ? "bg-primary" : "bg-muted-foreground")} />} Stage 3: AI Interview
                               </span>
                             </div>
                             <p className="text-xs text-muted-foreground">
@@ -649,9 +646,9 @@ export function CandidatePortal() {
                                 : "border-border"
                             )}
                           >
-                            <div className="flex items-center gap-2 text-xs font-semibold mb-1">
-                              <span className={isCompleted ? "text-success" : "text-muted-foreground"}>
-                                {isCompleted ? "✓" : "•"} Stage 4: Decision
+                            <div className="flex items-center gap-1.5 text-xs font-semibold mb-1">
+                              <span className={cn("flex items-center gap-1.5", isCompleted ? "text-success" : "text-muted-foreground")}>
+                                {isCompleted ? <CheckCircle className="h-3.5 w-3.5" weight="fill" /> : <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground" />} Stage 4: Decision
                               </span>
                             </div>
                             <p className="text-xs text-muted-foreground">
@@ -667,19 +664,19 @@ export function CandidatePortal() {
                           G10: only real evaluation fields from the API payload;
                           fabricated placeholder strengths were removed. */}
                       {isCompleted && (
-                        <div className="mt-6 p-5 rounded-2xl bg-gradient-to-br from-primary/5 via-muted/30 to-background border border-primary/20 space-y-4">
+                        <div className="mt-6 p-5 rounded-xl bg-muted/40 border border-border space-y-4">
                           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 border-b border-border/40 pb-3">
                             <div>
                               <div className="flex items-center gap-2">
-                                <span className="flex h-5 w-5 items-center justify-center rounded-full bg-primary/20 text-primary text-xs font-bold">
-                                  ✦
+                                <span className="flex h-5 w-5 items-center justify-center rounded-full bg-primary/10 text-primary text-xs font-bold">
+                                  I
                                 </span>
                                 <h4 className="text-sm font-bold text-foreground">
                                   Assessment Summary
                                 </h4>
                               </div>
                               <p className="text-xs text-muted-foreground mt-0.5">
-                                A summary of your interview results. Automated scores are approximations — a human recruiter makes the final decision.
+                                A summary of your interview results. Automated scores are approximations: a human recruiter makes the final decision.
                               </p>
                             </div>
                             {app.overall_score !== null && app.overall_score !== undefined && (
@@ -716,7 +713,7 @@ export function CandidatePortal() {
         {/* Delete Account Confirmation Modal */}
         {showDeleteConfirm && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-            <div className="bg-card border border-destructive/30 rounded-2xl p-6 max-w-md w-full space-y-4 shadow-xl">
+            <div className="bg-card border border-destructive/30 rounded-xl p-6 max-w-md w-full space-y-4 shadow-lg">
               <div className="flex items-center gap-3">
                 <div className="h-10 w-10 rounded-full bg-destructive/10 flex items-center justify-center">
                   <Trash className="h-5 w-5 text-destructive" />

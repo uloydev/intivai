@@ -76,7 +76,7 @@ func TestClampRunes(t *testing.T) {
 // honest expiry state at the storage layer, and CandidateQARemaining refuses
 // on the same boundary so no LLM spend is reachable.
 func TestRecordCandidateQAGatesInactiveInterviews(t *testing.T) {
-	s := seedInterviewApp(t, "active")
+	s := seedInterviewApp(t)
 	s.create(t)
 	ctx := context.Background()
 	if err := s.svc.StartInterview(ctx, s.orgID.String(), s.ivID); err != nil {
@@ -122,7 +122,7 @@ func TestRecordCandidateQAGatesInactiveInterviews(t *testing.T) {
 // I4/I5: with an org cap of 1 the second ask is refused by the service itself,
 // nothing extra is recorded, and remaining hits zero exactly at the boundary.
 func TestRecordCandidateQAEnforcesOrgCap(t *testing.T) {
-	s := seedInterviewApp(t, "active")
+	s := seedInterviewApp(t)
 	s.create(t)
 	ctx := context.Background()
 
@@ -156,7 +156,7 @@ func TestRecordCandidateQAEnforcesOrgCap(t *testing.T) {
 // ComposeConnectContexts must carry the pinned per-job candidate context into
 // the QA grounding (I12 single-load contract, job-context branch).
 func TestComposeConnectContextsIncludesJobCandidateContext(t *testing.T) {
-	s := seedInterviewApp(t, "active")
+	s := seedInterviewApp(t)
 	s.create(t)
 	ctx := context.Background()
 

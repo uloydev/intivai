@@ -5,7 +5,6 @@ import {
   Copy,
   Plus,
   ArrowSquareOut,
-  Sparkle,
   CheckCircle,
   Play,
   UsersThree,
@@ -85,7 +84,7 @@ export function InterviewsPage() {
     } else {
       setTab("eligible")
       setHighlightedAppId(app.id)
-      toast.info(`${app.candidate_name} has not passed screening yet — interview creation requires a passing CV score.`)
+      toast.info(`${app.candidate_name} has not passed screening yet: interview creation requires a passing CV score.`)
     }
   }, [inviteParam, apps, loadingApps])
 
@@ -124,9 +123,9 @@ export function InterviewsPage() {
       {/* Header */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="font-display text-3xl font-bold tracking-tight">AI Interview Operations</h1>
+          <h1 className="font-display text-3xl font-bold tracking-tight">Interview Operations</h1>
           <p className="text-sm text-muted-foreground">
-            Configure dynamic questioning rails, dispatch invites, and monitor real-time AI sessions.
+            Configure questioning rails, dispatch invites, and monitor interview sessions.
           </p>
         </div>
         <div className="flex flex-col items-end gap-1.5">
@@ -139,8 +138,7 @@ export function InterviewsPage() {
               }
             }}
             disabled={passed.length === 0}
-            variant="gradient"
-            className="shadow-md shadow-primary/20"
+            className="shadow-sm"
           >
             <Plus className="mr-1.5 h-4 w-4" weight="bold" /> New Interview Session
           </Button>
@@ -222,7 +220,7 @@ export function InterviewsPage() {
                     <TableHead>Role</TableHead>
                     <TableHead>Assessment State</TableHead>
                     <TableHead>Assessment Score</TableHead>
-                    <TableHead>AI Recommendation</TableHead>
+                    <TableHead>Recommendation</TableHead>
                     <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -244,7 +242,7 @@ export function InterviewsPage() {
                           </div>
                         </div>
                       </TableCell>
-                      <TableCell className="text-xs text-muted-foreground">{iv.job_title || "—"}</TableCell>
+                      <TableCell className="text-xs text-muted-foreground">{iv.job_title || "Not specified"}</TableCell>
                       <TableCell>
                         <Badge
                           variant={iv.status === "completed" ? "default" : "secondary"}
@@ -259,11 +257,11 @@ export function InterviewsPage() {
                       </TableCell>
                       <TableCell>
                         {iv.evaluation ? (
-                          <span className="font-display font-bold text-sm text-foreground">
+                          <span className="font-mono font-bold text-sm text-foreground tabular-nums">
                             {iv.evaluation.overall_score} / 100
                           </span>
                         ) : (
-                          <span className="text-xs text-muted-foreground">—</span>
+                          <span className="text-xs text-muted-foreground">Pending</span>
                         )}
                       </TableCell>
                       <TableCell>
@@ -326,13 +324,12 @@ export function InterviewsPage() {
                       <TableCell className="font-medium">{app.candidate_name}</TableCell>
                       <TableCell className="text-xs text-muted-foreground">{app.job_title}</TableCell>
                       <TableCell>
-                        <Badge className="bg-success/10 text-success border-success/20 font-bold">
+                        <Badge className="bg-success/10 text-success border-success/20 font-mono font-bold">
                           {app.cv_score} / 100
                         </Badge>
                       </TableCell>
                       <TableCell className="text-right">
                         <Button
-                          variant="gradient"
                           size="sm"
                           className="h-8 text-xs shadow-sm"
                           onClick={() => {
@@ -360,7 +357,7 @@ export function InterviewsPage() {
             <>
               <DialogHeader>
                 <DialogTitle className="font-display text-lg flex items-center gap-2 text-success">
-                  <CheckCircle className="h-6 w-6" weight="fill" /> Interview Session Active!
+                  <CheckCircle className="h-5 w-5" weight="bold" /> Interview Session Active
                 </DialogTitle>
                 <DialogDescription>
                   Share the secure candidate invite link below to initiate the evaluation.
@@ -368,7 +365,7 @@ export function InterviewsPage() {
               </DialogHeader>
 
               <div className="space-y-4 py-2">
-                <div className="rounded-xl border border-primary/20 bg-primary/5 p-3.5 space-y-2">
+                <div className="rounded-lg border border-border bg-muted/30 p-3.5 space-y-2">
                   <div className="flex items-center justify-between">
                     <Label className="text-xs font-semibold flex items-center gap-1.5">
                       <ChatCircleText className="h-4 w-4 text-primary" weight="bold" /> Chat Interview Link
@@ -386,7 +383,7 @@ export function InterviewsPage() {
                 <div className="flex justify-between items-center pt-2">
                   <Button asChild variant="ghost" size="sm" className="text-xs text-primary gap-1">
                     <Link to={`/interviews/${created.interview_id}`}>
-                      View Scorecard →
+                      View Scorecard
                     </Link>
                   </Button>
                   <Button asChild variant="default" size="sm" className="text-xs">
@@ -401,7 +398,7 @@ export function InterviewsPage() {
             <>
               <DialogHeader>
                 <DialogTitle className="font-display text-lg flex items-center gap-2">
-                  <Sparkle className="h-5 w-5 text-primary" weight="fill" /> Setup Candidate Interview
+                  <Plus className="h-5 w-5 text-primary" weight="bold" /> Setup Candidate Interview
                 </DialogTitle>
                 <DialogDescription>
                   Configure the scope for <span className="font-semibold text-foreground">{selectedApp?.candidate_name}</span> applying for <span className="font-semibold text-foreground">{selectedApp?.job_title}</span>.
@@ -410,7 +407,7 @@ export function InterviewsPage() {
 
               <div className="space-y-4 py-3">
                 <div className="space-y-1.5">
-                  <Label htmlFor="qcount" className="text-xs font-semibold">Number of Dynamic AI Questions</Label>
+                  <Label htmlFor="qcount" className="text-xs font-semibold">Number of Questions</Label>
                   <Input
                     id="qcount"
                     type="number"
@@ -418,10 +415,10 @@ export function InterviewsPage() {
                     max={10}
                     value={count}
                     onChange={(e) => setCount(e.target.value)}
-                    className="bg-background/80"
+                    className="bg-background"
                   />
                   <p className="text-xs text-muted-foreground">
-                    LLM will synthesize CV-gap questions tailored to the candidate's missing competencies.
+                    Interview engine synthesizes questions tailored to candidate requirements.
                   </p>
                 </div>
               </div>
@@ -430,8 +427,8 @@ export function InterviewsPage() {
                 <Button variant="secondary" onClick={() => setOpen(false)}>
                   Cancel
                 </Button>
-                <Button variant="gradient" onClick={() => create.mutate()} disabled={create.isPending}>
-                  {create.isPending ? "Generating Rails…" : "Initialize Session"}
+                <Button onClick={() => create.mutate()} disabled={create.isPending}>
+                  {create.isPending ? "Creating Session…" : "Initialize Session"}
                 </Button>
               </DialogFooter>
             </>

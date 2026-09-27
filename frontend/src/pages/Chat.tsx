@@ -2,10 +2,8 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import { useMutation } from "@tanstack/react-query"
 import { Link, useParams, useSearchParams } from "react-router-dom"
 import {
-  Sparkle,
   PaperPlaneRight,
   Stop,
-  Robot,
   User,
   CheckCircle,
   WarningCircle,
@@ -41,6 +39,7 @@ export function ChatPage() {
 
   const [input, setInput] = useState("")
   const [showSandbox, setShowSandbox] = useState(false)
+  const [mobileTab, setMobileTab] = useState<"chat" | "sandbox">("chat")
   const [isInterrupting, setIsInterrupting] = useState(false)
   const pastedFlagRef = useRef(false)
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -157,14 +156,16 @@ export function ChatPage() {
 
   const sendWithAction = (action: "reply" | "advance") => {
     const trimmed = input.trim()
-    if ((action === "reply" && !trimmed) || streaming || pendingAnswer || !!evaluation || expired || disconnected) return
+    if (streaming || pendingAnswer || !!evaluation || expired || disconnected) return
+    if (!trimmed && (action === "reply" || topicTurn <= 1)) return
+    const textToSend = trimmed.length > 0 ? trimmed : "[Topic concluded by candidate]"
     // G11: the pending debounced code-change goes out BEFORE the answer so
     // the server snapshots the latest editor state for this question.
     debouncedCodeChangeRef.current.flush()
-    const sent = session.submitAnswer(trimmed, action, collectPacingTelemetry())
+    const sent = session.submitAnswer(textToSend, action, collectPacingTelemetry())
     setInput("")
     if (!sent) {
-      toast.error("Connection lost — your answer was not sent. Please try again.")
+      toast.error("Connection lost: your answer was not sent. Please try again.")
     }
   }
 
@@ -181,14 +182,14 @@ export function ChatPage() {
       setQaInput("")
       setShowQaInput(false)
     } else {
-      toast.error("Connection lost — your question was not sent. Please try again.")
+      toast.error("Connection lost: your question was not sent. Please try again.")
     }
   }
 
   const handleTimerExpire = () => {
     if (streaming || pendingAnswer || !!evaluation || expired || disconnected) return
     const trimmed = input.trim()
-    const submissionText = trimmed.length > 0 ? trimmed : "My time for this question ran out — nothing was submitted."
+    const submissionText = trimmed.length > 0 ? trimmed : "My time for this question ran out: nothing was submitted."
     const action = isTopicComplete ? "advance" : "reply"
     // G11: honest toast — only claim auto-submission when it actually left.
     const sent = session.submitAnswer(submissionText, action, collectPacingTelemetry())
@@ -196,7 +197,7 @@ export function ChatPage() {
     if (sent) {
       toast.info("Stage time limit elapsed. Response auto-submitted.")
     } else {
-      toast.error("Stage time limit elapsed — but the connection is down, so nothing was submitted. Reconnect and try again.")
+      toast.error("Stage time limit elapsed, but connection is down. Nothing was submitted. Reconnect and try again.")
     }
   }
 
@@ -228,9 +229,9 @@ export function ChatPage() {
   return (
     <div className="flex h-screen flex-col bg-background text-foreground selection:bg-primary/20 selection:text-primary">
       {/* Top Header Bar */}
-      <header className="flex h-14 shrink-0 items-center justify-between border-b border-border/60 bg-background/80 px-4 sm:px-6 backdrop-blur-xl z-10">
+      <header className="flex h-14 shrink-0 items-center justify-between border-b border-border bg-card px-4 sm:px-6 z-10">
         <div className="flex items-center gap-3">
-          <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-primary text-primary-foreground font-bold font-display text-sm shadow-md shadow-primary/25">
+          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground font-bold font-display text-sm shadow-sm">
             I
           </div>
           <div>
@@ -258,7 +259,11 @@ export function ChatPage() {
           <Button
             variant={showSandbox ? "secondary" : "outline"}
             size="sm"
-            onClick={() => setShowSandbox(!showSandbox)}
+            onClick={() => {
+              const next = !showSandbox
+              setShowSandbox(next)
+              if (next) setMobileTab("sandbox")
+            }}
             className="text-xs h-8 gap-1.5 border-border/70 shadow-sm"
           >
             <Code2 className="w-3.5 h-3.5 text-indigo-400" />
@@ -287,12 +292,12 @@ export function ChatPage() {
       {expired && (
         <div className="bg-destructive/10 border-b border-destructive/20 px-4 py-2.5 text-center text-xs font-medium text-destructive flex items-center justify-center gap-2">
           <WarningCircle className="h-4 w-4" weight="fill" />
-          Session ticket expired — please reopen your candidate invite link to resume.
+          Session ticket expired: please reopen your candidate invite link to resume.
         </div>
       )}
       {reconnecting && (
         <div className="bg-warning/10 border-b border-warning/20 px-4 py-2 text-center text-xs font-medium text-warning flex items-center justify-center gap-2 animate-pulse">
-          <ArrowClockwise className="h-4 w-4 animate-spin" /> Connection lost — resuming session…
+          <ArrowClockwise className="h-4 w-4 animate-spin" /> Connection lost: resuming session…
         </div>
       )}
       {disconnected && (
@@ -301,7 +306,7 @@ export function ChatPage() {
           className="bg-destructive/10 border-b border-destructive/20 px-4 py-2.5 text-center text-xs font-medium text-destructive flex flex-col sm:flex-row items-center justify-center gap-2"
         >
           <WarningCircle className="h-4 w-4" weight="fill" />
-          <span>Connection lost — answers are not being recorded.</span>
+          <span>Connection lost: answers are not being recorded.</span>
           <Button
             variant="outline"
             size="sm"
@@ -315,7 +320,7 @@ export function ChatPage() {
 
       {/* Stage Timer Gate & Assessment Progress Bar */}
       {!evaluation && !expired && currentIdx > 0 && (
-        <div className="border-b border-border/70 bg-card/60 px-4 py-2.5 backdrop-blur-md">
+        <div className="border-b border-border bg-card px-4 py-2.5">
           <div className="max-w-7xl mx-auto">
             <TimerGate
               sessionRemainingSec={sessionRemainingSec}
@@ -331,6 +336,38 @@ export function ChatPage() {
         </div>
       )}
 
+      {/* Mobile Tab Switcher (when sandbox is open on < lg) */}
+      {showSandbox && (
+        <div className="flex lg:hidden items-center justify-center p-2 border-b border-border bg-card shrink-0">
+          <div className="flex rounded-lg bg-muted p-1 w-full max-w-xs text-xs font-semibold">
+            <button
+              type="button"
+              onClick={() => setMobileTab("chat")}
+              className={cn(
+                "flex-1 py-1.5 rounded-md transition-all text-center",
+                mobileTab === "chat"
+                  ? "bg-background text-foreground shadow-xs font-bold"
+                  : "text-muted-foreground hover:text-foreground"
+              )}
+            >
+              Interview Chat
+            </button>
+            <button
+              type="button"
+              onClick={() => setMobileTab("sandbox")}
+              className={cn(
+                "flex-1 py-1.5 rounded-md transition-all text-center",
+                mobileTab === "sandbox"
+                  ? "bg-background text-foreground shadow-xs font-bold"
+                  : "text-muted-foreground hover:text-foreground"
+              )}
+            >
+              Code Sandbox
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Main Workspace Body: Single or Split View */}
       <div className={cn(
         "flex-1 flex min-h-0 overflow-hidden",
@@ -340,7 +377,11 @@ export function ChatPage() {
         <div
           className={cn(
             "relative flex flex-col h-full overflow-hidden transition-all duration-300",
-            showSandbox ? "lg:w-[45%] lg:border-r lg:border-border border-b lg:border-b-0" : "w-full max-w-4xl mx-auto"
+            showSandbox
+              ? mobileTab === "sandbox"
+                ? "hidden lg:flex lg:w-[45%] lg:border-r lg:border-border"
+                : "flex w-full lg:w-[45%] lg:border-r lg:border-border"
+              : "w-full max-w-4xl mx-auto"
           )}
         >
           {/* Active Question Context Pill (if active) */}
@@ -370,10 +411,10 @@ export function ChatPage() {
           >
             {bubbles.length === 0 && !streaming && (
               <div className="flex flex-col items-center justify-center py-20 text-center space-y-3">
-                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-primary/10 text-primary animate-pulse">
-                  <Sparkle className="h-6 w-6" weight="fill" />
+                <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                  <Target className="h-6 w-6" weight="bold" />
                 </div>
-                <p className="font-display font-semibold text-sm">Connecting to AI Interviewer...</p>
+                <p className="font-display font-semibold text-sm">Connecting to Interviewer...</p>
                 <p className="text-xs text-muted-foreground max-w-xs">
                   Formulating competence probing questions tailored to your application.
                 </p>
@@ -395,10 +436,10 @@ export function ChatPage() {
                 {/* AI Avatar for Assistant & Question */}
                 {(b.kind === "question" || b.kind === "assistant") && (
                   <div className={cn(
-                    "flex h-8 w-8 shrink-0 items-center justify-center rounded-xl font-bold shadow-md",
-                    b.kind === "question" ? "bg-primary text-primary-foreground shadow-primary/20" : "bg-muted text-foreground border border-border"
+                    "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg font-bold shadow-sm",
+                    b.kind === "question" ? "bg-primary text-primary-foreground" : "bg-muted text-foreground border border-border"
                   )}>
-                    {b.kind === "question" ? <Target className="h-4 w-4" weight="bold" /> : <Robot className="h-4 w-4" weight="fill" />}
+                    {b.kind === "question" ? <Target className="h-4 w-4" weight="bold" /> : <ChatCircleDots className="h-4 w-4" weight="bold" />}
                   </div>
                 )}
 
@@ -410,7 +451,7 @@ export function ChatPage() {
                   )}>
                     <div className="flex items-center justify-between border-b border-border/40 pb-1.5">
                       <span className="font-display font-bold text-xs text-primary flex items-center gap-1.5">
-                        <Sparkle className="h-3.5 w-3.5" weight="fill" />
+                        <Target className="h-3.5 w-3.5" weight="bold" />
                         {b.isProbe ? (
                           <span>Adaptive Follow-Up Probe ({b.idx || currentIdx} of {Math.max(total, b.idx || currentIdx)})</span>
                         ) : (
@@ -435,9 +476,9 @@ export function ChatPage() {
                     <Markdown content={b.content} />
                     {b.streaming && (
                       <span className="inline-flex gap-1 ml-1.5 align-middle">
-                        <span className="h-1.5 w-1.5 rounded-full bg-primary animate-bounce [animation-delay:-0.3s]" />
-                        <span className="h-1.5 w-1.5 rounded-full bg-primary animate-bounce [animation-delay:-0.15s]" />
-                        <span className="h-1.5 w-1.5 rounded-full bg-primary animate-bounce" />
+                        <span className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse" />
+                        <span className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse [animation-delay:150ms]" />
+                        <span className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse [animation-delay:300ms]" />
                       </span>
                     )}
                   </div>
@@ -452,7 +493,7 @@ export function ChatPage() {
 
                 {/* Candidate Answer Bubble */}
                 {b.kind === "answer" && (
-                  <div className="max-w-[85%] rounded-2xl rounded-tr-sm bg-primary text-primary-foreground p-3.5 text-xs sm:text-sm shadow-md shadow-primary/10 whitespace-pre-wrap leading-relaxed">
+                  <div className="max-w-[85%] rounded-2xl rounded-tr-sm bg-primary text-primary-foreground p-3.5 text-xs sm:text-sm shadow-sm whitespace-pre-wrap leading-relaxed">
                     {b.content}
                   </div>
                 )}
@@ -499,6 +540,19 @@ export function ChatPage() {
                 )}
               </div>
             ))}
+
+            {/* AI Evaluator Synthesis Indicator */}
+            {pendingAnswer && !streaming && (
+              <div className="flex gap-3 text-xs sm:text-sm leading-relaxed animate-in fade-in duration-300 justify-start">
+                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-muted text-foreground border border-border shadow-sm">
+                  <ChatCircleDots className="h-4 w-4 animate-pulse text-primary" weight="bold" />
+                </div>
+                <div className="rounded-2xl rounded-tl-sm bg-muted/40 border border-border/50 p-3.5 flex items-center gap-2.5 text-muted-foreground shadow-sm">
+                  <span className="inline-block h-2 w-2 rounded-full bg-primary/70 animate-ping" />
+                  <span className="text-xs font-medium">Interviewer is evaluating your response…</span>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Scroll-to-bottom FAB */}
@@ -513,13 +567,13 @@ export function ChatPage() {
 
           {/* Bottom Bar: Evaluation or Answer Input */}
           {evaluation ? (
-            <div className="border-t border-border/80 bg-card/70 backdrop-blur-xl p-5 space-y-3">
+            <div className="border-t border-border bg-card p-5 space-y-3">
               <div className="flex items-center gap-2 text-success font-display font-bold text-sm">
                 <CheckCircle className="h-5 w-5" weight="fill" />
                 <span>Interview Complete</span>
               </div>
               <p className="text-xs text-muted-foreground leading-relaxed">
-                Your interview is complete — our team will review the results and reach out within a few business days.
+                Your interview is complete. Our team will review the results and reach out within a few business days.
               </p>
               {evaluation.overall !== undefined && evaluation.overall !== null && (
                 <div className="rounded-xl border border-border/50 bg-muted/30 p-3 text-xs text-muted-foreground flex items-center justify-between">
@@ -529,19 +583,19 @@ export function ChatPage() {
                   </Badge>
                 </div>
               )}
-              <Button asChild variant="gradient" size="sm" className="shadow-md shadow-primary/20">
+              <Button asChild size="sm" className="shadow-sm">
                 <Link to="/candidate/portal">
-                  Track your application in the Candidate Portal →
+                  Track your application in the Candidate Portal
                 </Link>
               </Button>
             </div>
           ) : (
-            <div className="border-t border-border/60 bg-background/80 backdrop-blur-xl p-3.5 sticky bottom-0 z-10">
+            <div className="border-t border-border bg-card p-3.5 sticky bottom-0 z-10">
               {/* Turn progress indicator */}
               {!isTopicComplete && currentIdx > 0 && (
                 <div className="flex items-center justify-between mb-2 px-0.5">
                   <span className="text-[11px] text-muted-foreground font-medium">
-                    Topic Discussion — Turn {topicTurn} of {maxTopicTurns}
+                    Topic Discussion: Turn {topicTurn} of {maxTopicTurns}
                   </span>
                   <div className="flex gap-1">
                     {Array.from({ length: maxTopicTurns }).map((_, i) => (
@@ -626,9 +680,8 @@ export function ChatPage() {
                     <>
                       {/* Primary: Send Reply / Clarification (in-topic dialogue) */}
                       <Button
-                        variant="gradient"
                         size="icon"
-                        className="h-[48px] w-[48px] rounded-xl shadow-md shadow-primary/20"
+                        className="h-[48px] w-[48px] rounded-lg shadow-sm"
                         title="Send reply / clarify (Enter)"
                         aria-label="Send reply"
                         onClick={sendAnswer}
@@ -640,14 +693,14 @@ export function ChatPage() {
                       {!isTopicComplete && currentIdx > 0 && (
                         <Button
                           variant="outline"
-                          size="icon"
-                          className="h-9 w-[48px] rounded-xl border-success/40 text-success hover:bg-success/10 text-[10px] leading-tight"
+                          size="sm"
+                          className="h-[48px] px-3 rounded-lg border-success/40 text-success hover:bg-success/10 text-xs font-semibold leading-tight shrink-0"
                           title="Complete this topic & advance to next question"
                           aria-label="Complete topic and advance"
                           onClick={advanceTopic}
-                          disabled={pendingAnswer || expired || disconnected}
+                          disabled={(!input.trim() && topicTurn <= 1) || pendingAnswer || expired || disconnected}
                         >
-                          <ArrowRight className="h-4 w-4" weight="bold" />
+                          {input.trim() ? "Submit & Advance" : "Conclude Topic"}
                         </Button>
                       )}
                     </>
@@ -659,7 +712,7 @@ export function ChatPage() {
                 <p className="text-[10px] text-muted-foreground mt-1.5 px-0.5">
                   <span className="font-medium text-foreground/60">↵ Reply / Clarify</span>
                   {" · "}
-                  <span className="font-medium text-success/80">→ Complete topic &amp; next question</span>
+                  <span className="font-medium text-success/80">Next Topic: Complete &amp; advance</span>
                 </p>
               )}
               {/* Request Human Interviewer */}
@@ -674,7 +727,7 @@ export function ChatPage() {
               )}
               {humanRequested && (
                 <p className="text-[10px] text-success mt-1.5 px-0.5 flex items-center gap-1">
-                  <CheckCircle className="h-3 w-3" /> Human interviewer requested — a team member will follow up.
+                  <CheckCircle className="h-3 w-3" /> Human interviewer requested: a team member will follow up.
                 </p>
               )}
               {/* Ask a Question (J10) */}
@@ -701,9 +754,8 @@ export function ChatPage() {
                           className="min-h-[48px] resize-none bg-card rounded-xl border-border/60 text-xs sm:text-sm p-2.5 focus-visible:ring-primary"
                         />
                         <Button
-                          variant="gradient"
                           size="icon"
-                          className="h-[48px] w-[48px] rounded-xl shrink-0"
+                          className="h-[48px] w-[48px] rounded-lg shrink-0 shadow-sm"
                           title="Send question (Enter)"
                           aria-label="Send question"
                           onClick={sendCandidateQuestion}
@@ -738,7 +790,13 @@ export function ChatPage() {
 
         {/* Right Split Column: Live Coding Sandbox */}
         {showSandbox && (
-          <div className="lg:w-[55%] h-[40vh] lg:h-full overflow-hidden flex flex-col bg-neutral-950">
+          <div
+            className={cn(
+              "overflow-hidden flex flex-col bg-neutral-950",
+              mobileTab === "chat" ? "hidden lg:flex" : "flex",
+              "w-full h-full lg:w-[55%]"
+            )}
+          >
             <CodingSandbox
               questionIdx={currentIdx}
               onExecute={handleExecuteSandbox}
@@ -769,7 +827,6 @@ export function ChatPage() {
             </p>
             <div className="flex gap-2">
               <Button
-                variant="gradient"
                 onClick={() => requestHumanMutation.mutate()}
                 disabled={requestHumanMutation.isPending}
               >

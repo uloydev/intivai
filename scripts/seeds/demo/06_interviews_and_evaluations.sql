@@ -407,3 +407,31 @@ VALUES (
 ON CONFLICT (id) DO UPDATE SET
     expires_at = EXCLUDED.expires_at;
 
+-- Seed Initial Recruiter Notifications
+INSERT INTO recruiter_notifications (
+    id, org_id, user_id, event_type, title, message, action_url, read, created_at
+)
+VALUES (
+    'aaaaaaaa-9999-8888-7777-666666666601',
+    '968f66ef-91c6-4db3-8764-ceeffb753b1f',
+    '38647293-4a4e-4060-b6f5-682bbc4cc467',
+    'interview.completed',
+    'Interview Completed',
+    'David Chen completed interview evaluation for Principal AI & ML Systems Engineer (Score: 89/100, Strong Hire).',
+    '/interviews/c5d6e7f8-a4b5-4c5d-8e6f-6e7f8a4b5c5d',
+    false,
+    NOW() - INTERVAL '2 hours'
+),
+(
+    'aaaaaaaa-9999-8888-7777-666666666602',
+    '968f66ef-91c6-4db3-8764-ceeffb753b1f',
+    '38647293-4a4e-4060-b6f5-682bbc4cc467',
+    'candidate.screening_passed',
+    'Screening Passed',
+    'Elena Rostova achieved 94% match on Staff Frontend Architect resume screening.',
+    '/candidates?candidate_id=e6f1a2b3-c4d5-4e6f-8a1b-2b3c4d5e6f1a',
+    true,
+    NOW() - INTERVAL '1 day'
+)
+ON CONFLICT (id) DO NOTHING;
+

@@ -13,17 +13,17 @@ test.describe("Full Intivai Application Pages Validation", () => {
     await expect(page.getByRole("link", { name: /Sign In/i }).first()).toBeVisible()
 
     // Hero title & description
-    await expect(page.getByText(/Screen, Probe, and Grade Engineers with Real-Time AI/i)).toBeVisible()
-    await expect(page.getByText(/Intivai conducts adaptive voice and chat technical interviews/i)).toBeVisible()
+    await expect(page.getByText(/Autonomous Technical Interviews Backed by Objective Engineering Rubrics/i)).toBeVisible()
+    await expect(page.getByText(/Intivai pairs adaptive technical interviewing/i)).toBeVisible()
 
     // How it works and simulator preview
     await expect(page.getByText(/How Autonomous Screening Works/i)).toBeVisible()
-    await expect(page.getByText(/Interactive AI Technical Evaluator/i)).toBeVisible()
-    await expect(page.getByText(/AI Interviewer/i).first()).toBeVisible()
+    await expect(page.getByText(/Interactive Technical Evaluation Preview/i)).toBeVisible()
+    await expect(page.getByText(/Technical Interviewer/i).first()).toBeVisible()
 
     // Value pillars & metrics
-    await expect(page.getByText(/Faster Candidate Turnaround/i)).toBeVisible()
-    await expect(page.getByText(/Deterministic Safety Rails/i)).toBeVisible()
+    await expect(page.getByText(/Adaptive Chat & Sandbox/i)).toBeVisible()
+    await expect(page.getByText(/Tenant-Isolated/i)).toBeVisible()
   })
 
   test("2. Careers Page (/careers) should render jobs list, search, filters, and apply modal", async ({ page }) => {
@@ -112,7 +112,7 @@ test.describe("Full Intivai Application Pages Validation", () => {
 
     // 4e. Interviews Page
     await page.goto("/interviews")
-    await expect(page.getByText("AI Interview Operations")).toBeVisible()
+    await expect(page.getByText(/Interview Operations/i)).toBeVisible()
     await expect(page.getByRole("button", { name: /New Interview Session/i })).toBeVisible()
   })
 
@@ -149,7 +149,7 @@ test.describe("Full Intivai Application Pages Validation", () => {
     // Click "ROI Calculator"
     await page.getByRole("link", { name: /ROI Calculator/i }).first().click()
     await expect(page).toHaveURL(/\/#calculator/)
-    await expect(page.getByText(/Calculate Your Engineering Time Saved/i)).toBeVisible()
+    await expect(page.getByText(/Engineering Bandwidth Calculator/i)).toBeVisible()
 
     // Click "FAQ"
     await page.getByRole("link", { name: /FAQ/i }).first().click()

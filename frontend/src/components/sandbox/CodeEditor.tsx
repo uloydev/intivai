@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react"
 import Editor from "@monaco-editor/react"
-import { Play, RotateCcw, Sparkles, Check, ChevronDown } from "lucide-react"
+import { Play, RotateCcw, Code2, Check, ChevronDown } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { SandboxLanguage } from "@/types/api"
 import { toast } from "sonner"
@@ -68,9 +68,9 @@ export function CodeEditor({
   }
 
   return (
-    <div className="flex flex-col h-full bg-neutral-950 border border-neutral-800 rounded-lg overflow-hidden shadow-2xl">
+    <div className="flex flex-col h-full bg-neutral-950 border border-neutral-800 rounded-lg overflow-hidden shadow-sm">
       {/* Editor Top Toolbar */}
-      <div className="flex items-center justify-between px-3 py-2 bg-neutral-900/90 backdrop-blur border-b border-neutral-800">
+      <div className="flex items-center justify-between px-3 py-2 bg-neutral-900 border-b border-neutral-800">
         <div className="flex items-center gap-2">
           {/* Language Selector */}
           <div className="relative inline-block">
@@ -104,11 +104,11 @@ export function CodeEditor({
           {onAskAIReview && !readOnly && (
             <button
               onClick={onAskAIReview}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium text-purple-300 bg-purple-950/50 hover:bg-purple-900/60 border border-purple-800/60 transition-all shadow-sm"
-              title="Request AI Algorithmic & Complexity Feedback"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium text-foreground bg-muted/60 hover:bg-muted border border-border/80 transition-all shadow-sm"
+              title="Request Algorithmic & Complexity Feedback"
             >
-              <Sparkles className="w-3.5 h-3.5 text-purple-400" />
-              <span>AI Code Review</span>
+              <Code2 className="w-3.5 h-3.5 text-primary" />
+              <span>Code Review</span>
             </button>
           )}
 
@@ -117,10 +117,10 @@ export function CodeEditor({
               onClick={onRun}
               disabled={isRunning}
               className={cn(
-                "flex items-center gap-1.5 px-4 py-1.5 rounded text-xs font-bold text-white shadow-lg transition-all",
+                "flex items-center gap-1.5 px-4 py-1.5 rounded text-xs font-bold text-white transition-all shadow-sm",
                 isRunning
                   ? "bg-emerald-800 opacity-60 cursor-not-allowed"
-                  : "bg-emerald-600 hover:bg-emerald-500 active:scale-95 shadow-emerald-950/50"
+                  : "bg-emerald-600 hover:bg-emerald-500 active:scale-95"
               )}
             >
               <Play className={cn("w-3.5 h-3.5 fill-current", isRunning && "animate-spin motion-reduce:animate-none")} />

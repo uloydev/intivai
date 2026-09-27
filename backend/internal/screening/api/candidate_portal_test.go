@@ -38,6 +38,7 @@ func TestCandidatePortal_OTPAndApplicationLookupFlow(t *testing.T) {
 	app := fiber.New()
 	app.Post("/api/v1/public/candidate/auth/otp", handler.RequestOTP)
 	app.Post("/api/v1/public/candidate/auth/verify", handler.VerifyOTP)
+	app.Post("/api/v1/public/candidate/auth/logout", handler.Logout)
 	app.Get("/api/v1/candidate/portal/applications", handler.RequireCandidateAuth, handler.ListApplications)
 
 	candidateEmail := "portal-test-" + uuid.NewString()[:8] + "@candidate.io"
@@ -77,6 +78,7 @@ func TestCandidatePortal_OTPAndApplicationLookupFlow(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, vResult.Data.Token)
 	require.Equal(t, candidateEmail, vResult.Data.Email)
+	require.Contains(t, vResp.Header.Get("Set-Cookie"), "intivai_candidate_jwt=")
 
 	// 4. Create an Org, Job, Candidate and Application to verify ListApplications
 	orgID := uuid.New()
@@ -119,6 +121,20 @@ func TestCandidatePortal_OTPAndApplicationLookupFlow(t *testing.T) {
 	require.Equal(t, "Senior Go Architect", listResult.Data[0].JobTitle)
 	require.Equal(t, "Acme Tech", listResult.Data[0].OrgName)
 	require.Equal(t, 88.5, listResult.Data[0].CVScore)
+
+	// 5b. Query candidate applications with HttpOnly Cookie (cookie-based auth)
+	cookieReq := httptest.NewRequest("GET", "/api/v1/candidate/portal/applications", nil)
+	cookieReq.Header.Set("Cookie", "intivai_candidate_jwt="+vResult.Data.Token)
+	cookieResp, err := app.Test(cookieReq, -1)
+	require.NoError(t, err)
+	require.Equal(t, 200, cookieResp.StatusCode)
+
+	// 6. Test logout clears candidate cookie
+	logoutReq := httptest.NewRequest("POST", "/api/v1/public/candidate/auth/logout", nil)
+	logoutResp, err := app.Test(logoutReq, -1)
+	require.NoError(t, err)
+	require.Equal(t, 200, logoutResp.StatusCode)
+	require.Contains(t, logoutResp.Header.Get("Set-Cookie"), "intivai_candidate_jwt=;")
 }
 
 func TestCandidatePortal_OTPLockoutAndReplay(t *testing.T) {

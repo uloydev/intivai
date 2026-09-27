@@ -1220,6 +1220,43 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
 
+  /api/v1/public/candidate/auth/logout:
+    post:
+      tags: [Candidate Portal]
+      summary: Clear candidate session cookie
+      security: []
+      responses:
+        "200":
+          description: Logged out successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+
+  /api/v1/public/invite-preview:
+    get:
+      tags: [Candidate Portal]
+      summary: Pre-flight preview of candidate invitation without exposing PII
+      security: []
+      parameters:
+        - name: token
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Invitation preview metadata
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InvitePreview"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
   /api/v1/public/candidate-review/{token}:
     get:
       tags: [Candidate Portal]
@@ -1367,6 +1404,119 @@ paths:
             text/plain:
               schema:
                 type: string
+
+  /api/v1/billing/summary:
+    get:
+      tags: [Billing]
+      summary: Get subscription and interview quota summary
+      responses:
+        "200":
+          description: Billing quota summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BillingSummary"
+
+  /api/v1/billing/checkout:
+    post:
+      tags: [Billing]
+      summary: Create checkout session for subscription upgrade or credits
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [plan, success_url, cancel_url]
+              properties:
+                plan:
+                  type: string
+                  enum: [free, starter, pro, enterprise]
+                credits:
+                  type: integer
+                success_url:
+                  type: string
+                cancel_url:
+                  type: string
+      responses:
+        "200":
+          description: Checkout session created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                  url:
+                    type: string
+
+  /api/v1/billing/portal:
+    post:
+      tags: [Billing]
+      summary: Create customer billing portal session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [return_url]
+              properties:
+                return_url:
+                  type: string
+      responses:
+        "200":
+          description: Customer portal session URL
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  url:
+                    type: string
+
+  /api/v1/notifications:
+    get:
+      tags: [Notifications]
+      summary: List recruiter notifications
+      responses:
+        "200":
+          description: List of notifications and unread count
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  notifications:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/RecruiterNotification"
+                  unread_count:
+                    type: integer
+
+  /api/v1/notifications/{id}/read:
+    patch:
+      tags: [Notifications]
+      summary: Mark notification as read
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Notification marked read
+
+  /api/v1/notifications/read-all:
+    post:
+      tags: [Notifications]
+      summary: Mark all recruiter notifications as read
+      responses:
+        "200":
+          description: All notifications marked read
 
 # ── Components ──────────────────────────────────────────────────────────
 components:
@@ -1683,10 +1833,59 @@ components:
           type: string
         recruiter_notes:
           type: string
+        scoring_weights:
+          type: object
+          additionalProperties:
+            type: number
         created_at:
           type: string
           format: date-time
         updated_at:
+          type: string
+          format: date-time
+
+    BillingSummary:
+      type: object
+      properties:
+        plan:
+          type: string
+        plan_status:
+          type: string
+        monthly_limit:
+          type: integer
+        monthly_usage:
+          type: integer
+        interview_credits:
+          type: integer
+        current_period_start:
+          type: string
+          format: date-time
+        current_period_end:
+          type: string
+          format: date-time
+        has_customer_account:
+          type: boolean
+
+    RecruiterNotification:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        org_id:
+          type: string
+          format: uuid
+        event_type:
+          type: string
+        title:
+          type: string
+        message:
+          type: string
+        action_url:
+          type: string
+        read:
+          type: boolean
+        created_at:
           type: string
           format: date-time
 
@@ -1704,6 +1903,22 @@ components:
         created_at:
           type: string
           format: date-time
+
+    InvitePreview:
+      type: object
+      properties:
+        valid:
+          type: boolean
+        status:
+          type: string
+        org_name:
+          type: string
+        job_title:
+          type: string
+        question_count:
+          type: integer
+        estimated_duration_min:
+          type: integer
 
     InterviewSummary:
       type: object

@@ -36,7 +36,13 @@ func TestPublicRoutesNotAffectedByLaterAuthGroup(t *testing.T) {
 	}
 	for _, c := range cases {
 		req := httptest.NewRequest(c.method, c.path, nil)
-		resp, _ := app.Test(req, -1)
+		resp, err := app.Test(req, -1)
+		if err != nil {
+			t.Fatalf("%s %s request failed: %v", c.method, c.path, err)
+		}
+		if resp != nil && resp.Body != nil {
+			_ = resp.Body.Close()
+		}
 		if resp.StatusCode != 200 {
 			t.Fatalf("%s %s got %d — auth middleware leaked onto public route", c.method, c.path, resp.StatusCode)
 		}

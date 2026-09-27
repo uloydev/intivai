@@ -2,13 +2,11 @@ import { useState, useRef, useEffect } from "react"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import {
   Brain,
-  Sparkle,
   FloppyDisk,
   UploadSimple,
   FileText,
   CheckCircle,
   ShieldCheck,
-  Lightning,
   TreeStructure,
   Trash,
 } from "@phosphor-icons/react"
@@ -190,7 +188,7 @@ export function CompanyContextPage() {
               : "border-transparent text-muted-foreground hover:text-foreground"
           }`}
         >
-          <Sparkle className="h-4 w-4" />
+          <Brain className="h-4 w-4" />
           <span>AI Persona & Prompt Rails</span>
         </button>
         <button
@@ -213,11 +211,11 @@ export function CompanyContextPage() {
       {activeTab === "prompt" && (
         <div className="grid gap-6 lg:grid-cols-3">
           {/* Main Prompt Editor */}
-          <Card className="glass border-border/60 lg:col-span-2 shadow-sm">
+          <Card className="border-border lg:col-span-2 shadow-sm">
             <CardHeader className="flex flex-row items-center justify-between pb-3">
               <div>
                 <CardTitle className="font-display text-base font-bold flex items-center gap-2">
-                  <Sparkle className="h-4 w-4 text-primary" weight="fill" />
+                  <Brain className="h-4 w-4 text-primary" weight="fill" />
                   Tenant System Prompt
                 </CardTitle>
                 <CardDescription className="text-xs mt-0.5">
@@ -259,8 +257,7 @@ export function CompanyContextPage() {
               <Button
                 onClick={() => savePrompt.mutate()}
                 disabled={savePrompt.isPending || !promptText.trim()}
-                variant="gradient"
-                className="w-full gap-2 text-xs font-bold shadow-md shadow-primary/20"
+                className="w-full gap-2 text-xs font-bold"
               >
                 <FloppyDisk className="h-4 w-4" weight="bold" />
                 {savePrompt.isPending ? "Saving Rails..." : "Save AI System Prompt"}
@@ -270,10 +267,10 @@ export function CompanyContextPage() {
 
           {/* Persona Presets */}
           <div className="space-y-4">
-            <Card className="glass border-border/60 shadow-sm">
+            <Card className="border-border shadow-sm">
               <CardHeader className="pb-3">
                 <CardTitle className="font-display text-sm font-bold flex items-center gap-1.5">
-                  <Lightning className="h-4 w-4 text-amber-600 dark:text-amber-400" weight="fill" />
+                  <Brain className="h-4 w-4 text-primary" weight="fill" />
                   Interviewer Persona Presets
                 </CardTitle>
                 <CardDescription className="text-xs">
@@ -311,7 +308,7 @@ export function CompanyContextPage() {
       {activeTab === "knowledge" && (
         <div className="grid gap-6 lg:grid-cols-3">
           {/* Upload New Context */}
-          <Card className="glass border-border/60 shadow-sm">
+          <Card className="border-border shadow-sm">
             <CardHeader>
               <CardTitle className="font-display text-base font-bold flex items-center gap-2">
                 <UploadSimple className="h-4 w-4 text-primary" weight="bold" />
@@ -349,7 +346,6 @@ export function CompanyContextPage() {
               <Button
                 onClick={() => uploadContext.mutate()}
                 disabled={uploadContext.isPending || (!contextText.trim() && !selectedFile)}
-                variant="gradient"
                 className="w-full gap-2 text-xs font-bold"
               >
                 <Brain className="h-4 w-4" weight="fill" />
@@ -359,7 +355,7 @@ export function CompanyContextPage() {
           </Card>
 
           {/* Active Context Versions */}
-          <Card className="glass border-border/60 lg:col-span-2 shadow-sm">
+          <Card className="border-border lg:col-span-2 shadow-sm">
             <CardHeader>
               <CardTitle className="font-display text-base font-bold flex items-center gap-2">
                 <TreeStructure className="h-4 w-4 text-primary" weight="bold" />
@@ -394,13 +390,13 @@ export function CompanyContextPage() {
                         <div>
                           <div className="flex items-center gap-2">
                             <span className="font-display text-xs font-bold text-foreground">
-                              Company Context Version {ctx.version}
+                              Company Context Version <span className="font-mono tabular-nums">{ctx.version}</span>
                             </span>
-                            <Badge variant="outline" className="text-xs uppercase">
+                            <Badge variant="outline" className="text-[11px] font-mono uppercase">
                               {ctx.type}
                             </Badge>
                           </div>
-                          <p className="font-mono text-xs text-muted-foreground truncate max-w-md mt-0.5">
+                          <p className="font-mono text-[11px] text-muted-foreground truncate max-w-md mt-0.5">
                             Hash: {ctx.content_hash}
                           </p>
                         </div>

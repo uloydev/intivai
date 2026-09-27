@@ -39,23 +39,12 @@ test.describe("Coding Sandbox & Live Pair-Programming Terminal E2E", () => {
     await expect(page.getByRole("button", { name: /Run & Test/i })).not.toBeVisible()
   })
 
-  test("2. Voice Interview Room allows toggling Code Sandbox split view", async ({ page }) => {
+  test("2. Voice Interview Room displays disabled state without ticket", async ({ page }) => {
     await page.goto("/voice/00000000-0000-0000-0000-000000000001")
 
-    // Heading and Voice Evaluator card
-    await expect(page.getByText(/Intivai Voice Evaluator/i)).toBeVisible()
-
-    // Toggle Code Sandbox
-    const sandboxToggle = page.getByRole("button", { name: /Code Sandbox/i })
-    await expect(sandboxToggle).toBeVisible()
-    await sandboxToggle.click()
-
-    // Verify split view rendered alongside voice orb
-    await expect(page.getByRole("button", { name: /Run & Test/i })).toBeVisible()
-    await expect(page.getByText(/Terminal Console/i)).toBeVisible()
-
-    // Close Sandbox
-    await page.getByRole("button", { name: /Hide Code Sandbox/i }).click()
-    await expect(page.getByRole("button", { name: /Run & Test/i })).not.toBeVisible()
+    // Voice session unavailable guidance (ADR-0006/G4)
+    await expect(page.getByText(/Voice Session Unavailable/i)).toBeVisible()
+    await expect(page.getByText(/Recruiter access required/i)).toBeVisible()
+    await expect(page.getByText(/Back to Interviews/i)).toBeVisible()
   })
 })

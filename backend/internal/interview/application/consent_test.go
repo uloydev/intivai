@@ -8,9 +8,9 @@ import (
 // Consent gate: StartInterview refuses without consent; GiveConsent is
 // idempotent and token-bound; the chat then starts normally.
 func TestConsentGate(t *testing.T) {
-	s := seedInterviewApp(t, "active")
+	s := seedInterviewApp(t)
 	// Build the interview WITHOUT the seed helper's consent step.
-	created, err := s.svc.CreateInterview(context.Background(), iamActor(s.orgID.String(), "admin"), CreateInterviewCommand{ApplicationID: s.appID, QuestionCount: 3})
+	created, err := s.svc.CreateInterview(context.Background(), iamActor(s.orgID.String()), CreateInterviewCommand{ApplicationID: s.appID, QuestionCount: 3})
 	if err != nil {
 		t.Fatal(err)
 	}

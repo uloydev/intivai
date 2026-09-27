@@ -43,20 +43,21 @@ type CreateScreeningCommand struct {
 }
 
 type ApplicationResult struct {
-	ID              uuid.UUID       `json:"id"`
-	CandidateID     uuid.UUID       `json:"candidate_id"`
-	CandidateName   string          `json:"candidate_name"`
-	CandidateEmail  string          `json:"candidate_email"`
-	CVStatus        string          `json:"cv_status"`
-	JobID           uuid.UUID       `json:"job_id"`
-	JobTitle        string          `json:"job_title"`
-	Status          string          `json:"status"`
-	CVScore         *float64        `json:"cv_score,omitempty"`
-	PassedScreening *bool           `json:"passed_screening,omitempty"`
-	Stage           *string         `json:"stage,omitempty"`
-	RecruiterNotes  *string         `json:"recruiter_notes,omitempty"`
-	ScoreBreakdown  json.RawMessage `json:"score_breakdown,omitempty"`
-	InterviewScore  *float64        `json:"interview_score,omitempty"`
+	ID              uuid.UUID          `json:"id"`
+	CandidateID     uuid.UUID          `json:"candidate_id"`
+	CandidateName   string             `json:"candidate_name"`
+	CandidateEmail  string             `json:"candidate_email"`
+	CVStatus        string             `json:"cv_status"`
+	JobID           uuid.UUID          `json:"job_id"`
+	JobTitle        string             `json:"job_title"`
+	Status          string             `json:"status"`
+	CVScore         *float64           `json:"cv_score,omitempty"`
+	PassedScreening *bool              `json:"passed_screening,omitempty"`
+	Stage           *string            `json:"stage,omitempty"`
+	RecruiterNotes  *string            `json:"recruiter_notes,omitempty"`
+	ScoreBreakdown  json.RawMessage    `json:"score_breakdown,omitempty"`
+	ScoringWeights  map[string]float64 `json:"scoring_weights,omitempty"`
+	InterviewScore  *float64           `json:"interview_score,omitempty"`
 }
 
 func (s *ScreeningService) Create(ctx context.Context, actor application.AuthContext, cmd CreateScreeningCommand) (*ApplicationResult, error) {
@@ -178,6 +179,12 @@ func (s *ScreeningService) UpdateDecision(ctx context.Context, actor application
 			RecruiterNotes:  app.RecruiterNotes,
 			ScoreBreakdown:  app.ScoreBreakdown,
 		}
+		if s.jobRepo != nil {
+			if job, err := s.jobRepo.GetByID(tctx, app.JobID); err == nil && job != nil {
+				out.JobTitle = job.Title
+				out.ScoringWeights = job.ScoringWeights
+			}
+		}
 		return nil
 	})
 	if err != nil {
@@ -225,15 +232,20 @@ func (s *ScreeningService) decisionDetails(ctx context.Context, orgID uuid.UUID,
 		if err != nil {
 			return err
 		}
-		cand, err := s.candRepo.GetByID(tctx, app.CandidateID)
-		if err != nil {
-			return err
+		if s.candRepo != nil {
+			cand, err := s.candRepo.GetByID(tctx, app.CandidateID)
+			if err != nil {
+				return err
+			}
+			email, name = cand.Email, cand.Name
 		}
-		job, err := s.jobRepo.GetByID(tctx, app.JobID)
-		if err != nil {
-			return err
+		if s.jobRepo != nil {
+			job, err := s.jobRepo.GetByID(tctx, app.JobID)
+			if err != nil {
+				return err
+			}
+			jobTitle = job.Title
 		}
-		email, name, jobTitle = cand.Email, cand.Name, job.Title
 		return nil
 	})
 	return email, name, jobTitle, err
@@ -252,13 +264,19 @@ func (s *ScreeningService) List(ctx context.Context, actor application.AuthConte
 		}
 		out = make([]*ApplicationResult, 0, len(apps))
 		// Batch lookups (2 queries + maps) instead of 2×N GetByID round-trips.
-		cands, err := s.candRepo.ListByIDs(tctx, actor.OrgID, appCandidateIDs(apps))
-		if err != nil {
-			return err
+		var cands map[uuid.UUID]*cvdomain.Candidate
+		if s.candRepo != nil {
+			cands, err = s.candRepo.ListByIDs(tctx, actor.OrgID, appCandidateIDs(apps))
+			if err != nil {
+				return err
+			}
 		}
-		jobs, err := s.jobRepo.ListByIDs(tctx, actor.OrgID, appJobIDs(apps))
-		if err != nil {
-			return err
+		var jobs map[uuid.UUID]*jobdomain.Job
+		if s.jobRepo != nil {
+			jobs, err = s.jobRepo.ListByIDs(tctx, actor.OrgID, appJobIDs(apps))
+			if err != nil {
+				return err
+			}
 		}
 		for _, a := range apps {
 			r := &ApplicationResult{
@@ -275,6 +293,7 @@ func (s *ScreeningService) List(ctx context.Context, actor application.AuthConte
 			}
 			if j, ok := jobs[a.JobID]; ok {
 				r.JobTitle = j.Title
+				r.ScoringWeights = j.ScoringWeights
 			}
 			out = append(out, r)
 		}

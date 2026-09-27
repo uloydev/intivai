@@ -152,6 +152,7 @@ func TestPublicApplyDoesNotReturnPortalToken(t *testing.T) {
 	req := applyMultipart(t, jobID, "Portal Candidate", email)
 	resp, err := app.Test(req, -1)
 	require.NoError(t, err)
+	defer resp.Body.Close()
 	require.Equal(t, 201, resp.StatusCode)
 
 	bodyBytes, err := io.ReadAll(resp.Body)
@@ -193,6 +194,7 @@ func TestPublicApplyDoesNotReturnPortalToken(t *testing.T) {
 	vReq.Header.Set("Content-Type", "application/json")
 	vResp, err := app.Test(vReq, -1)
 	require.NoError(t, err)
+	defer vResp.Body.Close()
 	require.Equal(t, 200, vResp.StatusCode)
 
 	var verifyResult struct {
@@ -212,6 +214,7 @@ func TestPublicApplyDoesNotReturnPortalToken(t *testing.T) {
 	listReq.Header.Set("Authorization", "Bearer "+verifyResult.Data.Token)
 	listResp, err := app.Test(listReq, -1)
 	require.NoError(t, err)
+	defer listResp.Body.Close()
 	require.Equal(t, 200, listResp.StatusCode)
 
 	var listResult struct {
@@ -270,6 +273,7 @@ func TestPublicApplyEnqueuesPortalAccessEmail(t *testing.T) {
 
 	resp, err := app.Test(applyMultipart(t, jobID, "Mail Candidate", email), -1)
 	require.NoError(t, err)
+	defer resp.Body.Close()
 	require.Equal(t, 201, resp.StatusCode)
 	bodyBytes, err := io.ReadAll(resp.Body)
 	require.NoError(t, err)
@@ -344,19 +348,26 @@ func TestPublicApplyPerEmailDailyCap429(t *testing.T) {
 	for i := 0; i < jobapi.MaxApplyPerEmailPerDay; i++ {
 		resp, err := app.Test(applyMultipart(t, jobIDs[i], "Cap Candidate", email), -1)
 		require.NoError(t, err)
-		_, _ = io.Copy(io.Discard, resp.Body)
+		if resp != nil && resp.Body != nil {
+			_, _ = io.Copy(io.Discard, resp.Body)
+			_ = resp.Body.Close()
+		}
 		require.Equalf(t, 201, resp.StatusCode, "apply #%d must succeed", i+1)
 	}
 
 	capped, err := app.Test(applyMultipart(t, jobIDs[jobapi.MaxApplyPerEmailPerDay], "Cap Candidate", email), -1)
 	require.NoError(t, err)
+	defer capped.Body.Close()
 	cappedBody, _ := io.ReadAll(capped.Body)
 	require.Equalf(t, 429, capped.StatusCode, "body: %s", string(cappedBody))
 
 	// A different email on the same org/job is unaffected (cap is per-email).
 	fresh, err := app.Test(applyMultipart(t, jobIDs[jobapi.MaxApplyPerEmailPerDay], "Fresh Candidate", freshEmail), -1)
 	require.NoError(t, err)
-	_, _ = io.Copy(io.Discard, fresh.Body)
+	if fresh != nil && fresh.Body != nil {
+		_, _ = io.Copy(io.Discard, fresh.Body)
+		_ = fresh.Body.Close()
+	}
 	require.Equal(t, 201, fresh.StatusCode)
 }
 
@@ -411,6 +422,9 @@ func TestPublicApplyEnqueueFailureKeepsReapplyExistingCVObject(t *testing.T) {
 
 	resp, err := appA.Test(applyMultipart(t, jobA, "D4 Candidate", email), -1)
 	require.NoError(t, err)
+	if resp != nil && resp.Body != nil {
+		defer resp.Body.Close()
+	}
 	require.Equal(t, 201, resp.StatusCode)
 
 	var candID uuid.UUID
@@ -443,6 +457,9 @@ func TestPublicApplyEnqueueFailureKeepsReapplyExistingCVObject(t *testing.T) {
 
 	resp2, err := appB.Test(applyMultipart(t, jobB, "D4 Candidate", email), -1)
 	require.NoError(t, err)
+	if resp2 != nil && resp2.Body != nil {
+		defer resp2.Body.Close()
+	}
 	require.NotEqual(t, 201, resp2.StatusCode,
 		"enqueue failure must not report success: body=%s", resp2.Body)
 
@@ -511,6 +528,9 @@ func TestPublicApplyEnqueueFailureNewCandidateRollsBack(t *testing.T) {
 
 	resp, err := app.Test(applyMultipart(t, jobID, "D4 New Candidate", email), -1)
 	require.NoError(t, err)
+	if resp != nil && resp.Body != nil {
+		defer resp.Body.Close()
+	}
 	require.NotEqual(t, 201, resp.StatusCode, "enqueue failure must not report success")
 
 	var candID uuid.UUID

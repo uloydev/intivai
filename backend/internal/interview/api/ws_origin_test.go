@@ -36,14 +36,20 @@ func TestWSServerRejectsDisallowedOrigin(t *testing.T) {
 	dialer := websocket.Dialer{HandshakeTimeout: 3 * time.Second}
 
 	// Allowed origin passes.
-	conn2, _, err := dialer.Dial("ws://"+ln.Addr().String()+"/ws", map[string][]string{"Origin": {"http://allowed.example"}})
+	conn2, resp2, err := dialer.Dial("ws://"+ln.Addr().String()+"/ws", map[string][]string{"Origin": {"http://allowed.example"}})
+	if resp2 != nil && resp2.Body != nil {
+		defer resp2.Body.Close()
+	}
 	if err != nil {
 		t.Fatalf("allowed origin rejected: %v", err)
 	}
 	_ = conn2.Close()
 
 	// Disallowed origin fails the handshake.
-	_, _, err = dialer.Dial("ws://"+ln.Addr().String()+"/ws", map[string][]string{"Origin": {"http://evil.example"}})
+	_, resp3, err := dialer.Dial("ws://"+ln.Addr().String()+"/ws", map[string][]string{"Origin": {"http://evil.example"}})
+	if resp3 != nil && resp3.Body != nil {
+		defer resp3.Body.Close()
+	}
 	if err == nil {
 		t.Fatal("disallowed origin accepted")
 	}

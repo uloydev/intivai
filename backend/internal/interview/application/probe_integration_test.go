@@ -64,7 +64,7 @@ func TestProbeFollowUpOnShallowAnswer(t *testing.T) {
 		scrrepo.NewPostgresApplicationRepo(pool), cvrepo.NewPostgresCandidateRepo(pool), jobrepo.NewPostgresJobRepo(pool),
 		jobrepo.NewPostgresCandidateContextRepo(pool),
 		ctxrepo.NewPostgresContextRepo(pool), minio, auth.NewJWTProvider("test-secret"), ivdomain.SystemClock(), nil, nil, zerolog.Nop())
-	actor := iamActor(orgID, "admin")
+	actor := iamActor(orgID)
 
 	res, err := svc.CreateInterview(ctx, actor, CreateInterviewCommand{ApplicationID: appID, QuestionCount: 2})
 	if err != nil {

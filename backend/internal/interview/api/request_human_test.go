@@ -108,6 +108,9 @@ func TestRequestHuman_Endpoint(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		if resp != nil && resp.Body != nil {
+			defer resp.Body.Close()
+		}
 		if resp.StatusCode != fiber.StatusBadRequest {
 			t.Fatalf("status = %d, want 400", resp.StatusCode)
 		}
@@ -121,6 +124,9 @@ func TestRequestHuman_Endpoint(t *testing.T) {
 		resp, err := app.Test(req, -1)
 		if err != nil {
 			t.Fatal(err)
+		}
+		if resp != nil && resp.Body != nil {
+			defer resp.Body.Close()
 		}
 		if resp.StatusCode != fiber.StatusBadRequest {
 			t.Fatalf("status = %d, want 400", resp.StatusCode)
@@ -136,6 +142,9 @@ func TestRequestHuman_Endpoint(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		if resp != nil && resp.Body != nil {
+			defer resp.Body.Close()
+		}
 		if resp.StatusCode != fiber.StatusBadRequest {
 			t.Fatalf("status = %d, want 400", resp.StatusCode)
 		}
@@ -149,6 +158,9 @@ func TestRequestHuman_Endpoint(t *testing.T) {
 		resp, err := app.Test(req, -1)
 		if err != nil {
 			t.Fatal(err)
+		}
+		if resp != nil && resp.Body != nil {
+			defer resp.Body.Close()
 		}
 		if resp.StatusCode != fiber.StatusOK {
 			t.Fatalf("status = %d, want 200", resp.StatusCode)
@@ -188,6 +200,9 @@ func TestRequestHuman_Endpoint(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		if resp != nil && resp.Body != nil {
+			defer resp.Body.Close()
+		}
 		if resp.StatusCode != fiber.StatusOK {
 			t.Fatalf("status = %d, want 200", resp.StatusCode)
 		}
@@ -224,6 +239,9 @@ func TestRequestHuman_Endpoint(t *testing.T) {
 		resp, err := app.Test(req, -1)
 		if err != nil {
 			t.Fatal(err)
+		}
+		if resp != nil && resp.Body != nil {
+			defer resp.Body.Close()
 		}
 		if resp.StatusCode != fiber.StatusBadRequest {
 			t.Fatalf("status = %d, want 400", resp.StatusCode)
