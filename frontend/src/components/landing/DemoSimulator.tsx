@@ -265,21 +265,21 @@ export function DemoSimulator() {
                 onClick={() => setSimAnswer(currentScenario.sampleGood)}
                 className="rounded-md border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 text-[11px] text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/20 font-medium"
               >
-                ✓ Strong Senior Answer
+                Strong Senior Answer
               </button>
               <button
                 type="button"
                 onClick={() => setSimAnswer(currentScenario.sampleBasic)}
                 className="rounded-md border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-[11px] text-amber-600 dark:text-amber-400 hover:bg-amber-500/20 font-medium"
               >
-                ⚠ Basic / Brief Answer
+                Basic / Brief Answer
               </button>
               <button
                 type="button"
                 onClick={() => setSimAnswer("I have worked with this before in some projects.")}
                 className="rounded-md border border-destructive/30 bg-destructive/10 px-2.5 py-1 text-[11px] text-destructive hover:bg-destructive/20 font-medium"
               >
-                ✕ Evasive Answer
+                Evasive Answer
               </button>
             </div>
           )}
@@ -339,7 +339,7 @@ export function DemoSimulator() {
                           : "border-destructive/30 text-destructive bg-destructive/5"
                       }`}
                     >
-                      Score: {evalResult.score} / 100
+                      Score: <span className="tabular-nums">{evalResult.score}</span> / 100
                     </Badge>
                   </div>
                 </div>

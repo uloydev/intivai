@@ -83,15 +83,20 @@ export function AppShell() {
     <div className="flex min-h-screen bg-background text-foreground">
       <CommandPalette />
       {/* Desktop Sidebar */}
-      <aside className="hidden w-64 shrink-0 flex-col border-r border-border bg-card md:flex z-10">
-        <div className="flex h-16 items-center justify-between px-6 border-b border-border/60">
+      <aside className="hidden w-64 shrink-0 flex-col border-r border-border bg-sidebar md:flex z-10">
+        <div className="flex h-16 items-center justify-between px-5 border-b border-border/70">
           <div className="flex items-center gap-2.5">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground font-bold font-display shadow-sm">
-              I
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground font-bold font-mono text-sm shadow-xs ring-1 ring-primary/30">
+              IV
             </div>
-            <span className="font-display text-lg font-bold tracking-tight text-foreground">
-              Intivai
-            </span>
+            <div className="flex flex-col">
+              <span className="font-display text-base font-bold tracking-tight text-foreground leading-none">
+                Intivai
+              </span>
+              <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground mt-0.5">
+                Evaluation Studio
+              </span>
+            </div>
           </div>
           <div className="flex items-center gap-1">
             <Button
@@ -103,7 +108,7 @@ export function AppShell() {
             >
               <Bell className="h-4 w-4" />
               {(notifData?.unread_count ?? 0) > 0 && (
-                <span className="absolute top-1.5 right-1.5 flex h-2 w-2 rounded-full bg-primary" />
+                <span className="absolute top-1.5 right-1.5 flex h-2 w-2 rounded-full bg-primary ring-2 ring-background" />
               )}
             </Button>
             <Button
@@ -119,14 +124,14 @@ export function AppShell() {
         </div>
 
         {/* User / Org pill — from the real session, not hardcoded */}
-        <div className="mx-4 my-3 rounded-xl border border-border/60 bg-muted/40 p-3">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold truncate">{orgLabel}</span>
-            <Badge variant="outline" className="text-[10px] py-0 px-1.5 border-border text-muted-foreground bg-background">
+        <div className="mx-3.5 my-3 rounded-lg border border-border/70 bg-muted/40 p-2.5">
+          <div className="flex items-center justify-between gap-1.5">
+            <span className="text-xs font-medium text-foreground truncate">{orgLabel}</span>
+            <span className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-mono font-semibold uppercase tracking-wider border border-border bg-background text-muted-foreground">
               {roleLabel}
-            </Badge>
+            </span>
           </div>
-          <p className="text-[11px] text-muted-foreground truncate mt-0.5">{email}</p>
+          <p className="text-[11px] font-mono text-muted-foreground truncate mt-1">{email}</p>
         </div>
 
         {/* Navigation Items */}
@@ -138,21 +143,21 @@ export function AppShell() {
                 key={item.to}
                 to={item.to}
                 className={cn(
-                  "flex items-center gap-3 rounded-xl px-3 py-2.5 text-xs font-semibold transition-all active:scale-[0.98]",
+                  "flex items-center gap-3 rounded-lg px-3 py-2 text-xs transition-all active:scale-[0.99]",
                   active
-                    ? "bg-primary text-primary-foreground shadow-sm"
-                    : "text-muted-foreground hover:bg-muted/60 hover:text-foreground"
+                    ? "bg-primary text-primary-foreground font-semibold shadow-xs"
+                    : "text-muted-foreground hover:bg-muted/60 hover:text-foreground font-medium"
                 )}
               >
-                <item.icon className="h-4 w-4" weight={active ? "fill" : "bold"} />
-                {item.label}
+                <item.icon className="h-4 w-4 shrink-0" weight={active ? "fill" : "bold"} />
+                <span>{item.label}</span>
               </NavLink>
             )
           })}
         </nav>
 
         {/* Sign Out */}
-        <div className="p-3 border-t border-border/60">
+        <div className="p-3 border-t border-border/70">
           <Button
             variant="ghost"
             size="sm"

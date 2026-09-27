@@ -178,7 +178,7 @@ export function Candidate360Drawer({
               <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground mt-1">
                 <span className="flex items-center gap-1">
                   <EnvelopeSimple className="h-3.5 w-3.5" />
-                  {application.candidate_email || "No email provided"}
+                  {application.candidate_email || "-"}
                 </span>
                 <span>•</span>
                 <span className="flex items-center gap-1 font-medium text-foreground">
@@ -263,7 +263,7 @@ export function Candidate360Drawer({
                     AI Resume Screening Match
                   </p>
                   <div className="flex items-center gap-2 mt-1">
-                    <span className="font-display text-3xl font-bold text-foreground">
+                    <span className="font-mono text-3xl font-bold text-foreground tabular-nums">
                       {application.cv_score != null ? `${application.cv_score}%` : "Pending"}
                     </span>
                     {application.passed_screening ? (
@@ -326,7 +326,7 @@ export function Candidate360Drawer({
                     {weightedTotal != null && (
                       <div className="flex items-center justify-between rounded-lg border border-border/50 bg-background/60 px-3 py-2">
                         <span className="text-xs font-medium text-muted-foreground">Weighted Overall</span>
-                        <span className="font-display text-base font-bold text-foreground">{weightedTotal}%</span>
+                        <span className="font-mono text-base font-bold text-foreground tabular-nums">{weightedTotal}%</span>
                       </div>
                     )}
                     <div className="grid grid-cols-2 gap-2">
@@ -383,7 +383,7 @@ export function Candidate360Drawer({
                     <div className="flex items-center justify-between border-b border-border/50 pb-3">
                       <div>
                         <p className="text-xs text-muted-foreground">Overall Assessment Score</p>
-                        <p className="font-display text-3xl font-bold text-foreground">
+                        <p className="font-mono text-3xl font-bold text-foreground tabular-nums">
                           {application.interview_score} / 100
                         </p>
                       </div>

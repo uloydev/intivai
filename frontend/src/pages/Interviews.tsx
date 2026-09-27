@@ -257,7 +257,7 @@ export function InterviewsPage() {
                       </TableCell>
                       <TableCell>
                         {iv.evaluation ? (
-                          <span className="font-display font-bold text-sm text-foreground">
+                          <span className="font-mono font-bold text-sm text-foreground tabular-nums">
                             {iv.evaluation.overall_score} / 100
                           </span>
                         ) : (
@@ -324,7 +324,7 @@ export function InterviewsPage() {
                       <TableCell className="font-medium">{app.candidate_name}</TableCell>
                       <TableCell className="text-xs text-muted-foreground">{app.job_title}</TableCell>
                       <TableCell>
-                        <Badge className="bg-success/10 text-success border-success/20 font-bold">
+                        <Badge className="bg-success/10 text-success border-success/20 font-mono font-bold">
                           {app.cv_score} / 100
                         </Badge>
                       </TableCell>

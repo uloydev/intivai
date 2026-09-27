@@ -97,7 +97,7 @@ export function ProctoringCard({ summary, events }: ProctoringCardProps) {
               <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider block">
                 Tab Switches
               </span>
-              <span className="font-display text-lg font-bold text-foreground mt-0.5 block">
+              <span className="font-mono text-lg font-bold text-foreground mt-0.5 block tabular-nums">
                 {resolved.tab_switch_count}
               </span>
             </div>
@@ -105,7 +105,7 @@ export function ProctoringCard({ summary, events }: ProctoringCardProps) {
               <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider block">
                 Time Out of Focus
               </span>
-              <span className="font-display text-lg font-bold text-foreground mt-0.5 block">
+              <span className="font-mono text-lg font-bold text-foreground mt-0.5 block tabular-nums">
                 {resolved.total_away_duration_sec}s
               </span>
             </div>
@@ -113,7 +113,7 @@ export function ProctoringCard({ summary, events }: ProctoringCardProps) {
               <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider block">
                 Clipboard Pastes
               </span>
-              <span className="font-display text-lg font-bold text-foreground mt-0.5 block">
+              <span className="font-mono text-lg font-bold text-foreground mt-0.5 block tabular-nums">
                 {resolved.paste_event_count}{" "}
                 <span className="text-xs font-normal text-muted-foreground">
                   ({resolved.suspicious_paste_count} large)
@@ -124,7 +124,7 @@ export function ProctoringCard({ summary, events }: ProctoringCardProps) {
               <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider block">
                 Audio Anomalies
               </span>
-              <span className="font-display text-lg font-bold text-foreground mt-0.5 block">
+              <span className="font-mono text-lg font-bold text-foreground mt-0.5 block tabular-nums">
                 {resolved.audio_anomaly_count}
               </span>
             </div>

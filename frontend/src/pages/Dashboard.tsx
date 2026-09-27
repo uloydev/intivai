@@ -9,7 +9,6 @@ import {
   Plus,
   ArrowRight,
   MicrophoneStage,
-  Lightning,
 } from "@phosphor-icons/react"
 import { PipelineFunnel } from "@/components/recruiter/PipelineFunnel"
 import { api } from "@/lib/api"
@@ -116,8 +115,8 @@ export function DashboardPage() {
                 <Skeleton className="h-8 w-16" />
               ) : (
                 <div className="flex items-baseline justify-between">
-                  <span className="font-display text-3xl font-bold tabular-nums">{activeJobs.length}</span>
-                  <span className="text-xs font-medium text-muted-foreground">{jobs?.length ?? 0} total</span>
+                  <span className="font-mono text-3xl font-bold tabular-nums">{activeJobs.length}</span>
+                  <span className="text-xs font-mono font-medium text-muted-foreground">{jobs?.length ?? 0} total</span>
                 </div>
               )}
               <p className="mt-1 text-xs text-muted-foreground">Positions actively accepting applicants</p>
@@ -139,7 +138,7 @@ export function DashboardPage() {
                 <Skeleton className="h-8 w-16" />
               ) : (
                 <div className="flex items-baseline justify-between">
-                  <span className="font-display text-3xl font-bold tabular-nums">{totalCVs}</span>
+                  <span className="font-mono text-3xl font-bold tabular-nums">{totalCVs}</span>
                   <Badge variant="info" size="sm">OCR + Parsed</Badge>
                 </div>
               )}
@@ -162,11 +161,11 @@ export function DashboardPage() {
                 <Skeleton className="h-8 w-16" />
               ) : (
                 <div className="flex items-baseline justify-between">
-                  <span className="font-display text-3xl font-bold text-success tabular-nums">
+                  <span className="font-mono text-3xl font-bold text-success tabular-nums">
                     {passRate !== null ? `${passRate}%` : "N/A"}
                   </span>
                   {passRate !== null && (
-                    <span className="text-xs font-medium text-muted-foreground">{passedApps.length}/{totalApps} passed</span>
+                    <span className="text-xs font-mono font-medium text-muted-foreground">{passedApps.length}/{totalApps} passed</span>
                   )}
                 </div>
               )}
@@ -189,7 +188,7 @@ export function DashboardPage() {
                 <Skeleton className="h-8 w-16" />
               ) : (
                 <div className="flex items-baseline justify-between">
-                  <span className="font-display text-3xl font-bold tabular-nums">{interviews?.length ?? 0}</span>
+                  <span className="font-mono text-3xl font-bold tabular-nums">{interviews?.length ?? 0}</span>
                   <Badge variant="info" size="sm">{completedInterviews.length} completed</Badge>
                 </div>
               )}
@@ -258,7 +257,7 @@ export function DashboardPage() {
                         </div>
                         <Button asChild variant="outline" size="sm" className="shrink-0 h-8 text-xs gap-1">
                           <Link to={`/candidates?job_id=${job.id}`}>
-                            Applicants ({jobApps.length}) →
+                            Applicants ({jobApps.length})
                           </Link>
                         </Button>
                       </div>
@@ -278,7 +277,7 @@ export function DashboardPage() {
               </div>
               <Button asChild variant="ghost" size="sm" className="gap-1 text-primary">
                 <Link to="/candidates">
-                  View all <ArrowRight className="h-3.5 w-3.5" />
+                  View all
                 </Link>
               </Button>
             </CardHeader>
@@ -323,7 +322,7 @@ export function DashboardPage() {
                         )}
                         {app.passed_screening && (
                           <Button asChild size="sm" variant="ghost" className="h-7 text-xs text-primary">
-                            <Link to={`/interviews?invite=${encodeURIComponent(app.candidate_id)}`}>Invite →</Link>
+                            <Link to={`/interviews?invite=${encodeURIComponent(app.candidate_id)}`}>Invite</Link>
                           </Button>
                         )}
                       </div>
@@ -341,7 +340,7 @@ export function DashboardPage() {
           <Card className="border-border/80 shadow-sm">
             <CardHeader>
               <CardTitle className="font-display text-lg flex items-center gap-2">
-                <Lightning className="h-5 w-5 text-primary" weight="fill" /> Quick Interview Modes
+                <ChatCircleText className="h-5 w-5 text-primary" weight="bold" /> Quick Interview Modes
               </CardTitle>
               <CardDescription>Candidate test portals & live simulators</CardDescription>
             </CardHeader>

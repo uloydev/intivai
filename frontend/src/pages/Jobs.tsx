@@ -328,18 +328,18 @@ export function JobsPage() {
                       <Badge
                         className={
                           job.status === "active"
-                            ? "bg-success/10 text-success border-success/20"
-                            : "bg-muted text-muted-foreground"
+                            ? "bg-success/10 text-success border-success/20 font-mono text-[11px] uppercase"
+                            : "bg-muted text-muted-foreground font-mono text-[11px] uppercase"
                         }
                       >
                         {job.status}
                       </Badge>
                       {job.is_published ? (
-                        <Badge variant="outline" title="Published = visible on the careers board; Active = accepting applicants" className="text-xs bg-info/10 text-info border-info/20">
+                        <Badge variant="outline" title="Published = visible on the careers board; Active = accepting applicants" className="text-[11px] font-mono bg-info/10 text-info border-info/20">
                           Published
                         </Badge>
                       ) : (
-                        <Badge variant="outline" title="Published = visible on the careers board; Active = accepting applicants" className="text-xs text-muted-foreground">
+                        <Badge variant="outline" title="Published = visible on the careers board; Active = accepting applicants" className="text-[11px] font-mono text-muted-foreground">
                           Internal
                         </Badge>
                       )}
@@ -349,10 +349,10 @@ export function JobsPage() {
                   {/* Relational Pipeline Badges */}
                   <div className="mt-3 flex items-center gap-2">
                     <span className="inline-flex items-center gap-1 rounded-md bg-secondary/80 px-2 py-0.5 text-[11px] font-medium text-foreground">
-                      <UsersThree className="h-3 w-3 text-muted-foreground" /> {applicantCount} Applied
+                      <UsersThree className="h-3 w-3 text-muted-foreground" /> <span className="font-mono tabular-nums">{applicantCount}</span> Applied
                     </span>
                     <span className="inline-flex items-center gap-1 rounded-md bg-success/10 border border-success/20 px-2 py-0.5 text-[11px] font-semibold text-success">
-                      <CheckCircle className="h-3 w-3" weight="fill" /> {passedApps.length} Qualified
+                      <CheckCircle className="h-3 w-3" weight="fill" /> <span className="font-mono tabular-nums">{passedApps.length}</span> Qualified
                     </span>
                   </div>
 
@@ -362,7 +362,7 @@ export function JobsPage() {
                     {(job.required_skills ?? []).map((s) => (
                       <span
                         key={s}
-                        className="rounded-lg bg-primary/5 border border-primary/15 px-2 py-0.5 text-[11px] font-medium text-foreground"
+                        className="rounded-md bg-muted/60 border border-border/60 px-2 py-0.5 text-[11px] font-mono font-medium text-muted-foreground"
                       >
                         {s}
                       </span>
@@ -373,7 +373,7 @@ export function JobsPage() {
                 <div className="mt-5 flex items-center justify-between border-t border-border/40 pt-3">
                   <Button asChild variant="ghost" size="sm" className="h-8 text-xs text-primary gap-1 font-semibold">
                     <Link to={`/candidates?job_id=${job.id}`}>
-                      View Applicants ({applicantCount}) →
+                      View Applicants ({applicantCount})
                     </Link>
                   </Button>
                   <div className="flex gap-2">

@@ -125,7 +125,7 @@ export function PipelineFunnel({
                   </div>
 
                   <div className="mt-3">
-                    <p className="font-display text-2xl font-bold tracking-tight text-foreground">
+                    <p className="font-mono text-2xl font-bold tracking-tight text-foreground tabular-nums">
                       {stage.count}
                     </p>
                     <p className="text-xs font-medium text-muted-foreground line-clamp-1 mt-0.5">

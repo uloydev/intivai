@@ -62,7 +62,7 @@ export function RoiCalculator() {
               <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider block">
                 Dev Hours Saved
               </span>
-              <span className="font-display text-2xl sm:text-3xl font-extrabold text-primary block mt-1">
+              <span className="font-mono text-2xl sm:text-3xl font-extrabold text-primary block mt-1 tabular-nums">
                 {hoursSavedPerMonth}h
               </span>
               <span className="text-[10px] text-muted-foreground">per month</span>
@@ -71,7 +71,7 @@ export function RoiCalculator() {
               <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider block">
                 Estimated Savings
               </span>
-              <span className="font-display text-2xl sm:text-3xl font-extrabold text-success block mt-1">
+              <span className="font-mono text-2xl sm:text-3xl font-extrabold text-success block mt-1 tabular-nums">
                 ${costSavingsPerMonth.toLocaleString()}
               </span>
               <span className="text-[10px] text-muted-foreground">in eng bandwidth</span>

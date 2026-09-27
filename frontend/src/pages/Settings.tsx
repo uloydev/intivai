@@ -48,7 +48,7 @@ export function SettingsPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Settings</h1>
+          <h1 className="font-display text-2xl font-bold tracking-tight text-foreground">Settings</h1>
           <p className="text-sm text-muted-foreground">
             Configure workspace-level options.
           </p>
@@ -84,6 +84,7 @@ export function SettingsPage() {
                 onChange={(e) => setInput(e.target.value)}
                 placeholder="10"
                 disabled={isLoading || updateMutation.isPending}
+                className="font-mono text-sm max-w-xs"
               />
               <p className="text-xs text-muted-foreground">
                 {isLoading

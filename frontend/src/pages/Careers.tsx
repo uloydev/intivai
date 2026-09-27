@@ -12,7 +12,6 @@ import {
   CurrencyDollar,
   Buildings,
   Check,
-  Star,
   Gift,
   Eye,
 } from "@phosphor-icons/react"
@@ -204,7 +203,7 @@ export function CareersPage() {
             to="/candidate/portal"
             className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-medium bg-muted border border-border text-foreground hover:bg-muted/80 transition-colors"
           >
-            <span>Already applied? Track your status in the Candidate Portal</span> →
+            <span>Already applied? Track your status in the Candidate Portal</span>
           </Link>
         </div>
       </div>
@@ -232,9 +231,9 @@ export function CareersPage() {
             type="button"
             onClick={() => setSelectedSkill("all")}
             className={cn(
-              "text-xs rounded-full px-3 py-1 font-medium transition-all",
+              "text-xs rounded-md px-2.5 py-1 font-medium transition-all",
               selectedSkill === "all"
-                ? "bg-primary text-primary-foreground shadow-sm"
+                ? "bg-primary text-primary-foreground shadow-xs font-semibold"
                 : "bg-muted hover:bg-muted/80 text-muted-foreground"
             )}
           >
@@ -246,9 +245,9 @@ export function CareersPage() {
               type="button"
               onClick={() => setSelectedSkill(skill)}
               className={cn(
-                "text-xs rounded-full px-3 py-1 font-medium transition-all",
+                "text-xs rounded-md px-2.5 py-1 font-medium transition-all",
                 selectedSkill === skill
-                  ? "bg-primary text-primary-foreground shadow-sm"
+                  ? "bg-primary text-primary-foreground shadow-xs font-semibold"
                   : "bg-muted hover:bg-muted/80 text-muted-foreground"
               )}
             >
@@ -316,7 +315,7 @@ export function CareersPage() {
                   {salary && (
                     <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-muted border border-border text-foreground font-medium text-xs">
                       <CurrencyDollar className="h-3.5 w-3.5 text-muted-foreground" />
-                      <span>{salary}</span>
+                      <span className="font-mono tabular-nums">{salary}</span>
                     </div>
                   )}
 
@@ -424,7 +423,7 @@ export function CareersPage() {
                     {selectedJob.requirements && selectedJob.requirements.length > 0 && (
                       <div className="space-y-2.5">
                         <h4 className="text-xs font-bold uppercase tracking-wider text-primary flex items-center gap-1.5">
-                          <Star className="h-3.5 w-3.5" /> Required Qualifications
+                          <CheckCircle className="h-3.5 w-3.5" weight="bold" /> Required Qualifications
                         </h4>
                         <ul className="space-y-2">
                           {selectedJob.requirements.map((req, idx) => (
@@ -505,7 +504,7 @@ export function CareersPage() {
                         <div className="space-y-2">
                           {selectedJob.benefits.map((ben, idx) => (
                             <div key={idx} className="text-xs text-muted-foreground flex items-start gap-2">
-                              <span className="text-success font-bold mt-0.5">✓</span>
+                              <CheckCircle className="h-3.5 w-3.5 text-success shrink-0 mt-0.5" weight="fill" />
                               <span className="leading-relaxed">{ben}</span>
                             </div>
                           ))}
@@ -521,7 +520,7 @@ export function CareersPage() {
                   Close
                 </Button>
                 <Button onClick={() => handleApplyClick(selectedJob)} className="shadow-sm">
-                  Apply for this Role <ArrowRight className="ml-1.5 h-3.5 w-3.5" />
+                  Apply for this Role
                 </Button>
               </DialogFooter>
             </div>

@@ -11,7 +11,7 @@ import type {
   CandidateVerifyResponse,
 } from "@/types/api"
 import { toast } from "sonner"
-import { Download, Trash } from "@phosphor-icons/react"
+import { Download, Trash, CheckCircle, WarningCircle, FileText, Info, XCircle } from "@phosphor-icons/react"
 
 const TOKEN_KEY = "intivai_candidate_token"
 const EMAIL_KEY = "intivai_candidate_email"
@@ -273,10 +273,6 @@ export function CandidatePortal() {
 
   return (
     <div className="min-h-[calc(100vh-4rem)] bg-background text-foreground py-12 px-4 sm:px-6 lg:px-8 relative overflow-hidden">
-      {/* Background glow effects */}
-      <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[350px] bg-indigo-600/10 rounded-full blur-3xl pointer-events-none" />
-      <div className="absolute bottom-10 right-10 w-[400px] h-[250px] bg-cyan-600/10 rounded-full blur-3xl pointer-events-none" />
-
       <div className="max-w-4xl mx-auto relative z-10">
         {step !== "dashboard" ? (
           /* Authentication Screen */
@@ -296,14 +292,14 @@ export function CandidatePortal() {
             <div className="bg-card border border-border rounded-xl p-8 shadow-sm">
               {error && (
                 <div className="mb-6 p-4 rounded-xl bg-destructive/10 border border-destructive/30 text-destructive text-sm flex items-start gap-3">
-                  <span className="text-destructive font-bold">✕</span>
+                  <XCircle className="h-5 w-5 text-destructive shrink-0 mt-0.5" weight="fill" />
                   <span>{error}</span>
                 </div>
               )}
 
               {infoMsg && (
                 <div className="mb-6 p-4 rounded-xl bg-primary/10 border border-primary/20 text-primary text-sm flex items-start gap-3">
-                  <span className="text-primary font-bold">ℹ</span>
+                  <Info className="h-5 w-5 text-primary shrink-0 mt-0.5" weight="fill" />
                   <span>{infoMsg}</span>
                 </div>
               )}
@@ -470,8 +466,8 @@ export function CandidatePortal() {
               </div>
             ) : appsQuery.error ? (
               <div className="p-12 text-center bg-card/60 border border-destructive/30 rounded-2xl space-y-3">
-                <div className="w-16 h-16 rounded-full bg-destructive/10 text-destructive flex items-center justify-center text-2xl mx-auto">
-                  ⚠
+                <div className="w-16 h-16 rounded-full bg-destructive/10 text-destructive flex items-center justify-center mx-auto">
+                  <WarningCircle className="h-8 w-8 text-destructive" weight="fill" />
                 </div>
                 <p className="text-sm text-destructive">
                   Unable to load applications at this time. Please refresh or try again later.
@@ -479,8 +475,8 @@ export function CandidatePortal() {
               </div>
             ) : applications.length === 0 ? (
               <div className="p-12 text-center bg-card/60 border border-border rounded-2xl space-y-4">
-                <div className="w-16 h-16 rounded-full bg-muted text-muted-foreground flex items-center justify-center text-2xl mx-auto">
-                  📋
+                <div className="w-16 h-16 rounded-full bg-muted text-muted-foreground flex items-center justify-center mx-auto">
+                  <FileText className="h-8 w-8 text-muted-foreground/60" weight="bold" />
                 </div>
                 <div>
                   <h3 className="text-lg font-semibold text-foreground">No Applications Found</h3>
@@ -545,17 +541,17 @@ export function CandidatePortal() {
                             </Link>
                           ) : isCompleted ? (
                             <div className="text-right">
-                              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-success/10 text-success border border-success/30">
-                                ✓ Assessment Complete
+                              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md text-xs font-semibold bg-success/10 text-success border border-success/30">
+                                <CheckCircle className="h-3.5 w-3.5" weight="fill" /> Assessment Complete
                               </span>
                               {app.overall_score !== null && app.overall_score !== undefined && (
                                 <p className="text-xs text-muted-foreground mt-1">
-                                  Score: <strong className="text-foreground">{Math.round(app.overall_score)}/100</strong>
+                                  Score: <strong className="text-foreground font-mono tabular-nums">{Math.round(app.overall_score)}/100</strong>
                                 </p>
                               )}
                             </div>
                           ) : (
-                            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-muted text-muted-foreground border border-border">
+                            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md text-xs font-medium bg-muted text-muted-foreground border border-border">
                               Status: {applicationStatusLabel(app.application_status)}
                             </span>
                           )}
@@ -571,8 +567,8 @@ export function CandidatePortal() {
                         <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
                           {/* Stage 1: Submitted */}
                           <div className="p-3.5 rounded-xl bg-muted/40 border border-success/30">
-                            <div className="flex items-center gap-2 text-xs font-semibold text-success mb-1">
-                              <span>✓</span> Stage 1: Submitted
+                            <div className="flex items-center gap-1.5 text-xs font-semibold text-success mb-1">
+                              <CheckCircle className="h-3.5 w-3.5" weight="fill" /> Stage 1: Submitted
                             </div>
                             <p className="text-xs text-muted-foreground">Application & CV received</p>
                           </div>
@@ -589,8 +585,8 @@ export function CandidatePortal() {
                             )}
                           >
                             <div className="flex items-center justify-between text-xs font-semibold mb-1">
-                              <span className={app.passed_screening ? "text-success" : "text-muted-foreground"}>
-                                {app.passed_screening ? "✓" : "•"} Stage 2: CV Screen
+                              <span className={cn("flex items-center gap-1.5", app.passed_screening ? "text-success" : "text-muted-foreground")}>
+                                {app.passed_screening ? <CheckCircle className="h-3.5 w-3.5" weight="fill" /> : <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground" />} Stage 2: CV Screen
                               </span>
                               {app.cv_score !== null && app.cv_score !== undefined && (
                                 <span className="text-xs font-mono font-bold text-primary">
@@ -618,17 +614,18 @@ export function CandidatePortal() {
                                 : "border-border"
                             )}
                           >
-                            <div className="flex items-center gap-2 text-xs font-semibold mb-1">
+                            <div className="flex items-center gap-1.5 text-xs font-semibold mb-1">
                               <span
-                                className={
+                                className={cn(
+                                  "flex items-center gap-1.5",
                                   isCompleted
                                     ? "text-success"
                                     : isInterviewReady
                                     ? "text-primary"
                                     : "text-muted-foreground"
-                                }
+                                )}
                               >
-                                {isCompleted ? "✓" : isInterviewReady ? "⚡" : "•"} Stage 3: AI Interview
+                                {isCompleted ? <CheckCircle className="h-3.5 w-3.5" weight="fill" /> : <span className={cn("h-1.5 w-1.5 rounded-full", isInterviewReady ? "bg-primary" : "bg-muted-foreground")} />} Stage 3: AI Interview
                               </span>
                             </div>
                             <p className="text-xs text-muted-foreground">
@@ -649,9 +646,9 @@ export function CandidatePortal() {
                                 : "border-border"
                             )}
                           >
-                            <div className="flex items-center gap-2 text-xs font-semibold mb-1">
-                              <span className={isCompleted ? "text-success" : "text-muted-foreground"}>
-                                {isCompleted ? "✓" : "•"} Stage 4: Decision
+                            <div className="flex items-center gap-1.5 text-xs font-semibold mb-1">
+                              <span className={cn("flex items-center gap-1.5", isCompleted ? "text-success" : "text-muted-foreground")}>
+                                {isCompleted ? <CheckCircle className="h-3.5 w-3.5" weight="fill" /> : <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground" />} Stage 4: Decision
                               </span>
                             </div>
                             <p className="text-xs text-muted-foreground">

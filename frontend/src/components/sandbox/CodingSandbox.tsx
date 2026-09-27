@@ -146,7 +146,7 @@ export function CodingSandbox({
               )}
             >
               <span>Test Suite</span>
-              <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-neutral-900 border border-neutral-700 text-neutral-400">
+              <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-neutral-900 border border-neutral-700 text-neutral-400">
                 {testCases.length}
               </span>
             </button>
@@ -158,7 +158,7 @@ export function CodingSandbox({
               className="flex items-center gap-1.5 text-xs text-primary hover:text-primary/80 bg-primary/10 px-2 py-0.5 rounded border border-primary/20"
             >
               <Code2 className="w-3 h-3 text-primary" />
-              <span>Score: {aiReview.quality_score}/100</span>
+              <span className="font-mono tabular-nums">Score: {aiReview.quality_score}/100</span>
             </button>
           )}
         </div>

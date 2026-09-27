@@ -204,7 +204,7 @@ export function PublicLayout() {
                 <Link to="/login">Sign In</Link>
               </Button>
               <Button asChild size="sm" className="text-xs">
-                <Link to="/register">Get Started Free</Link>
+                <Link to="/register">Create Recruiter Account</Link>
               </Button>
             </div>
           )}
@@ -252,7 +252,7 @@ export function PublicLayout() {
                 </Button>
                 <Button asChild className="w-full">
                   <Link to="/register" onClick={() => closeMenu()}>
-                    Get Started
+                    Create Account
                   </Link>
                 </Button>
               </div>

@@ -55,34 +55,34 @@ function statusBadge(status: string) {
     // Transient pipeline work — static amber badge; the query refetchInterval
     // polls, so an infinite pulsing spinner would be misleading.
     return (
-      <Badge variant="secondary" className="bg-warning/10 text-warning border-warning/20 gap-1">
+      <Badge variant="secondary" className="bg-warning/10 text-warning border-warning/20 font-mono text-[11px] gap-1">
         <ArrowClockwise className="h-3 w-3 animate-spin motion-reduce:animate-none" /> Processing
       </Badge>
     )
   }
   if (status === "new") {
     return (
-      <Badge variant="secondary" className="bg-sky-500/10 text-sky-600 dark:text-sky-400 border-sky-500/20 gap-1">
+      <Badge variant="secondary" className="bg-sky-500/10 text-sky-600 dark:text-sky-400 border-sky-500/20 font-mono text-[11px] gap-1">
         <Clock className="h-3 w-3" /> In queue
       </Badge>
     )
   }
   if (status === "extracted" || status === "parsed" || status === "pending_review") {
     return (
-      <Badge className="bg-success/10 text-success border-success/20 gap-1">
+      <Badge className="bg-success/10 text-success border-success/20 font-mono text-[11px] gap-1">
         <CheckCircle className="h-3 w-3" weight="fill" /> Profile ready
       </Badge>
     )
   }
   if (status === "failed_ocr" || status === "failed_extract" || status === "failed_parse") {
     return (
-      <Badge variant="destructive" className="gap-1">
+      <Badge variant="destructive" className="font-mono text-[11px] gap-1">
         <XCircle className="h-3 w-3" weight="fill" /> Needs attention
       </Badge>
     )
   }
   return (
-    <Badge variant="secondary" className="text-xs">{status}</Badge>
+    <Badge variant="secondary" className="font-mono text-[11px]">{status}</Badge>
   )
 }
 
@@ -439,7 +439,7 @@ export function CVsPage() {
                         className="h-8 text-xs text-muted-foreground hover:text-foreground gap-1"
                       >
                         <Link to={`/candidates?candidate_id=${cv.id}`}>
-                          Candidate 360 →
+                          Candidate 360
                         </Link>
                       </Button>
                     </>

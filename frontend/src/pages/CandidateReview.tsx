@@ -47,8 +47,8 @@ export function CandidateReviewPage() {
   if (error || !cv) {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-background text-center px-4">
-        <div className="h-16 w-16 rounded-full bg-destructive/10 flex items-center justify-center text-destructive">
-          <Warning weight="fill" className="h-8 w-8" />
+        <div className="h-14 w-14 rounded-xl bg-destructive/10 border border-destructive/20 flex items-center justify-center text-destructive">
+          <Warning weight="fill" className="h-7 w-7" />
         </div>
         <h1 className="font-display text-2xl font-bold">Review Link Invalid or Expired</h1>
         <p className="text-sm text-muted-foreground max-w-md">

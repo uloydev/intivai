@@ -89,7 +89,7 @@ export function InterviewResultPage() {
       <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-8 text-center space-y-3">
         <p className="text-destructive font-medium">{error instanceof Error ? error.message : "Interview not found"}</p>
         <Button asChild variant="outline" size="sm">
-          <Link to="/interviews">← Back to Interviews</Link>
+          <Link to="/interviews">Back to Interviews</Link>
         </Button>
       </div>
     )
@@ -204,9 +204,9 @@ export function InterviewResultPage() {
             <div className="flex flex-col gap-6 md:flex-row md:items-center md:justify-between border-b border-border/50 pb-6">
               <div className="flex items-center gap-5">
                 <div className="flex h-20 w-20 shrink-0 flex-col items-center justify-center rounded-2xl bg-primary/10 border border-primary/20 text-primary">
-                  <span className="text-xs uppercase font-bold tracking-wider">Score</span>
-                  <span className="font-display text-3xl font-extrabold">{evalReport.overall_score}</span>
-                  <span className="text-xs text-muted-foreground">/ 100</span>
+                  <span className="text-[10px] uppercase font-mono font-bold tracking-wider">Score</span>
+                  <span className="font-mono text-3xl font-extrabold tabular-nums">{evalReport.overall_score}</span>
+                  <span className="text-[11px] font-mono text-muted-foreground">/ 100</span>
                 </div>
                 <div className="space-y-1.5">
                   <div className="flex items-center gap-2">
@@ -240,7 +240,7 @@ export function InterviewResultPage() {
                       <span className="text-xs font-semibold capitalize text-muted-foreground">
                         {name.replace(/_/g, " ")}
                       </span>
-                      <span className="font-display text-sm font-bold">{score}%</span>
+                      <span className="font-mono text-sm font-bold text-foreground tabular-nums">{score}%</span>
                     </div>
                     {/* Progress Bar */}
                     <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
@@ -477,7 +477,7 @@ export function InterviewResultPage() {
                       </span>
                     </div>
                     {perQ && (
-                      <Badge className="bg-primary/10 text-primary border-primary/20 text-xs font-bold">
+                      <Badge className="bg-primary/10 text-primary border-primary/20 text-xs font-mono font-bold">
                         Score: {perQ.score} / 100
                       </Badge>
                     )}
@@ -485,7 +485,7 @@ export function InterviewResultPage() {
 
                   <CardContent className="p-4 space-y-3">
                     {/* Candidate Answer */}
-                    <div className="rounded-xl bg-background/80 border border-border/40 p-3 text-xs leading-relaxed space-y-1">
+                    <div className="rounded-xl bg-background/80 border-l-2 border-primary/50 border-r border-t border-b border-border/40 p-3 text-xs leading-relaxed space-y-1">
                       <div className="flex items-center gap-1.5 text-muted-foreground font-semibold text-xs">
                         <User className="h-3.5 w-3.5" /> Candidate Response:
                       </div>

@@ -138,7 +138,7 @@ export function IntegrationsPage() {
                 </div>
                 <div className="flex flex-wrap gap-1">
                   {wh.events.map((e) => (
-                    <Badge key={e} variant="info" size="sm">{e}</Badge>
+                    <Badge key={e} variant="info" size="sm" className="font-mono text-[10px]">{e}</Badge>
                   ))}
                 </div>
               </div>
@@ -165,10 +165,10 @@ export function IntegrationsPage() {
                     ) : (
                       <Clock className="h-3.5 w-3.5 text-warning shrink-0" />
                     )}
-                    <span className="font-mono">{d.event}</span>
-                    <span className="text-muted-foreground">HTTP {d.status_code}</span>
-                    <span className="text-muted-foreground">{d.attempts} attempt(s)</span>
-                    <span className="text-muted-foreground ml-auto">{new Date(d.created_at).toLocaleString()}</span>
+                    <span className="font-mono text-foreground font-medium">{d.event}</span>
+                    <span className="font-mono text-muted-foreground">HTTP {d.status_code}</span>
+                    <span className="font-mono text-muted-foreground">{d.attempts} attempt(s)</span>
+                    <span className="font-mono text-muted-foreground ml-auto text-[11px]">{new Date(d.created_at).toLocaleString()}</span>
                   </div>
                 ))}
               </div>

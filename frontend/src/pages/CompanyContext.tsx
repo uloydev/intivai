@@ -7,7 +7,6 @@ import {
   FileText,
   CheckCircle,
   ShieldCheck,
-  Lightning,
   TreeStructure,
   Trash,
 } from "@phosphor-icons/react"
@@ -271,7 +270,7 @@ export function CompanyContextPage() {
             <Card className="border-border shadow-sm">
               <CardHeader className="pb-3">
                 <CardTitle className="font-display text-sm font-bold flex items-center gap-1.5">
-                  <Lightning className="h-4 w-4 text-amber-600 dark:text-amber-400" weight="fill" />
+                  <Brain className="h-4 w-4 text-primary" weight="fill" />
                   Interviewer Persona Presets
                 </CardTitle>
                 <CardDescription className="text-xs">
@@ -391,13 +390,13 @@ export function CompanyContextPage() {
                         <div>
                           <div className="flex items-center gap-2">
                             <span className="font-display text-xs font-bold text-foreground">
-                              Company Context Version {ctx.version}
+                              Company Context Version <span className="font-mono tabular-nums">{ctx.version}</span>
                             </span>
-                            <Badge variant="outline" className="text-xs uppercase">
+                            <Badge variant="outline" className="text-[11px] font-mono uppercase">
                               {ctx.type}
                             </Badge>
                           </div>
-                          <p className="font-mono text-xs text-muted-foreground truncate max-w-md mt-0.5">
+                          <p className="font-mono text-[11px] text-muted-foreground truncate max-w-md mt-0.5">
                             Hash: {ctx.content_hash}
                           </p>
                         </div>

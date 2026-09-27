@@ -9,7 +9,7 @@ import {
   LockKey,
   Scales,
   FilePdf,
-  Lightning,
+  Copy,
   CaretDown,
 } from "@phosphor-icons/react"
 import { Button } from "@/components/ui/button"
@@ -98,7 +98,7 @@ export function LandingPage() {
 
         <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
           <Card className="border-border bg-card p-5 space-y-3 relative overflow-hidden shadow-sm">
-            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10 text-primary font-display font-bold text-sm">
+            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10 text-primary font-mono font-bold text-sm">
               01
             </div>
             <h3 className="font-display font-bold text-base">Job & Rail Setup</h3>
@@ -108,7 +108,7 @@ export function LandingPage() {
           </Card>
 
           <Card className="border-border bg-card p-5 space-y-3 relative overflow-hidden shadow-sm">
-            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-info/10 text-info font-display font-bold text-sm">
+            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-info/10 text-info font-mono font-bold text-sm">
               02
             </div>
             <h3 className="font-display font-bold text-base">Semantic CV Matching</h3>
@@ -118,7 +118,7 @@ export function LandingPage() {
           </Card>
 
           <Card className="border-border bg-card p-5 space-y-3 relative overflow-hidden shadow-sm">
-            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-accent/10 text-accent font-display font-bold text-sm">
+            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-accent/10 text-accent font-mono font-bold text-sm">
               03
             </div>
             <h3 className="font-display font-bold text-base">Chat & Coding Sandbox</h3>
@@ -128,7 +128,7 @@ export function LandingPage() {
           </Card>
 
           <Card className="border-border bg-card p-5 space-y-3 relative overflow-hidden shadow-sm">
-            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-success/10 text-success font-display font-bold text-sm">
+            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-success/10 text-success font-mono font-bold text-sm">
               04
             </div>
             <h3 className="font-display font-bold text-base">Scorecards & ATS Sync</h3>
@@ -163,7 +163,7 @@ export function LandingPage() {
 
           <Card className="border-border bg-card p-6 space-y-4 shadow-sm">
             <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-warning/10 text-warning">
-              <Lightning className="h-6 w-6" weight="bold" />
+              <Copy className="h-6 w-6" weight="bold" />
             </div>
             <h3 className="font-display font-bold text-lg">Clipboard Paste Telemetry</h3>
             <p className="text-xs leading-relaxed text-muted-foreground">
