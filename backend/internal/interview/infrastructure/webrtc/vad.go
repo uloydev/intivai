@@ -16,11 +16,14 @@ func NewVAD(modelPath string) (*VAD, error) {
 
 // Process returns true if speech is detected in the 16kHz float32 audio chunk
 func (v *VAD) Process(audioData []float32) (bool, error) {
+	if len(audioData) == 0 {
+		return false, nil
+	}
 	var energy float32
 	for _, sample := range audioData {
 		energy += sample * sample
 	}
-	energy = energy / float32(len(audioData))
+	energy /= float32(len(audioData))
 
 	return energy > v.energyThreshold, nil
 }

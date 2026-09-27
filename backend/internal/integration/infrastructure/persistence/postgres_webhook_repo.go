@@ -79,6 +79,7 @@ func (r *PostgresWebhookRepo) ListConfigsByOrg(ctx context.Context, orgID uuid.U
 	if err != nil {
 		return nil, err
 	}
+	defer func() { _ = rows.Close() }()
 
 	var configs []*domain.WebhookConfig
 	for rows.Next() {
@@ -92,7 +93,7 @@ func (r *PostgresWebhookRepo) ListConfigsByOrg(ctx context.Context, orgID uuid.U
 		}
 		configs = append(configs, &cfg)
 	}
-	return configs, nil
+	return configs, rows.Err()
 }
 
 func (r *PostgresWebhookRepo) UpdateConfig(ctx context.Context, cfg *domain.WebhookConfig) error {
@@ -184,6 +185,7 @@ func (r *PostgresWebhookRepo) ListDeliveriesByWebhook(ctx context.Context, webho
 	if err != nil {
 		return nil, err
 	}
+	defer func() { _ = rows.Close() }()
 
 	var deliveries []*domain.WebhookDelivery
 	for rows.Next() {
@@ -193,7 +195,7 @@ func (r *PostgresWebhookRepo) ListDeliveriesByWebhook(ctx context.Context, webho
 		}
 		deliveries = append(deliveries, &d)
 	}
-	return deliveries, nil
+	return deliveries, rows.Err()
 }
 
 func (r *PostgresWebhookRepo) UpdateDelivery(ctx context.Context, d *domain.WebhookDelivery) error {
@@ -235,6 +237,7 @@ func (r *PostgresWebhookRepo) ListConfigsByEvent(ctx context.Context, orgID uuid
 	if err != nil {
 		return nil, err
 	}
+	defer func() { _ = rows.Close() }()
 
 	var configs []*domain.WebhookConfig
 	for rows.Next() {
@@ -248,5 +251,5 @@ func (r *PostgresWebhookRepo) ListConfigsByEvent(ctx context.Context, orgID uuid
 		}
 		configs = append(configs, &cfg)
 	}
-	return configs, nil
+	return configs, rows.Err()
 }

@@ -279,6 +279,7 @@ func (w *ExtractWorker) fail(ctx context.Context, p ExtractCVPayload, cause erro
 	})
 	if uer != nil {
 		w.log.Error().Err(uer).Msg("extract fail update")
+		return fmt.Errorf("mark failed_extract: %w", uer)
 	}
 	w.log.Error().Err(cause).Str("candidate_id", p.CandidateID).Msg("extract_cv failed")
 	return nil

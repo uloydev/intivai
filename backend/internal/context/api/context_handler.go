@@ -9,6 +9,7 @@ import (
 	ctxapp "github.com/intivai/backend/internal/context/application"
 	ctxdomain "github.com/intivai/backend/internal/context/domain"
 	"github.com/intivai/backend/internal/iam/api"
+	iamapp "github.com/intivai/backend/internal/iam/application"
 	sharederr "github.com/intivai/backend/internal/shared/errors"
 	"github.com/intivai/backend/internal/shared/httpapi"
 )
@@ -21,24 +22,21 @@ func NewContextHandler(svc *ctxapp.ContextService) *ContextHandler {
 	return &ContextHandler{svc: svc}
 }
 
-// orgFromPath validates :orgId matches the actor's org (tenant pinning).
-func (h *ContextHandler) orgFromPath(c *fiber.Ctx) (uuid.UUID, error) {
+// actorFromPath validates :orgId matches the actor's org (tenant pinning).
+func (h *ContextHandler) actorFromPath(c *fiber.Ctx) (iamapp.AuthContext, error) {
 	actor, err := api.RequireActor(c)
 	if err != nil {
-		return uuid.Nil, err
+		return iamapp.AuthContext{}, err
 	}
 	orgID, err := uuid.Parse(c.Params("orgId"))
 	if err != nil || orgID != actor.OrgID {
-		return uuid.Nil, sharederr.NewDomainError("FORBIDDEN", "org mismatch")
+		return iamapp.AuthContext{}, sharederr.NewDomainError("FORBIDDEN", "org mismatch")
 	}
-	return orgID, nil
+	return actor, nil
 }
 
 func (h *ContextHandler) UploadContext(c *fiber.Ctx) error {
-	if _, err := h.orgFromPath(c); err != nil {
-		return httpapi.Error(c, err)
-	}
-	actor, err := api.RequireActor(c)
+	actor, err := h.actorFromPath(c)
 	if err != nil {
 		return httpapi.Error(c, err)
 	}
@@ -79,10 +77,7 @@ func (h *ContextHandler) UploadContext(c *fiber.Ctx) error {
 }
 
 func (h *ContextHandler) ListContexts(c *fiber.Ctx) error {
-	if _, err := h.orgFromPath(c); err != nil {
-		return httpapi.Error(c, err)
-	}
-	actor, err := api.RequireActor(c)
+	actor, err := h.actorFromPath(c)
 	if err != nil {
 		return httpapi.Error(c, err)
 	}
@@ -94,10 +89,7 @@ func (h *ContextHandler) ListContexts(c *fiber.Ctx) error {
 }
 
 func (h *ContextHandler) SetPrompt(c *fiber.Ctx) error {
-	if _, err := h.orgFromPath(c); err != nil {
-		return httpapi.Error(c, err)
-	}
-	actor, err := api.RequireActor(c)
+	actor, err := h.actorFromPath(c)
 	if err != nil {
 		return httpapi.Error(c, err)
 	}
@@ -115,10 +107,7 @@ func (h *ContextHandler) SetPrompt(c *fiber.Ctx) error {
 }
 
 func (h *ContextHandler) GetPrompt(c *fiber.Ctx) error {
-	if _, err := h.orgFromPath(c); err != nil {
-		return httpapi.Error(c, err)
-	}
-	actor, err := api.RequireActor(c)
+	actor, err := h.actorFromPath(c)
 	if err != nil {
 		return httpapi.Error(c, err)
 	}
@@ -132,10 +121,7 @@ func (h *ContextHandler) GetPrompt(c *fiber.Ctx) error {
 // Delete handles DELETE /api/v1/orgs/:orgId/contexts/:contextID — removes one
 // company-context row (admin/recruiter only, tenant-pinned).
 func (h *ContextHandler) Delete(c *fiber.Ctx) error {
-	if _, err := h.orgFromPath(c); err != nil {
-		return httpapi.Error(c, err)
-	}
-	actor, err := api.RequireActor(c)
+	actor, err := h.actorFromPath(c)
 	if err != nil {
 		return httpapi.Error(c, err)
 	}

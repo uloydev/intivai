@@ -93,7 +93,7 @@ func (w *ParseWorker) handle(ctx context.Context, t *asynq.Task) error {
 		w.log.Warn().Str("candidate_id", p.CandidateID).Msg("docx yielded <50 chars of text — likely scanned; re-upload as PDF to OCR")
 	}
 	if method == "pdfcpu" && len(strings.TrimSpace(text)) < 50 {
-		ocrText, oerr := ocr.Extract(data)
+		ocrText, oerr := ocr.ExtractContext(ctx, data)
 		if oerr != nil {
 			// True OCR exhaustion — terminal, with a safe category message.
 			if markErr := w.mark(ctx, p, cvdomain.StatusFailedOCR, fmt.Errorf("%w: %v", cvdomain.ErrUnreadable, oerr)); markErr != nil {

@@ -2,6 +2,7 @@ package ocr
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -11,10 +12,15 @@ import (
 	"strings"
 )
 
-// Extract OCRs a scanned PDF: rasterize pages with pdftoppm (poppler-utils),
-// then run tesseract over each page image. Alpine tesseract cannot read PDF
-// input directly — rasterization is mandatory.
+// Extract rasterizes the input PDF into 200dpi PNGs with pdftoppm,
+// then runs tesseract over each page image.
 func Extract(pdf []byte) (string, error) {
+	return ExtractContext(context.Background(), pdf)
+}
+
+// ExtractContext rasterizes the input PDF into 200dpi PNGs with pdftoppm,
+// then runs tesseract over each page image using the provided context.
+func ExtractContext(ctx context.Context, pdf []byte) (string, error) {
 	if _, err := exec.LookPath("tesseract"); err != nil {
 		return "", fmt.Errorf("tesseract not installed: %w", err)
 	}
@@ -34,7 +40,7 @@ func Extract(pdf []byte) (string, error) {
 	}
 
 	prefix := filepath.Join(dir, "page")
-	if out, err := exec.Command("pdftoppm", "-png", "-r", "200", in, prefix).CombinedOutput(); err != nil {
+	if out, err := exec.CommandContext(ctx, "pdftoppm", "-png", "-r", "200", in, prefix).CombinedOutput(); err != nil {
 		return "", fmt.Errorf("pdftoppm failed: %w: %s", err, strings.TrimSpace(string(out)))
 	}
 	pages, err := filepath.Glob(prefix + "-*.png")
@@ -49,7 +55,7 @@ func Extract(pdf []byte) (string, error) {
 	var sb strings.Builder
 	for _, page := range pages {
 		outPath := filepath.Join(dir, "text")
-		cmd := exec.Command("tesseract", page, outPath, "-l", "eng")
+		cmd := exec.CommandContext(ctx, "tesseract", page, outPath, "-l", "eng")
 		var stderr bytes.Buffer
 		cmd.Stderr = &stderr
 		if err := cmd.Run(); err != nil {

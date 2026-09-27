@@ -1166,7 +1166,8 @@ func (h *ChatHandler) streamAndRespond(ctx context.Context, s *chatSession, answ
 	s.historyMu.Unlock()
 	msgs = append(msgs, historySnapshot...)
 
-	if !turn.isTopicComplete {
+	switch {
+	case !turn.isTopicComplete:
 		// In-topic dialogue turn: Candidate asked for clarification or provided partial solution.
 		// LLM should respond in-topic with clarification or deep edge-case probing.
 		topicPrompt := "the current question"
@@ -1183,13 +1184,13 @@ func (h *ChatHandler) streamAndRespond(ctx context.Context, s *chatSession, answ
 				"3. Keep your response focused and conversational (2-4 sentences). Do NOT transition to any other question.",
 				topicPrompt, turn.topicTurn, turn.maxTopicTurns, answer),
 		})
-	} else if next != nil {
+	case next != nil:
 		// Topic finalized -> transitioning to next topic
 		msgs = append(msgs, gensvc.ContextMessage{
 			Role:    gensvc.RoleSystem,
 			Content: fmt.Sprintf("The discussion on the previous question is now finalized. Briefly acknowledge the candidate's final response and provide a natural, 1-sentence transition to the next topic: \"%s\". Do NOT ask the next question yourself.", next.Content),
 		})
-	} else {
+	default:
 		// Final question finished -> conclude interview
 		msgs = append(msgs, gensvc.ContextMessage{
 			Role:    gensvc.RoleSystem,
