@@ -34,18 +34,24 @@ type Enqueuer interface {
 	Enqueue(ctx context.Context, jobType string, payload any, opts ...asynq.Option) (*asynq.TaskInfo, error)
 }
 
+// DomainEventDispatcher — cross-context event dispatcher seam.
+type DomainEventDispatcher interface {
+	Dispatch(ctx context.Context, orgID uuid.UUID, event intdomain.WebhookEvent, payload []byte) error
+}
+
 // EvaluationWorker — asynq handler for TaskEvaluateInterview. Idempotent:
 // skips when the interview already has an evaluation (inline path won).
 // The LLM call runs OUTSIDE the DB transaction — a held pool connection for
 // the full LLM round-trip starves the pool under load.
 type EvaluationWorker struct {
-	pool      *gorm.DB
-	ivRepo    ivdomain.InterviewRepository
-	evaluator *evalllm.Evaluator
-	queue     Enqueuer
-	publicURL string
-	webhookFn func(ctx context.Context, orgID uuid.UUID, event intdomain.WebhookEvent, payload []byte) // optional webhook dispatch
-	log       zerolog.Logger
+	pool       *gorm.DB
+	ivRepo     ivdomain.InterviewRepository
+	evaluator  *evalllm.Evaluator
+	queue      Enqueuer
+	publicURL  string
+	dispatcher DomainEventDispatcher
+	webhookFn  func(ctx context.Context, orgID uuid.UUID, event intdomain.WebhookEvent, payload []byte) // optional webhook dispatch fallback
+	log        zerolog.Logger
 }
 
 func NewEvaluationWorker(pool *gorm.DB, ivRepo ivdomain.InterviewRepository, evaluator *evalllm.Evaluator, q Enqueuer, publicURL string, log zerolog.Logger) *EvaluationWorker {
@@ -54,6 +60,11 @@ func NewEvaluationWorker(pool *gorm.DB, ivRepo ivdomain.InterviewRepository, eva
 
 func (w *EvaluationWorker) WithWebhookDispatch(fn func(ctx context.Context, orgID uuid.UUID, event intdomain.WebhookEvent, payload []byte)) *EvaluationWorker {
 	w.webhookFn = fn
+	return w
+}
+
+func (w *EvaluationWorker) WithEventDispatcher(d DomainEventDispatcher) *EvaluationWorker {
+	w.dispatcher = d
 	return w
 }
 
@@ -67,6 +78,10 @@ func (w *EvaluationWorker) handle(ctx context.Context, t *asynq.Task) error {
 		return asynq.SkipRetry
 	}
 	if p.OrgID == "" || p.InterviewID == "" {
+		return asynq.SkipRetry
+	}
+	orgUUID, err := uuid.Parse(p.OrgID)
+	if err != nil {
 		return asynq.SkipRetry
 	}
 	ivID, err := uuid.Parse(p.InterviewID)
@@ -124,22 +139,24 @@ func (w *EvaluationWorker) handle(ctx context.Context, t *asynq.Task) error {
 	}
 
 	// Phase 4: notify the org's recruiters that the scorecard is ready.
-	if orgUUID, perr := uuid.Parse(p.OrgID); perr == nil {
-		w.notifyScorecard(ctx, orgUUID, ivID, report)
-	}
+	w.notifyScorecard(ctx, orgUUID, ivID, report)
 
 	// Phase 5: dispatch webhooks for interview.completed event.
-	if w.webhookFn != nil {
-		if orgUUID, perr := uuid.Parse(p.OrgID); perr == nil {
-			payload, err := json.Marshal(intdomain.InterviewCompletedPayload{
-				InterviewID:    p.InterviewID,
-				Score:          report.OverallScore,
-				Recommendation: report.Recommendation,
-				ReportURL:      fmt.Sprintf("%s/interviews/%s", strings.TrimSuffix(w.publicURL, "/"), ivID),
-			})
-			if err != nil {
-				w.log.Warn().Err(err).Str("interview_id", p.InterviewID).Msg("webhook dispatch: marshal payload failed")
-			} else {
+	if w.dispatcher != nil || w.webhookFn != nil {
+		payload, err := json.Marshal(intdomain.InterviewCompletedPayload{
+			InterviewID:    p.InterviewID,
+			Score:          report.OverallScore,
+			Recommendation: report.Recommendation,
+			ReportURL:      fmt.Sprintf("%s/interviews/%s", strings.TrimSuffix(w.publicURL, "/"), ivID),
+		})
+		if err != nil {
+			w.log.Warn().Err(err).Str("interview_id", p.InterviewID).Msg("webhook dispatch: marshal payload failed")
+		} else {
+			if w.dispatcher != nil {
+				if err := w.dispatcher.Dispatch(ctx, orgUUID, intdomain.EventInterviewCompleted, payload); err != nil {
+					w.log.Warn().Err(err).Str("interview_id", p.InterviewID).Msg("event dispatch failed")
+				}
+			} else if w.webhookFn != nil {
 				w.webhookFn(ctx, orgUUID, intdomain.EventInterviewCompleted, payload)
 			}
 		}

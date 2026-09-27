@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -41,7 +40,6 @@ import (
 	iamrepo "github.com/intivai/backend/internal/iam/infrastructure/persistence"
 	intapi "github.com/intivai/backend/internal/integration/api"
 	intapp "github.com/intivai/backend/internal/integration/application"
-	intdomain "github.com/intivai/backend/internal/integration/domain"
 	intrepo "github.com/intivai/backend/internal/integration/infrastructure/persistence"
 	ivapi "github.com/intivai/backend/internal/interview/api"
 	ivapp "github.com/intivai/backend/internal/interview/application"
@@ -57,7 +55,6 @@ import (
 	pgmem "github.com/intivai/backend/internal/memory/infrastructure/postgres"
 	notifapi "github.com/intivai/backend/internal/notification/api"
 	notifapp "github.com/intivai/backend/internal/notification/application"
-	notifdomain "github.com/intivai/backend/internal/notification/domain"
 	notifrepo "github.com/intivai/backend/internal/notification/infrastructure/persistence"
 	sbapi "github.com/intivai/backend/internal/sandbox/api"
 	sbapp "github.com/intivai/backend/internal/sandbox/application"
@@ -278,54 +275,19 @@ func main() {
 	notifService := notifapp.NewNotificationService(pool, notifRepo)
 	notifHandler := notifapi.NewNotificationHandler(notifService)
 
+	// --- Webhooks & Events ---
+	webhookRepo := intrepo.NewPostgresWebhookRepo(pool)
+	webhookService := intapp.NewWebhookService(webhookRepo)
+	webhookHandler := intapi.NewWebhookHandler(webhookService, logger)
+	webhookWorker := intapp.NewWebhookWorker(webhookRepo, pool, logger)
+	eventDispatcher := intapp.NewEventDispatcher(pool, webhookRepo, notifService, queueClient, logger)
+
 	// --- M3: interviews ---
 	ivRepo := ivrepo.NewPostgresInterviewRepo(pool)
 	tokenRepo := ivrepo.NewPostgresTokenRepo(pool)
 	questionBank := ivrepo.NewPostgresQuestionBank(pool)
-	evalWorker := evalapp.NewEvaluationWorker(pool, ivRepo, evalllm.NewEvaluator(llmClient), queueClient, cfg.App.PublicURL, logger).WithWebhookDispatch(func(ctx context.Context, orgID uuid.UUID, event intdomain.WebhookEvent, payload []byte) {
-		// Query active webhook configs, create deliveries, enqueue — all inside
-		// a tenant tx so FORCED RLS (025) applies and delivery insert + enqueue
-		// commit atomically (enqueue failure rolls the delivery back).
-		eventJSON, err := json.Marshal([]string{string(event)})
-		if err != nil {
-			logger.Error().Err(err).Str("event", string(event)).Msg("webhook dispatch: marshal event failed")
-			return
-		}
-		if err := db.RunInTx(ctx, pool, orgID.String(), func(tctx context.Context) error {
-			if event == intdomain.EventInterviewCompleted {
-				_ = notifService.Create(tctx, orgID, notifdomain.EventInterviewCompleted,
-					"Interview Completed",
-					"An interview assessment finished and is ready for review.",
-					"/interviews")
-			}
-			var configs []struct {
-				ID  uuid.UUID
-				URL string
-			}
-			if err := pool.WithContext(tctx).Raw(
-				`SELECT id, url FROM webhook_configs WHERE org_id = $1 AND active = true AND events @> $2::jsonb`, orgID, string(eventJSON)).Scan(&configs).Error; err != nil {
-				return fmt.Errorf("query webhook configs: %w", err)
-			}
-			for _, whCfg := range configs {
-				deliveryID := uuid.New()
-				if err := pool.WithContext(tctx).Exec(
-					`INSERT INTO webhook_deliveries (id, org_id, webhook_id, event, payload, final_status, attempts, created_at, updated_at) VALUES ($1, $2, $3, $4, $5::jsonb, 'pending', 0, NOW(), NOW())`,
-					deliveryID, orgID, whCfg.ID, string(event), string(payload)).Error; err != nil {
-					return fmt.Errorf("insert webhook delivery: %w", err)
-				}
-				pl, err := json.Marshal(intapp.DeliverWebhookPayload{DeliveryID: deliveryID.String(), OrgID: orgID.String()})
-				if err != nil {
-					return fmt.Errorf("marshal delivery payload: %w", err)
-				}
-				if _, err := queueClient.Enqueue(ctx, intapp.TaskDeliverWebhook, pl, asynq.MaxRetry(3)); err != nil {
-					return fmt.Errorf("enqueue webhook delivery: %w", err)
-				}
-			}
-			return nil
-		}); err != nil {
-			logger.Error().Err(err).Str("org_id", orgID.String()).Str("event", string(event)).Msg("webhook dispatch failed")
-		}
-	})
+	evalWorker := evalapp.NewEvaluationWorker(pool, ivRepo, evalllm.NewEvaluator(llmClient), queueClient, cfg.App.PublicURL, logger).
+		WithEventDispatcher(eventDispatcher)
 	interviewService := ivapp.NewInterviewService(pool, ivRepo, tokenRepo, questionBank, appRepo, candidateRepo, jobRepo, jobCandRepo, contextRepo, store, tokens, ivdomain.SystemClock(), interviewEnqueuer{client: queueClient, publicURL: cfg.App.PublicURL}, orgSettings{repo: iamRepo}, logger)
 	sessionRegistry := ivapi.NewRedisSessionRegistry(rdb, 35*time.Minute)
 	chatHandler := ivapi.NewChatHandler(interviewService, llmClient, tokens, logger, sessionRegistry)
@@ -362,12 +324,6 @@ func main() {
 	sandboxService := sbapp.NewSandboxService(pool, codeRunner, llmClient, ivRepo)
 	sandboxHandler := sbapi.NewSandboxHandler(sandboxService)
 	chatHandler.WithCodeRunner(codeRunner)
-
-	// --- Webhooks ---
-	webhookRepo := intrepo.NewPostgresWebhookRepo(pool)
-	webhookService := intapp.NewWebhookService(webhookRepo)
-	webhookHandler := intapi.NewWebhookHandler(webhookService, logger)
-	webhookWorker := intapp.NewWebhookWorker(webhookRepo, pool, logger)
 
 	// --- Billing & Payment Gateway ---
 	var paymentGateway billingdomain.PaymentGateway = billinggateway.NewNoopPaymentGateway()
