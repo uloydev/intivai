@@ -53,6 +53,9 @@ rationale lives in [`design-decisions.md`](design-decisions.md).
 │   │   │   ├── infrastructure/persistence/  # postgres repo, tx manager
 │   │   │   └── api/                    # auth handlers + auth/tenant-tx middlewares
 │   │   ├── job/                        # job CRUD + PATCH status
+│   │   │   ├── application/            # ApplicationIntakeService (candidate dedup,
+│   │   │   │                           #   abuse cap, MinIO upload, parse enqueue, rollback)
+│   │   │   └── api/                    # public apply + job endpoints
 │   │   ├── cv/                         # candidates, PDF upload
 │   │   │   ├── domain/                 # Candidate entity, status machine
 │   │   │   ├── application/            # CVService, ParseWorker, ExtractWorker,
@@ -78,6 +81,7 @@ rationale lives in [`design-decisions.md`](design-decisions.md).
 │   │   │   ├── domain/service/         # question generator, bias, prompt composer,
 │   │   │   │                           #   context window/budget, probe strategy
 │   │   │   ├── application/            # InterviewService, VoiceSession, evaluation enqueuer
+│   │   │   │   └── session/            # DialogueEngine, InterviewSession, TurnState
 │   │   │   ├── infrastructure/persistence/  # interview/token/question-bank repos
 │   │   │   ├── infrastructure/stt/     # Whisper STT adapter (whisper.cpp)
 │   │   │   ├── infrastructure/tts/     # Edge TTS adapter (synthesized voice)
@@ -92,12 +96,15 @@ rationale lives in [`design-decisions.md`](design-decisions.md).
 │   │   ├── notification/               # email notification subsystem
 │   │   │   ├── application/            # EmailWorker (Mailpit SMTP dispatch)
 │   │   │   └──                         #   interview invitation templates
+│   │   ├── integration/                # webhooks + domain event dispatcher
+│   │   │   └── application/            # EventDispatcher (interview.completed,
+│   │   │                               #   scorecard email, HMAC webhooks)
 │   │   ├── llm/                        # LLM provider (chat/stream/structured),
 │   │   │                               #   Client with retry + fallback
 │   │   ├── embedding/                  # local 384-dim embeddings (cybertron,
 │   │   │                               #   CGO-free; multi-qa default, bge via env)
-│   │   └── memory/                     # Mnemosyne memory banks
-│   │       ├── domain/                 # MemoryBank port
+│   │   └── memory/                     # GroundingBank / Mnemosyne memory banks
+│   │       ├── domain/                 # GroundingBank / MemoryBank port (Remember, Recall)
 │   │       ├── application/            # SyncWorker
 │   │       └── infrastructure/
 │   │           ├── native/             # SQLite bank per tenant (dev default)
