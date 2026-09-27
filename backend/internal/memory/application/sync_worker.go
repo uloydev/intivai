@@ -3,6 +3,7 @@ package application
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 
 	"github.com/hibiken/asynq"
 	"github.com/intivai/backend/internal/memory/domain"
@@ -33,13 +34,13 @@ func NewSyncWorker(factory domain.BankFactory) *SyncWorker {
 
 // Register adds the sync_mnemosyne handler to the shared asynq mux.
 func (s *SyncWorker) Register(mux *asynq.ServeMux) {
-	mux.HandleFunc(TaskSyncMnemosyne, s.handleSync)
+	mux.HandleFunc(TaskSyncMnemosyne, s.HandleSync)
 }
 
-func (s *SyncWorker) handleSync(ctx context.Context, t *asynq.Task) error {
+func (s *SyncWorker) HandleSync(ctx context.Context, t *asynq.Task) error {
 	var p SyncPayload
 	if err := json.Unmarshal(t.Payload(), &p); err != nil {
-		return err
+		return fmt.Errorf("%w: malformed payload: %w", asynq.SkipRetry, err)
 	}
 	if p.OrgID == "" || p.EntityType == "" || p.Summary == "" {
 		return asynq.SkipRetry

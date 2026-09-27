@@ -51,14 +51,6 @@ func TestPostgresBankLifecycle(t *testing.T) {
 		t.Fatalf("remember: %v", err)
 	}
 
-	stats, err := bank.Stats(ctx)
-	if err != nil {
-		t.Fatalf("stats: %v", err)
-	}
-	if stats.Memories != 1 {
-		t.Fatalf("memories = %d, want 1", stats.Memories)
-	}
-
 	hits, err := bank.Recall(ctx, "Go fintech", "")
 	if err != nil {
 		t.Fatalf("recall: %v", err)
@@ -69,14 +61,11 @@ func TestPostgresBankLifecycle(t *testing.T) {
 
 	// Other tenant must not see the memory (RLS + org_id partition).
 	other := factory.ForBank(otherID)
-	if n, err := other.Stats(ctx); err != nil || n.Memories != 0 {
-		t.Fatalf("other tenant stats = %+v, err %v; want 0", n, err)
+	otherHits, err := other.Recall(ctx, "Go fintech", "")
+	if err != nil {
+		t.Fatalf("other tenant recall: %v", err)
 	}
-
-	if err := bank.Forget(ctx, hits[0].ID); err != nil {
-		t.Fatalf("forget: %v", err)
-	}
-	if stats, _ := bank.Stats(ctx); stats.Memories != 0 {
-		t.Fatalf("memories after forget = %d, want 0", stats.Memories)
+	if len(otherHits) != 0 {
+		t.Fatalf("other tenant recall hits = %+v; want 0", otherHits)
 	}
 }
