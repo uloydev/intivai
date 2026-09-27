@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
 	evalllm "github.com/intivai/backend/internal/evaluation/infrastructure/llm"
+	intdomain "github.com/intivai/backend/internal/integration/domain"
 	ivdomain "github.com/intivai/backend/internal/interview/domain"
 	ivrepo "github.com/intivai/backend/internal/interview/infrastructure/persistence"
 	"github.com/intivai/backend/internal/llm"
@@ -264,5 +265,89 @@ func TestEvaluationWorkerScorecardEmailsResolveOrgUsers(t *testing.T) {
 		if !got {
 			t.Fatalf("scorecard email to %q never sent: got %d sends", to, len(enq.sent))
 		}
+	}
+}
+
+type mockEventDispatcherForWorker struct {
+	dispatchedOrg   uuid.UUID
+	dispatchedEvent intdomain.WebhookEvent
+	dispatchedBytes []byte
+}
+
+func (m *mockEventDispatcherForWorker) Dispatch(_ context.Context, orgID uuid.UUID, event intdomain.WebhookEvent, payload []byte) error {
+	m.dispatchedOrg = orgID
+	m.dispatchedEvent = event
+	m.dispatchedBytes = payload
+	return nil
+}
+
+func TestEvaluationWorkerWithEventDispatcher(t *testing.T) {
+	url := os.Getenv("TEST_DATABASE_URL")
+	if url == "" {
+		t.Skip("TEST_DATABASE_URL not set")
+	}
+	pool, err := db.NewPool(context.Background(), url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	orgID := uuid.NewString()
+	ivID, appID, jobID, candID := uuid.New(), uuid.New(), uuid.New(), uuid.New()
+
+	err = db.RunInTx(ctx, pool, orgID, func(tctx context.Context) error {
+		tx, _ := db.TxFrom(tctx)
+		for _, q := range []struct {
+			sql  string
+			args []any
+		}{
+			{`INSERT INTO orgs (id, name, slug) VALUES ($1,$2,$3)`, []any{orgID, "o", "ewd" + orgID[:8]}},
+			{`INSERT INTO jobs (id, org_id, title, description, status, created_at) VALUES ($1,$2,$3,$4,'active',NOW())`, []any{jobID, orgID, "Go", "Go"}},
+			{`INSERT INTO candidates (id, org_id, name, email, status, created_at) VALUES ($1,$2,$3,$4,'extracted',NOW())`, []any{candID, orgID, "Jane", "j@x.io"}},
+			{`INSERT INTO applications (id, org_id, candidate_id, job_id, status, cv_score, passed_screening, created_at) VALUES ($1,$2,$3,$4,'passed',80,true,NOW())`, []any{appID, orgID, candID, jobID}},
+		} {
+			if err := tx.Exec(q.sql, q.args...).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := json.Marshal(struct {
+		Questions []ivdomain.Question `json:"questions"`
+		Answers   []ivdomain.Answer   `json:"answers"`
+	}{
+		Questions: []ivdomain.Question{{Idx: 1, Content: "q1", Category: "technical"}},
+		Answers:   []ivdomain.Answer{{Idx: 1, Content: "an answer with enough words to pass probing", AnsweredAt: time.Now()}},
+	})
+	err = db.RunInTx(ctx, pool, orgID, func(tctx context.Context) error {
+		tx, _ := db.TxFrom(tctx)
+		return tx.Exec(`INSERT INTO interviews (id, application_id, type, status, transcript, last_question_idx, context_version, created_at)
+			VALUES ($1, $2, 'chat', 'completed', $3, 1, 0, NOW())`, ivID, appID, raw).Error
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	mockDispatcher := &mockEventDispatcherForWorker{}
+	repo := ivrepo.NewPostgresInterviewRepo(pool)
+	worker := NewEvaluationWorker(pool, repo, evalllm.NewEvaluator(mockEvalProvider{}), nil, "http://localhost:5173", zerolog.Nop()).
+		WithEventDispatcher(mockDispatcher)
+
+	payload, _ := json.Marshal(EvaluatePayload{OrgID: orgID, InterviewID: ivID.String()})
+	task := asynq.NewTask(TaskEvaluateInterview, payload)
+	if err := worker.handle(ctx, task); err != nil {
+		t.Fatalf("worker: %v", err)
+	}
+
+	if mockDispatcher.dispatchedEvent != intdomain.EventInterviewCompleted {
+		t.Errorf("expected EventInterviewCompleted, got %s", mockDispatcher.dispatchedEvent)
+	}
+	if mockDispatcher.dispatchedOrg.String() != orgID {
+		t.Errorf("expected org %s, got %s", orgID, mockDispatcher.dispatchedOrg)
+	}
+	if len(mockDispatcher.dispatchedBytes) == 0 {
+		t.Error("expected non-empty dispatched payload")
 	}
 }
